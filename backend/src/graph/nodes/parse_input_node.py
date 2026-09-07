@@ -7,7 +7,7 @@
 import json
 import re
 
-from src.core.llm.llm_client import get_llm_client
+from src.core.llm.llm_gateway import get_llm_gateway
 from src.core.logging import get_logger
 from data.constant.constants import TestMode, UserIntent
 from src.graph.state import AgentState
@@ -36,7 +36,7 @@ def parse_input_node(state: AgentState) -> dict:
         builder = IntentPromptBuilder()
         messages = builder.build_messages(state["raw_input"])
 
-        llm_client = get_llm_client()
+        llm_client = get_llm_gateway()
         response = llm_client.chat(messages)
         logger.info(f"LLM意图分类原始响应: {response[:300]}", node="parse_input", response_length=len(response))
 

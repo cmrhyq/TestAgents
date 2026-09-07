@@ -1,7 +1,7 @@
 """/api/v1/chat/stream 流式对话接口测试。
 
 逻辑已迁移到 ``answer_question_node``：mock node 模块内的
-``security_audit_node`` 与 ``get_llm_client``，用 TestClient 覆盖
+``security_audit_node`` 与 ``get_llm_gateway``，用 TestClient 覆盖
 四条分支：安全拦截、非测试内容拦截、正常流式回答、审计节点异常，
 另附审计结果为空的兜底拦截分支。
 """
@@ -79,7 +79,7 @@ class TestChatStream:
         tokens = ["你好，", "这是测试用例"]
         with (
             patch("src.graph.nodes.answer_question.security_audit_node") as mock_node,
-            patch("src.graph.nodes.answer_question.get_llm_client") as mock_get,
+            patch("src.graph.nodes.answer_question.get_llm_gateway") as mock_get,
         ):
             mock_node.return_value = {"next_node": "end", "audit_result": AUDIT_PASS}
             client_llm = MagicMock()

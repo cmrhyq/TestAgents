@@ -31,7 +31,7 @@ def sample_openapi_file(input_dir) -> Path:
 @pytest.fixture()
 def mock_llm_client():
     """Mock LLM 客户端，避免测试中真实调用 LLM API。"""
-    with patch("src.core.llm.llm_client.get_llm_client") as mock_get:
+    with patch("src.core.llm.llm_gateway.get_llm_gateway") as mock_get:
         client = MagicMock()
         client.chat.return_value = '{"intent": "run", "test_mode": "single"}'
         mock_get.return_value = client
@@ -40,11 +40,11 @@ def mock_llm_client():
 
 @pytest.fixture()
 def mock_chat_model():
-    """Mock LangChain ChatModel。"""
-    with patch("src.graph.nodes.select_endpoints_node.get_chat_model") as mock_get:
-        model = MagicMock()
-        mock_get.return_value = model
-        yield model
+    """Mock LangChain ChatModel（select_endpoints_node 现经 gateway 调用）。"""
+    with patch("src.graph.nodes.select_endpoints_node.get_llm_gateway") as mock_get:
+        gateway = MagicMock()
+        mock_get.return_value = gateway
+        yield gateway
 
 
 @pytest.fixture(autouse=True)

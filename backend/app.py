@@ -19,7 +19,7 @@ from src.api.v1.router import api_router
 from src.core.config import init_config
 from src.core.database.database_manager import init_database_from_config
 from src.core.errors import ConflictError, NotFoundError, ValidationError
-from src.core.llm.llm_client import init_llm_client
+from src.core.llm.llm_gateway import init_llm_gateway
 from src.core.logging import get_logger
 from src.data.migration.migration import init_database_from_orm
 
@@ -64,7 +64,7 @@ async def lifespan(application: FastAPI):
     config = init_config()
     db_manager = init_database_from_config(config)
     init_database_from_orm(db_manager)
-    init_llm_client()
+    init_llm_gateway()
     logger.info("FastAPI 应用启动完成", version="1.0.0")
     yield
     db_manager.close()

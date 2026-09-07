@@ -10,7 +10,7 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from src.core.llm.llm_client import get_chat_model
+from src.core.llm.llm_gateway import get_llm_gateway
 from src.core.logging import get_logger
 from src.graph.state import AgentState
 from src.graph.tools.db_tools import get_space_endpoints, search_space
@@ -27,6 +27,10 @@ def select_endpoints_agent_node(state: AgentState) -> dict:
     将用户请求和系统提示词组装为 messages，调用绑定了工具的 LLM。
     LLM 可能返回 tool_calls（由 ToolNode 处理）或最终文本答案。
 
+    注意：必须经 gateway.invoke_with_tools 调用（内部桥接 ainvoke），
+    直接 model.bind_tools().invoke() 走同步 Router.completion，
+    smart-router（auto_router/complexity_router）会炸 Unmapped provider。
+
     Args:
         state: 当前 AgentState（含 messages）
 
@@ -35,8 +39,7 @@ def select_endpoints_agent_node(state: AgentState) -> dict:
     """
     logger.info("进入接口挑选Agent节点", node="select_endpoints_agent")
 
-    model = get_chat_model()
-    model_with_tools = model.bind_tools(AVAILABLE_TOOLS)
+    gateway = get_llm_gateway()
 
     if not state.get("messages"):
         builder = SelectEndpointsBuilder()
@@ -46,7 +49,7 @@ def select_endpoints_agent_node(state: AgentState) -> dict:
             HumanMessage(content=messages_dicts[1]["content"]),
         ]
         logger.debug(f"初始化消息列表，共{len(messages)}条", node="select_endpoints_agent", message_count=len(messages))
-        response = model_with_tools.invoke(messages)
+        response = gateway.invoke_with_tools(messages, AVAILABLE_TOOLS)
         return {"messages": messages + [response]}
     else:
         existing_messages: list[BaseMessage] = list(state["messages"])
@@ -55,7 +58,7 @@ def select_endpoints_agent_node(state: AgentState) -> dict:
             node="select_endpoints_agent",
             message_count=len(existing_messages),
         )
-        response = model_with_tools.invoke(existing_messages)
+        response = gateway.invoke_with_tools(existing_messages, AVAILABLE_TOOLS)
         return {"messages": [response]}
 
 

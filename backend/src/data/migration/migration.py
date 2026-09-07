@@ -126,7 +126,7 @@ def is_database_ready(manager: DatabaseManager | None = None) -> bool:
 
 
 def ensure_database(
-    db_url: str = "sqlite:///db/LLMTest.db",
+    db_url: str = "sqlite:///db/TestAgents.db",
     echo: bool = False,
     use_sql_file: bool = False,
     sql_file: str = "sql/schema.sql",

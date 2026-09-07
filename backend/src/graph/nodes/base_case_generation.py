@@ -12,7 +12,7 @@ from typing import Any
 
 from src.core.config import get_config
 from src.core.database.database_manager import get_db_manager
-from src.core.llm.llm_client import get_llm_client
+from src.core.llm.llm_gateway import get_llm_gateway
 from src.core.logging import get_logger
 from src.data.models.endpoint import Endpoint
 from src.data.models.test_case import TestCase
@@ -60,7 +60,7 @@ class BaseCaseGenerationNode(ABC):
             return self._error("无选中的接口")
 
         config = get_config()
-        llm_client = get_llm_client()
+        llm_client = get_llm_gateway()
 
         space_id = int(selected_endpoints[0].get("space_id") or 0)
         endpoint_ids = [int(ep["endpoint_id"]) for ep in selected_endpoints if ep.get("endpoint_id")]

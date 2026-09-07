@@ -50,8 +50,11 @@
 """
 
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter
 from typing import Any
+
+import asyncio
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_litellm import ChatLiteLLMRouter
@@ -61,6 +64,27 @@ from src.core.config import AppConfig, get_config
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _run_async(coro) -> Any:
+    """在同步上下文中执行协程。
+
+    litellm 的 auto_router/complexity_router（smart-router）只在
+    ``Router.acompletion`` 的 async pre-routing hook 中生效；同步
+    ``Router.completion`` 会把 auto_router/complexity_router 当普通
+    provider 直接抛 Unmapped LLM provider。因此同步入口必须桥接到
+    async 路径：
+
+    - 当前线程无事件循环：直接 ``asyncio.run``
+    - 当前线程已有事件循环（如误在 async 函数中调同步方法）：
+      丢到新线程执行，避免 RuntimeError
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, coro).result()
 
 
 class LLMService:
@@ -121,15 +145,12 @@ class LLMService:
     # ------------------------------------------------------------------
 
     def invoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
-        """同步调用，返回完整 AIMessage（含 usage_metadata / response_metadata / tool_calls）。"""
-        start = perf_counter()
-        try:
-            response = self.model.invoke(messages, **kwargs)
-            self._record_usage(_model_of(response), "invoke", _usage_of(response), duration_ms=_elapsed_ms(start))
-            return response
-        except Exception as e:
-            self._record_usage(self.default_model, "invoke", None, success=False, error_message=str(e))
-            raise
+        """同步调用，返回完整 AIMessage（含 usage_metadata / response_metadata / tool_calls）。
+
+        内部桥接到 ainvoke（asyncio.run）：保证 litellm smart-router
+        （auto_router/complexity_router）的 pre-routing 生效。
+        """
+        return _run_async(self.ainvoke(messages, **kwargs))
 
     async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
         """异步调用，返回完整 AIMessage。"""
@@ -143,17 +164,22 @@ class LLMService:
             raise
 
     def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[BaseMessage]:
-        """同步流式，逐 chunk 产出 AIMessageChunk（含 content / tool_call_chunks / usage_metadata）。"""
-        start = perf_counter()
-        last_chunk: BaseMessage | None = None
-        try:
-            for chunk in self.model.stream(messages, **kwargs):
-                last_chunk = chunk
-                yield chunk
-            self._record_usage(_model_of(last_chunk), "stream", _usage_of(last_chunk), duration_ms=_elapsed_ms(start))
-        except Exception as e:
-            self._record_usage(self.default_model, "stream", _usage_of(last_chunk), success=False, error_message=str(e))
-            raise
+        """同步流式，逐 chunk 产出 AIMessageChunk（含 content / tool_call_chunks / usage_metadata）。
+
+        内部桥接到 astream（同步生成器包装异步生成器）：保证
+        smart-router pre-routing 生效。
+        """
+        agenerator = self.astream(messages, **kwargs)
+
+        def _consume() -> Iterator[BaseMessage]:
+            try:
+                while True:
+                    chunk = _run_async(agenerator.__anext__())
+                    yield chunk
+            except StopAsyncIteration:
+                return
+
+        yield from _consume()
 
     async def astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[BaseMessage]:
         """异步流式，逐 chunk 产出 AIMessageChunk。"""
@@ -178,16 +204,11 @@ class LLMService:
         tools: list[Any],
         **kwargs: Any,
     ) -> AIMessage:
-        """同步调用并绑定工具，返回 AIMessage（含 .tool_calls）。"""
-        start = perf_counter()
-        try:
-            model_with_tools = self.model.bind_tools(tools)
-            response = model_with_tools.invoke(messages, **kwargs)
-            self._record_usage(_model_of(response), "tools", _usage_of(response), duration_ms=_elapsed_ms(start))
-            return response
-        except Exception as e:
-            self._record_usage(self.default_model, "tools", None, success=False, error_message=str(e))
-            raise
+        """同步调用并绑定工具，返回 AIMessage（含 .tool_calls）。
+
+        内部桥接到 ainvoke_with_tools：保证 smart-router pre-routing 生效。
+        """
+        return _run_async(self.ainvoke_with_tools(messages, tools, **kwargs))
 
     async def ainvoke_with_tools(
         self,
@@ -248,7 +269,7 @@ class LLMService:
         """
         usage = usage or {}
         try:
-            from src.core.database.connection import init_database_from_config
+            from src.core.database.database_manager import init_database_from_config
             from src.data.models.llm_log import LLMLog
 
             with init_database_from_config().get_session() as session:

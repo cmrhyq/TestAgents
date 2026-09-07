@@ -15,7 +15,7 @@ from typing import cast
 
 from data.constant.constants import NodeName
 from src.core.database.database_manager import get_db_manager
-from src.core.llm.llm_client import get_llm_client
+from src.core.llm.llm_gateway import get_llm_gateway
 from src.core.logging import get_logger
 from src.data.services.conversation_service import ConversationService
 from src.graph import AgentState
@@ -89,7 +89,7 @@ def answer_question_node(
     Args:
         state: 当前工作流状态，需包含 ``raw_input`` 与 ``conversation_id``
         audit_func: 安全审计可调用对象（默认 ``security_audit_node``），测试可注入
-        llm_client_factory: 返回 LLM 客户端的工厂（默认 ``get_llm_client``），测试可注入
+        llm_client_factory: 返回 LLM 客户端的工厂（默认 ``get_llm_gateway``），测试可注入
 
     Returns:
         部分状态更新，包含 ``answer_content`` 与 ``next_node``；
@@ -104,7 +104,7 @@ def answer_question_node(
     raw_input = state["raw_input"]
     conversation_id = state.get("conversation_id")
     audit = audit_func or security_audit_node
-    llm_client_factory = llm_client_factory or (lambda: get_llm_client())
+    llm_client_factory = llm_client_factory or (lambda: get_llm_gateway())
 
     # 1) 安全审计分流
     try:

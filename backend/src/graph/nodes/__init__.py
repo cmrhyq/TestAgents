@@ -1,7 +1,5 @@
 """Graph 节点实现模块。
 
-说明：``task_complexity_node`` 属于实验代码，未接入工作流图
-（见 doc/design/Refactor-Remaining.md 3.7 决策 B），不再从这里导出。
 """
 
 from src.graph.nodes.execute_flow_tests_node import execute_flow_tests_node

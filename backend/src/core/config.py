@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class LLMConfig(BaseModel):
     """LLM配置"""
 
-    default_model: str = Field(default="smart-router", description="默认模型名（对应 model_list 中的 model_name）")
+    default_model: str = Field(default="smart-router", description="默认模型名（对应 model_list 中的 model_name，smart-router=复杂度自动路由）")
 
 
 class RetryConfig(BaseModel):
@@ -73,7 +73,7 @@ class OutputConfig(BaseModel):
 class DatabaseConfig(BaseModel):
     """数据库配置"""
 
-    url: str = Field(default="sqlite:///db/LLMTest.db", description="数据库连接URL")
+    url: str = Field(default="sqlite:///db/TestAgents.db", description="数据库连接URL")
     echo: bool = Field(default=False, description="是否输出SQL语句")
     pool_size: int = Field(default=5, description="连接池大小")
     max_overflow: int = Field(default=10, description="最大溢出连接数")

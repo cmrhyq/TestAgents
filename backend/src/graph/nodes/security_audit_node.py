@@ -5,7 +5,7 @@
 由 ``api/v1/chat.py`` 在流式对话前调用，**不要**加入 ``build_graph()``。
 """
 
-from src import get_llm_client
+from src.core.llm.llm_gateway import get_llm_gateway
 from src.core.logging import get_logger
 from data.constant.constants import NodeName
 from src.graph.state import AgentState
@@ -34,7 +34,7 @@ def security_audit_node(state: AgentState) -> dict:
         builder = SystemSafetyBuilder()
         messages = builder.build_messages(state["raw_input"])
 
-        llm_client = get_llm_client()
+        llm_client = get_llm_gateway()
         response = llm_client.chat(messages)
 
         logger.info(f"Prompt安全审计响应：: {response}", node="security_audit")

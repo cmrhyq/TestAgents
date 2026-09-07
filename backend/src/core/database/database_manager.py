@@ -52,7 +52,7 @@ class DatabaseManager:
 
     def initialize(
         self,
-        db_url: str = "sqlite:///db/LLMTest.db",
+        db_url: str = "sqlite:///db/TestAgents.db",
         echo: bool = False,
         pool_size: int = 5,
         max_overflow: int = 10,
@@ -262,7 +262,7 @@ def get_db_manager() -> DatabaseManager:
 
 
 def init_database(
-    db_url: str = "sqlite:///db/LLMTest.db",
+    db_url: str = "sqlite:///db/TestAgents.db",
     echo: bool = False,
     pool_size: int = 5,
     max_overflow: int = 10,

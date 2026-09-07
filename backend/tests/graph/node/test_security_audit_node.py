@@ -58,7 +58,7 @@ class TestSecurityAuditNode:
             '"matched_categories": [], "explanation": "非API测试意图"}, '
             '"overall_verdict": {"action": "block", "reason": "存在高危攻击"}}'
         )
-        with patch("src.graph.nodes.security_audit_node.get_llm_client") as mock_get:
+        with patch("src.graph.nodes.security_audit_node.get_llm_gateway") as mock_get:
             client = MagicMock()
             client.chat.return_value = mock_response
             mock_get.return_value = client
@@ -77,7 +77,7 @@ class TestSecurityAuditNode:
             '"matched_categories": [], "explanation": "非API测试意图"}, '
             '"overall_verdict": {"action": "block", "reason": "存在信息泄露风险"}}'
         )
-        with patch("src.graph.nodes.security_audit_node.get_llm_client") as mock_get:
+        with patch("src.graph.nodes.security_audit_node.get_llm_gateway") as mock_get:
             client = MagicMock()
             client.chat.return_value = mock_response
             mock_get.return_value = client
@@ -94,7 +94,7 @@ class TestSecurityAuditNode:
             '"matched_categories": ["测试用例编写"], "explanation": "请求编写pytest单元测试"}, '
             '"overall_verdict": {"action": "pass", "reason": "合法的API测试请求"}}'
         )
-        with patch("src.graph.nodes.security_audit_node.get_llm_client") as mock_get:
+        with patch("src.graph.nodes.security_audit_node.get_llm_gateway") as mock_get:
             client = MagicMock()
             client.chat.return_value = mock_response
             mock_get.return_value = client
@@ -111,7 +111,7 @@ class TestSecurityAuditNode:
             '"matched_categories": [], "explanation": "内容为家常菜推荐，与API测试无关"}, '
             '"overall_verdict": {"action": "review", "reason": "非API测试相关内容"}}'
         )
-        with patch("src.graph.nodes.security_audit_node.get_llm_client") as mock_get:
+        with patch("src.graph.nodes.security_audit_node.get_llm_gateway") as mock_get:
             client = MagicMock()
             client.chat.return_value = mock_response
             mock_get.return_value = client

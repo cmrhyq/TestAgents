@@ -397,53 +397,6 @@ def validate_risk_level(data: Any, spec: ValidationSpec, context: dict | None = 
     return errors
 
 
-_COMPLEXITY_LEVELS = ("simple", "moderate", "complex")
-_VALID_MODELS = (
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "us.anthropic.claude-sonnet-4-6",
-    "us.anthropic.claude-opus-4-6-v1",
-)
-_SCORE_DIMENSIONS = ("reasoning_depth", "domain_knowledge", "output_complexity", "context_dependency", "precision_requirement")
-
-
-@register_validator("validate_complexity_level")
-def validate_complexity_level(data: Any, spec: ValidationSpec, context: dict | None = None) -> list[ValidationError]:
-    """校验复杂度分级结果：等级/模型枚举 + scores 各维 1-5。"""
-    errors: list[ValidationError] = []
-    if not isinstance(data, dict):
-        return errors
-
-    level = data.get("complexity_level")
-    if level not in _COMPLEXITY_LEVELS:
-        errors.append(
-            ValidationError(
-                field="complexity_level",
-                message=f"complexity_level {level!r} 不在允许范围 {list(_COMPLEXITY_LEVELS)}",
-                value=level,
-            )
-        )
-
-    model = data.get("selected_model")
-    if model not in _VALID_MODELS:
-        errors.append(
-            ValidationError(
-                field="selected_model",
-                message=f"selected_model {model!r} 不是合法模型 ID",
-                value=model,
-            )
-        )
-
-    scores = data.get("scores")
-    if isinstance(scores, dict):
-        for dim in _SCORE_DIMENSIONS:
-            score = scores.get(dim)
-            if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 5:
-                errors.append(
-                    ValidationError(field=f"scores.{dim}", message=f"{dim} 必须是 1-5 的整数", value=score)
-                )
-    return errors
-
-
 def _is_empty(value: Any) -> bool:
     """空值判断：None / 空白字符串 / 空列表 / 空字典。"""
     if value is None:
