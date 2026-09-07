@@ -46,7 +46,8 @@ export function EndpointsTab({
 }: EndpointsTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<Endpoint | null>(null);
 
-  const { mutate: importOpenAPI, isPending: isImporting } = useParseOpenAPI(Number(spaceId));
+  // 雪花 ID 超过 JS 安全整数范围，必须以 string 透传，禁止 Number() 转换（会丢精度）
+  const { mutate: importOpenAPI, isPending: isImporting } = useParseOpenAPI(String(spaceId));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const columns = buildEndpointColumns({
