@@ -42,14 +42,6 @@ execution:
     retry_interval: 1  # 秒
     retry_on_status: [500, 502, 503, 504]
 
-  # 并发配置
-  concurrency:
-    enabled: true
-    max_workers: 5
-
-  # 依赖失败处理
-  dependency_failure: skip  # skip / abort
-
 # 数据库配置
 database:
   url: "sqlite:///db/TestAgents.db"

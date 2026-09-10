@@ -77,7 +77,6 @@ class TestExecutor:
         if (
             cache_rules
             and self.cache_resolver.has_unresolved_dependencies(cache_rules)
-            and self.config.execution.dependency_failure == "skip"
         ):
             logger.info(f"缓存依赖未满足，跳过执行: {test_case.case_id}", case_id=test_case.case_id)
             return self._build_result(

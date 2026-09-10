@@ -30,13 +30,6 @@ class RetryConfig(BaseModel):
     retry_on_status: list[int] = Field(default=[500, 502, 503, 504], description="需要重试的状态码")
 
 
-class ConcurrencyConfig(BaseModel):
-    """并发配置"""
-
-    enabled: bool = Field(default=True, description="是否启用并发")
-    max_workers: int = Field(default=5, description="最大并发数")
-
-
 class ExecutionConfig(BaseModel):
     """测试执行配置"""
 
@@ -44,8 +37,6 @@ class ExecutionConfig(BaseModel):
     read_timeout: int = Field(default=30, description="读取超时（秒）")
     total_timeout: int = Field(default=60, description="总超时（秒）")
     retry: RetryConfig = Field(default_factory=RetryConfig)
-    concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
-    dependency_failure: str = Field(default="skip", description="依赖失败处理方式")
 
 
 class OutputConfig(BaseModel):
