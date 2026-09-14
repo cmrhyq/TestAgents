@@ -39,12 +39,14 @@ class AgentState(MessagesState):
     包含所有节点需要的业务数据字段。
     """
 
+    # 输入字段
+    raw_input: str
+
     # 路由字段
     next_node: str
     run_status: str
 
-    # 输入字段
-    raw_input: str
+    # 模型解析的流程字段
     user_intent: str  # UserIntent.value
     test_mode: str  # TestMode.value
     space_id: int | None  # 当前空间 ID（run 流程选接口/生成用例用）

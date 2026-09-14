@@ -1,18 +1,15 @@
-"""generate_single_cases_node 试点测试。
+"""generate_single_cases_node 单元测试。
 
-覆盖 USE_SKILL_RUNNER=True（skill runner 主路径）与 False（CasePromptBuilder 回退路径），
-mock LLM 客户端避免真实 API 调用，走完整 _generate_for_endpoint（含 build_single_case）。
+覆盖 CasePromptBuilder 路径：mock LLM 客户端，走完整 _generate_for_endpoint。
 """
 
-import importlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.graph.nodes.generate_single_cases_node import GenerateSingleCasesNode
-
-node_module = importlib.import_module("src.graph.nodes.generate_single_cases_node")
+from src.prompts.builders.case_builder import CasePromptBuilder
 
 VALID_RESPONSE = (
     '{"test_cases": ['
@@ -53,16 +50,14 @@ def _run(endpoint, llm_client, case_service):
         endpoint=endpoint,
         base_url="https://api.example.com",
         run_id=1,
-        prompt_builder=None,
+        prompt_builder=CasePromptBuilder(),
         llm_client=llm_client,
         case_service=case_service,
     )
 
 
 @pytest.mark.unit
-class TestGenerateSingleCasesNodeSkillPath:
-    """USE_SKILL_RUNNER=True：skill runner 主路径。"""
-
+class TestGenerateSingleCasesNode:
     def test_valid_output_builds_cases(self):
         llm = MagicMock()
         llm.chat.return_value = VALID_RESPONSE
@@ -74,65 +69,25 @@ class TestGenerateSingleCasesNodeSkillPath:
         assert case_service.build_single_case.call_count == 2
         assert len(cases) == 2
 
-    def test_parse_failure_retries_once_then_builds(self):
+    def test_invalid_json_returns_no_cases(self):
         llm = MagicMock()
-        llm.chat.side_effect = ["这不是JSON", VALID_RESPONSE]
+        llm.chat.return_value = "这不是JSON"
         case_service = _make_case_service()
 
         cases = _run(_make_endpoint(), llm, case_service)
 
-        assert llm.chat.call_count == 2  # 初始 + 1 次重试
-        assert case_service.build_single_case.call_count == 2
-        assert len(cases) == 2
-
-    def test_persistent_failure_returns_no_cases(self):
-        llm = MagicMock()
-        llm.chat.side_effect = ["坏1", "坏2", "坏3"]
-        case_service = _make_case_service()
-
-        cases = _run(_make_endpoint(), llm, case_service)
-
-        assert llm.chat.call_count == 2  # 初始 + 1 次重试后放弃
+        assert llm.chat.call_count == 1
         assert case_service.build_single_case.call_count == 0
         assert cases == []
 
-    def test_user_prompt_rendered_with_api_info(self):
-        """确认 skill user_prompt 收到格式化后的 api_info（含"无"占位）。"""
+    def test_messages_use_case_prompt_builder(self):
         llm = MagicMock()
         llm.chat.return_value = VALID_RESPONSE
 
         _run(_make_endpoint(), llm, _make_case_service())
 
         messages = llm.chat.call_args.args[0]
-        user_content = messages[1]["content"]
-        assert "API名称: 用户登录" in user_content
-        assert "API地址: https://api.example.com/api/v1/login" in user_content
-
-
-@pytest.mark.unit
-class TestGenerateSingleCasesNodeFallbackPath:
-    """USE_SKILL_RUNNER=False：回退 CasePromptBuilder 原路径。"""
-
-    def test_fallback_path(self, monkeypatch):
-        monkeypatch.setattr(node_module, "USE_SKILL_RUNNER", False)
-        from src.prompts.builders.case_builder import CasePromptBuilder
-
-        llm = MagicMock()
-        llm.chat.return_value = VALID_RESPONSE
-        case_service = _make_case_service()
-
-        cases = GenerateSingleCasesNode._generate_for_endpoint(
-            endpoint=_make_endpoint(),
-            base_url="https://api.example.com",
-            run_id=1,
-            prompt_builder=CasePromptBuilder(),
-            llm_client=llm,
-            case_service=case_service,
-        )
-
-        assert llm.chat.call_count == 1
-        assert case_service.build_single_case.call_count == 2
-        assert len(cases) == 2
-        # 回退路径使用原 builder 消息
-        messages = llm.chat.call_args.args[0]
         assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert "API名称: 用户登录" in messages[1]["content"]
+        assert "API地址: https://api.example.com/api/v1/login" in messages[1]["content"]

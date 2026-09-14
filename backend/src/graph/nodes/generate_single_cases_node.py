@@ -13,15 +13,10 @@ from src.data.models.endpoint import Endpoint
 from src.data.models.test_case import TestCase
 from src.data.services import CaseGenerationService
 from src.graph.nodes.base_case_generation import BaseCaseGenerationNode
-from src.graph.skill import SkillRunner, get_skill_registry
 from src.prompts.builders.case_builder import CasePromptBuilder
-from src.prompts.formatters.case_formatter import format_api_info_for_prompt
 from src.utils.json_utils import parse_llm_json_response, safe_json_loads
 
 logger = get_logger(__name__)
-
-# 灰度开关：True 使用 skill runner（single-case-generation），False 回退 CasePromptBuilder
-USE_SKILL_RUNNER = True
 
 
 class GenerateSingleCasesNode(BaseCaseGenerationNode):
@@ -94,18 +89,12 @@ class GenerateSingleCasesNode(BaseCaseGenerationNode):
             "description": endpoint.description or endpoint.summary or "",
         }
 
-        if USE_SKILL_RUNNER:
-            # skill runner：构建消息 + 解析 + 校验 + 重试/降级（single-case-generation 技能）
-            skill = get_skill_registry().get("single-case-generation")
-            result = SkillRunner(llm_client, skill).run(format_api_info_for_prompt(api_info))
-            cases_data = result.final_data if result.final_data is not None else parse_llm_json_response(result.raw_response)
-        else:
-            messages = [
-                {"role": "system", "content": prompt_builder.build_system_prompt()},
-                {"role": "user", "content": prompt_builder.build_user_prompt(api_info)},
-            ]
-            response_text = llm_client.chat(messages)
-            cases_data = parse_llm_json_response(response_text)
+        messages = [
+            {"role": "system", "content": prompt_builder.build_system_prompt()},
+            {"role": "user", "content": prompt_builder.build_user_prompt(api_info)},
+        ]
+        response_text = llm_client.chat(messages)
+        cases_data = parse_llm_json_response(response_text)
 
         orm_cases: list[TestCase] = []
         for idx, case_data in enumerate(cases_data, 1):
