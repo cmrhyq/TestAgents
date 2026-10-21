@@ -25,6 +25,8 @@ class Environment(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     variables: Mapped[str] = mapped_column(Text, default="{}")
     is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 生产环境标记：send_request 工具会据此拦截请求，避免污染真实数据
+    is_production: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)

@@ -54,6 +54,7 @@ class SpaceResponse(SpaceBase):
     """Space 响应体"""
 
     id: int = Field(..., description="空间ID")
+    workspace_path: str = Field(default="", description="工作目录路径（相对 backend 根）")
     created_at: str = Field(..., description="创建时间")
     updated_at: str = Field(..., description="更新时间")
 

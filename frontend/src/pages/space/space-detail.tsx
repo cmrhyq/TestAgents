@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { MessageSquare } from "lucide-react";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
 import { useEndpoints, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
@@ -18,6 +19,10 @@ import type { Endpoint, Environment } from "@/lib/types.ts";
 import { EndpointsTab } from "./tabs/endpoints-tab";
 import { EnvironmentsTab } from "./tabs/environments-tab";
 import { TestRunsTab } from "./tabs/test-runs-tab";
+import { OverviewTab } from "./tabs/overview-tab";
+import { ConversationsTab } from "./tabs/conversations-tab";
+import { MemoriesTab } from "./tabs/memories-tab";
+import { KnowledgeTab } from "./tabs/knowledge-tab";
 
 const SPACE_STATUS_MAP: Record<number, string> = {
   0: "未启用",
@@ -118,16 +123,36 @@ export default function SpaceDetailPage() {
                 <p className="mt-2 text-sm text-muted-foreground">{space.description}</p>
               )}
             </div>
+
+            {/* 空间是对话的入口：从这里进去会自动带上 space_id */}
+            <Button asChild size="sm">
+              <Link to={`/chat?space_id=${space.id}`}>
+                <MessageSquare className="mr-2 h-3.5 w-3.5" />
+                开始对话
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="endpoints" className="w-full">
+      <Tabs defaultValue="overview" className="w-full">
         <TabsList>
+          <TabsTrigger value="overview">概览</TabsTrigger>
+          <TabsTrigger value="conversations">会话</TabsTrigger>
           <TabsTrigger value="endpoints">接口</TabsTrigger>
           <TabsTrigger value="environments">环境</TabsTrigger>
+          <TabsTrigger value="memories">记忆</TabsTrigger>
+          <TabsTrigger value="knowledge">知识库</TabsTrigger>
           <TabsTrigger value="test-runs">测试运行</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+          <OverviewTab spaceId={spaceId} />
+        </TabsContent>
+
+        <TabsContent value="conversations" className="space-y-4">
+          <ConversationsTab spaceId={spaceId} />
+        </TabsContent>
 
         <TabsContent value="endpoints" className="space-y-4">
           <EndpointsTab
@@ -170,6 +195,14 @@ export default function SpaceDetailPage() {
             }}
             onDelete={(env) => deleteEnvironment.mutate(env.id)}
           />
+        </TabsContent>
+
+        <TabsContent value="memories" className="space-y-4">
+          <MemoriesTab spaceId={spaceId} />
+        </TabsContent>
+
+        <TabsContent value="knowledge" className="space-y-4">
+          <KnowledgeTab spaceId={spaceId} />
         </TabsContent>
 
         <TabsContent value="test-runs" className="space-y-4">

@@ -1,10 +1,16 @@
 import type { Id, PaginatedResponse } from "./common";
 
+/** 工作模式：agent 自动执行 / ask 只问答 / plan 只出计划。 */
+export type ConversationMode = "agent" | "ask" | "plan";
+
 export interface Conversation {
   id: Id;
   space_id: Id | null;
   title: string;
-  mode: string;
+  mode: ConversationMode | string;
+  /** 本会话选中的 skill 名（后端存 JSON，接口对外是数组） */
+  skill_names: string[];
+  environment_id: Id | null;
   status: number;
   last_message_at: string | null;
   created_at: string;
@@ -30,3 +36,10 @@ export interface MessageListResponse {
 export interface ConversationDetail extends Conversation {
   messages: Message[];
 }
+
+/** 模式的中文标签，供选择器与消息头展示。 */
+export const MODE_LABELS: Record<ConversationMode, string> = {
+  agent: "执行",
+  ask: "问答",
+  plan: "计划",
+};

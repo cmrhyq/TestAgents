@@ -15,7 +15,7 @@ from requests.exceptions import Timeout
 def _mock_dependencies():
     """Mock DataCache 和 logger 避免外部依赖。"""
     mock_cache = MagicMock()
-    with patch("src.utils.http.request.DataCache") as mock_cache_cls:
+    with patch("src.utils.http.request.CacheManager") as mock_cache_cls:
         mock_cache_cls.get_instance.return_value = mock_cache
         yield {"cache": mock_cache}
 

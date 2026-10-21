@@ -16,49 +16,25 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
+def get_backend_root() -> Path:
+    """backend 根目录（即 ``src/core/config.py`` 往上三级）。
+
+    工作目录、内置 skill 目录等相对路径配置都以它为基准解析，
+    避免依赖进程 cwd（uvicorn / pytest / CLI 的 cwd 各不相同）。
+    """
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def resolve_backend_path(raw: str | Path) -> Path:
+    """把配置里的路径解析为绝对路径：相对路径以 backend 根为基准。"""
+    path = Path(raw)
+    return path if path.is_absolute() else (get_backend_root() / path)
+
+
 class LLMConfig(BaseModel):
     """LLM配置"""
 
     default_model: str = Field(default="smart-router", description="默认模型名（对应 model_list 中的 model_name，smart-router=复杂度自动路由）")
-
-
-class RetryConfig(BaseModel):
-    """重试配置"""
-
-    max_retries: int = Field(default=2, description="最大重试次数")
-    retry_interval: float = Field(default=1.0, description="重试间隔（秒）")
-    retry_on_status: list[int] = Field(default=[500, 502, 503, 504], description="需要重试的状态码")
-
-
-class ExecutionConfig(BaseModel):
-    """测试执行配置"""
-
-    connect_timeout: int = Field(default=5, description="连接超时（秒）")
-    read_timeout: int = Field(default=30, description="读取超时（秒）")
-    total_timeout: int = Field(default=60, description="总超时（秒）")
-    retry: RetryConfig = Field(default_factory=RetryConfig)
-
-
-class OutputConfig(BaseModel):
-    """输出配置"""
-
-    base_dir: str = Field(default="output", description="输出根目录")
-    test_cases_dir: str = Field(default="", description="用例目录（留空则动态生成时间戳子目录）")
-    reports_dir: str = Field(default="", description="报告目录（留空则动态生成时间戳子目录）")
-
-    def get_test_cases_dir(self) -> str:
-        """获取用例目录（动态生成时间戳）"""
-        if self.test_cases_dir:
-            return self.test_cases_dir
-        ts = datetime.now().strftime("%Y%m%d%H%M%S")
-        return f"{self.base_dir}/{ts}/test_cases"
-
-    def get_reports_dir(self) -> str:
-        """获取报告目录（动态生成时间戳）"""
-        if self.reports_dir:
-            return self.reports_dir
-        ts = datetime.now().strftime("%Y%m%d%H%M%S")
-        return f"{self.base_dir}/{ts}/reports"
 
 
 class DatabaseConfig(BaseModel):
@@ -75,6 +51,7 @@ class DatabaseConfig(BaseModel):
 class ChromaConfig(BaseModel):
     """ChromaDB 向量数据库配置"""
 
+    enabled: bool = Field(default=False, description="是否启用 ChromaDB（关闭时知识库降级为词法检索）")
     host: str = Field(default="localhost", description="ChromaDB 服务地址")
     port: int = Field(default=8000, description="ChromaDB 服务端口")
     auth_provider: str = Field(
@@ -89,6 +66,51 @@ class ChromaConfig(BaseModel):
     tenant: str = Field(default="default_tenant", description="租户名称")
     database: str = Field(default="default_database", description="数据库名称")
     default_collection: str = Field(default="default", description="默认集合名称")
+
+
+class EmbeddingConfig(BaseModel):
+    """向量化模型配置。
+
+    未启用或调用失败时，知识库检索自动降级为 SQLite 词法匹配——
+    「向量检索暂时不可用」不应该让整个功能报错。
+    """
+
+    enabled: bool = Field(default=False, description="是否启用向量化（关闭时知识库走词法检索）")
+    model: str = Field(default="", description="litellm 格式的 embedding 模型名，如 zai/embedding-3")
+    api_key: str = Field(default="", description="API 密钥")
+    base_url: str = Field(default="", description="自定义服务端点")
+    dimension: int = Field(default=1024, description="向量维度（用于建集合时的校验）")
+
+
+class WorkspaceConfig(BaseModel):
+    """空间工作目录配置"""
+
+    root: str = Field(default="workspaces", description="工作目录根（相对 backend 或绝对路径）")
+    max_file_size_kb: int = Field(default=256, description="Agent 单次读取文件的大小上限（KB）")
+    tree_max_depth: int = Field(default=3, description="目录树接口默认深度")
+    tree_max_entries: int = Field(default=500, description="目录树单层条目上限，防爆量")
+
+
+class SkillConfig(BaseModel):
+    """Skills 配置"""
+
+    builtin_root: str = Field(default="skills", description="内置 skill 目录（相对 backend 或绝对路径）")
+    max_skill_chars: int = Field(default=8000, description="单个 skill 注入 system prompt 的正文上限")
+
+
+class ModelPricing(BaseModel):
+    """自定义模型费率（美元 / token）。
+
+    litellm 的定价表并不覆盖所有厂商（``zai/*`` 就没有），这类模型的调用
+    会被记为「成本未知」（NULL）。在此补上费率后即可正常计价。
+
+    注意与 ``model_list`` 分开配置：塞进 ``litellm_params`` 会被当成
+    未知 provider 参数透传，有调用失败的风险。
+    """
+
+    model: str = Field(..., description="模型名，与 model_list 里的 litellm_params.model 一致")
+    input_cost_per_token: float = Field(default=0.0, description="输入 token 单价（美元）")
+    output_cost_per_token: float = Field(default=0.0, description="输出 token 单价（美元）")
 
 
 class LoggingConfig(BaseModel):
@@ -112,12 +134,17 @@ class AppConfig(BaseModel):
     """应用配置"""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     chroma: ChromaConfig = Field(default_factory=ChromaConfig)
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
+    skill: SkillConfig = Field(default_factory=SkillConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     langsmith: LangSmithConfig = Field(default_factory=LangSmithConfig)
+    pricing: list[ModelPricing] = Field(
+        default_factory=list,
+        description="自定义模型费率，用于 litellm 定价表未收录的模型（影响 llm_log.cost_usd）",
+    )
     model_list: list[dict[str, Any]] = Field(
         default_factory=list,
         description="LiteLLM Router 模型列表（model_name + litellm_params），透传给 litellm.Router",
@@ -135,8 +162,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         AppConfig: 应用配置对象
     """
     if config_path is None:
-        space_root = Path(__file__).parent.parent.parent
-        resolved_path = space_root / "config" / "config.yaml"
+        resolved_path = get_backend_root() / "config" / "config.yaml"
     else:
         resolved_path = Path(config_path)
 
@@ -153,24 +179,6 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         logger.warning("配置文件不存在: %s，使用默认配置", resolved_path)
 
     return AppConfig(**config_data)
-
-
-def ensure_output_dirs(config: AppConfig) -> None:
-    """
-    确保输出目录存在
-
-    Args:
-        config: 应用配置
-    """
-    dirs = [
-        config.output.base_dir,
-        config.output.get_test_cases_dir(),
-        config.output.get_reports_dir(),
-    ]
-
-    for dir_path in dirs:
-        Path(dir_path).mkdir(parents=True, exist_ok=True)
-        logger.debug("输出目录已确认: %s", dir_path)
 
 
 def _setup_langsmith(config: AppConfig) -> None:
@@ -227,6 +235,5 @@ def init_config(config_path: str | None = None) -> AppConfig:
     """
     global _config
     _config = load_config(config_path)
-    ensure_output_dirs(_config)
     _setup_langsmith(_config)
     return _config

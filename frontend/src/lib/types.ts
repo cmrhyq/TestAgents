@@ -7,3 +7,6 @@ export * from "./types/environment";
 export * from "./types/test-run";
 export * from "./types/report";
 export * from "./types/conversation";
+export * from "./types/skill";
+export * from "./types/memory";
+export * from "./types/knowledge";

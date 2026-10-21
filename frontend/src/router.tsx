@@ -53,15 +53,27 @@ export const router = createBrowserRouter([
             },
           },
           {
-            path: "workflows/run",
-            element: <Navigate to="/workflows/chat" replace />,
-          },
-          {
-            path: "workflows/chat",
+            path: "chat",
             lazy: async () => {
-              const { default: Component } = await import("./pages/run/security-chat.tsx");
+              const { default: Component } = await import("./pages/chat/chat.tsx");
               return { Component };
             },
+          },
+          {
+            path: "skills",
+            lazy: async () => {
+              const { default: Component } = await import("./pages/skills/skills.tsx");
+              return { Component };
+            },
+          },
+          {
+            // 旧路径兜底：/workflows/chat 是历史入口，书签里可能还在，重定向而不是 404
+            path: "workflows/chat",
+            element: <Navigate to="/chat" replace />,
+          },
+          {
+            path: "workflows/run",
+            element: <Navigate to="/chat" replace />,
           },
           {
             path: "reports",

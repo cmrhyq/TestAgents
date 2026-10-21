@@ -223,3 +223,6 @@ frontend/dist/
 frontend/.eslintcache
 
 .workbuddy
+
+# 空间工作目录（含用户上传文档与测试产物，不入库）
+backend/workspaces/

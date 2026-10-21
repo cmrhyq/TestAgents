@@ -1,6 +1,6 @@
 # TestAgents 页面设计准则（工业蓝图 · Blueprint）
 
-> 版本：v0.1.0（对应当前前端实现）
+> 版本：v0.2.0（对应 v1.0 重构后的前端实现，2026-10-20）
 > 技术栈：Tailwind CSS v4 + shadcn/ui + React 19
 > 设计语言：**工业蓝图（Blueprint）** —— 像一张"活的工程图纸"
 > 令牌来源：[`frontend/src/index.css`](../../frontend/src/index.css)、[
@@ -225,7 +225,7 @@ sans-serif
     - 默认：`border-l-2 border-transparent text-muted-foreground`
     - Hover：`hover:bg-muted hover:text-foreground`
     - 选中：`border-l-2 border-primary bg-surface-primary font-medium text-foreground`
-    - 右侧 mono 编号（`01` / `02` / `03`）
+    - 右侧 mono 编号（`01` ~ `05`，顺序固定：仪表盘 / 测试对话 / 测试空间 / 技能 / 测试报告）
     - 布局：`rounded-sm px-3 py-1.5 gap-2 text-sm`
 - 导航分组上方有 mono 注解 `NAV_01`。
 
@@ -306,6 +306,63 @@ sans-serif
 - 全局 `<a>` 默认 `color: accent`；表格内链接 `font-medium text-accent hover:text-accent/80`。
 - 导航使用 `NavLink`，不依赖全局下划线。
 
+### 7.9 模式选择器（`chat/mode-selector.tsx`）
+
+分段控件，不是下拉——三个模式要**同时可见可比**。选中态工程蓝底白字，容器 `rounded-[3px]` + 1px 边框 + `p-0.5`。
+
+| 值 | 图标 | 标签 | 说明文案（必须对齐真实行为） |
+|:--|:--|:--|:--|
+| `agent` | `Zap` | 执行 | 自动选择工具：查接口、发请求、评估断言并落盘 |
+| `ask` | `MessageSquare` | 问答 | 只回答问题，可用工具全为只读，不会发任何请求 |
+| `plan` | `ListTodo` | 计划 | 只输出测试计划（接口范围 / 用例矩阵 / 断言策略 / 风险） |
+
+> **文案纪律**：`ask` / `plan` 的「不会执行」是后端工具白名单保证的事实，不是营销措辞。
+> 任何新模式上线，`hint` 必须描述**该模式的真实权限边界**，不允许写「尽量不执行」这类模糊承诺。
+
+### 7.10 技能选择器（`chat/skill-selector.tsx`）
+
+`DropdownMenu` + 多选，触发器为胶囊按钮（`Sparkles` 图标 + 已选数量 + `ChevronDown`），
+面板宽 `w-72` + `shadow-popover`。每项：`font-mono` 技能名 + 一行截断描述 + 选中 `Check`。
+未选中任何技能时显示「未选择技能（使用内置能力）」，**不要**默认勾选——默认勾选会让用户失去「到底用了什么」的判断。
+
+### 7.11 工具调用卡片（`chat/tool-call-card.tsx`）
+
+Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见：
+
+```tsx
+<div className="rounded-[3px] border border-border bg-background/60">
+  <button className="flex w-full items-center gap-2 px-2.5 py-1.5">
+    <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+    <span className="truncate font-mono text-xs font-medium">{call.name}</span>
+    <span className="ml-auto font-mono text-[10px] uppercase tracking-widest">200ms</span>
+  </button>
+  {/* 展开区：ARGS / RESULT 两段，label 用 .annotation */}
+</div>
+```
+
+| 状态 | 图标与配色 |
+|:--|:--|
+| 运行中 | `Loader2` + `animate-spin` + `text-primary` |
+| 成功 | `Check` + `text-success` |
+| 失败 | `AlertTriangle` + `text-destructive`，并在展开区保留原始错误文本 |
+
+- 参数与结果都用 `<pre max-h-40 overflow-auto font-mono text-[11px]>`，长内容靠滚动而非换行撑高页面。
+- 一轮多个调用时，上方加一条 `TOOL_TRACE · {n}` 的 `annotation` 汇总条。
+
+### 7.12 上下文栏与空间选择器
+
+对话页顶部固定一行 `border-b border-border px-4 py-2`，左侧 `SpaceSelector`，右侧 `annotation`
+（`Context · Space`）——等宽大写仅作装饰性标注，不承载信息。未选空间时整页替换为空态，
+**不要**让用户先输入再提示「请选择空间」。
+
+### 7.13 页面骨架模板
+
+| 页面 | 骨架 |
+|:--|:--|
+| 测试对话 `/chat` | 左侧 `ConversationListPanel`（220px，`md` 以下隐藏）+ 右侧对话区（消息流 `max-w-3xl` 居中）+ 底部固定 Composer |
+| 空间详情 `/spaces/:id` | `PageHeader` + 7 个 `TabsContent`（概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 测试运行），每个 tab 内部自带 `space-y-4` |
+| 技能管理 `/skills` | `PageHeader` + zip 导入按钮 + 技能卡片列表（名称 mono、scope 徽章、启停开关、声明工具数） |
+
 ---
 
 ## 八、间距与密度
@@ -356,6 +413,9 @@ sans-serif
 - [ ] 列表使用 `DataTable`，未重复实现表格样式
 - [ ] 链接与状态色使用语义令牌（`accent` / `primary` / `destructive` / `success`）
 - [ ] 新文本沿用 mono 大写标注规范（`.annotation`）
+- [ ] Agent 执行过程可见：工具调用必须有卡片，不允许「只显示最终答案」
+- [ ] 模式/技能说明文案与后端真实权限边界一致（见 §7.9 文案纪律）
+- [ ] 长内容（工具参数、响应体、目录树）使用滚动容器，不撑高页面
 - [ ] 亮色图纸与暗色夜图两种模式下均验证可读性
 - [ ] 通过 `tsc --noEmit` 与 `npm run build`
 
@@ -386,7 +446,9 @@ sans-serif
 | UI 基元               | `frontend/src/components/ui/*`                                                                                |
 | 对话组件                | `frontend/src/components/chat/*`                                                                              |
 | Markdown 子系统        | `frontend/src/components/markdown/*`、`frontend/src/styles/markdown.css`                                       |
-| 参考页面                | `frontend/src/pages/dashboard.tsx`（读数带 + 角标）、`frontend/src/pages/run/security-chat.tsx`（Composer + Agent 输出流） |
+| 参考页面                | `frontend/src/pages/dashboard.tsx`（读数带 + 角标）、`frontend/src/pages/chat/chat.tsx`（三选择器 + Composer + 工具轨迹）、`frontend/src/pages/space/space-detail.tsx`（7 tabs） |
+| 类型定义                | `frontend/src/lib/types/*`（按域拆分：conversation / skill / memory / knowledge / space …）                                                     |
+| 流式协议客户端             | `frontend/src/lib/stream.ts`（三行帧 → `ChatEvent` 判别联合）                                                                              |
 
 ---
 

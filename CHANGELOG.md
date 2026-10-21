@@ -3,25 +3,6 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
-### Changed
-
-- 后端分层重构：新增 BaseService/TestSummaryService，API 路由与 Graph 节点全部改走 Service，Repository 只做数据存取
-- 工作流层结构化：AgentState 类型化、路由注册表化、BaseCaseGenerationNode 模板方法消除 single/flow 重复、报告渲染外置 Jinja2 模板
-- chat / workflow 路由服务化：新增 ChatStreamService、WorkflowService，路由层保持薄
-- 全局业务异常：新增 `core/errors.py`（NotFoundError/ConflictError/ValidationError）映射 404/409/422，路由移除手写 HTTPException 样板
-- 前端结构整理：目录拼写修正（poject→project）、types 按域拆分、StatusBadge 支持数值 DataStatus、死代码清理
-
-### Security
-
-- 禁用 `fs_tools.run_command`（任意 Shell 命令执行），`read_file`/`list_directory`/`get_file_info` 限制在仓库工作区内
-
-### Fixed
-
-- 修复 mypy 全量类型错误（130+ files 0 errors）；枚举落地：`status == 1`/`"completed"`/`"pending"` 字面量替换为 DataStatus/TestStatus 枚举
-- 时间戳统一为 `local_now()`，`update_fields` 自动维护 `updated_at`
-
 ## [1.1.0] - 2026-06-15
 
 ### Added

@@ -62,7 +62,7 @@ def chroma_config_no_auth() -> ChromaConfig:
 @pytest.fixture()
 def mock_http_client():
     """Mock chromadb.HttpClient 构造函数，返回 mock client 实例。"""
-    with patch("src.core.chroma.connection.chromadb.HttpClient") as mock_cls:
+    with patch("src.core.chroma.chroma_manager.chromadb.HttpClient") as mock_cls:
         client = MagicMock()
         mock_cls.return_value = client
         yield client
@@ -110,12 +110,12 @@ class TestChromaManagerInitialize:
         manager.initialize(chroma_config)
 
         # HttpClient 只应被调用一次
-        with patch("src.core.chroma.connection.chromadb.HttpClient") as mock_cls:
+        with patch("src.core.chroma.chroma_manager.chromadb.HttpClient") as mock_cls:
             manager.initialize(chroma_config)
             mock_cls.assert_not_called()
 
     def test_initialize_with_auth_credentials(self, chroma_config):
-        with patch("src.core.chroma.connection.chromadb.HttpClient") as mock_cls:
+        with patch("src.core.chroma.chroma_manager.chromadb.HttpClient") as mock_cls:
             mock_cls.return_value = MagicMock()
             manager = ChromaManager.get_instance()
             manager.initialize(chroma_config)
@@ -126,7 +126,7 @@ class TestChromaManagerInitialize:
             assert settings.chroma_client_auth_credentials == chroma_config.auth_credentials
 
     def test_initialize_without_auth_credentials(self, chroma_config_no_auth):
-        with patch("src.core.chroma.connection.chromadb.HttpClient") as mock_cls:
+        with patch("src.core.chroma.chroma_manager.chromadb.HttpClient") as mock_cls:
             mock_cls.return_value = MagicMock()
             manager = ChromaManager.get_instance()
             manager.initialize(chroma_config_no_auth)
@@ -340,7 +340,7 @@ class TestChromaManagerVectorStore:
     def test_get_vector_store(self, initialized_manager):
         mock_embedding = MagicMock()
 
-        with patch("src.core.chroma.connection.Chroma") as mock_chroma_cls:
+        with patch("src.core.chroma.chroma_manager.Chroma") as mock_chroma_cls:
             mock_store = MagicMock()
             mock_chroma_cls.return_value = mock_store
 
@@ -359,7 +359,7 @@ class TestChromaManagerVectorStore:
     def test_get_vector_store_default_collection(self, initialized_manager):
         mock_embedding = MagicMock()
 
-        with patch("src.core.chroma.connection.Chroma") as mock_chroma_cls:
+        with patch("src.core.chroma.chroma_manager.Chroma") as mock_chroma_cls:
             mock_chroma_cls.return_value = MagicMock()
 
             initialized_manager.get_vector_store(embedding_function=mock_embedding)

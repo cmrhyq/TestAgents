@@ -21,6 +21,7 @@ class EnvironmentBase(BaseModel):
     description: str | None = Field(default="", description="环境描述")
     variables: str = Field(default="", description="环境变量键值对")
     is_default: int = Field(default=1, description="是否默认环境: 1-是, 0-否")
+    is_production: int = Field(default=0, description="是否生产环境: 1-是, 0-否（网关会拦截生产环境的写请求）")
     status: int = Field(default=1, description="状态(DataStatus): 1-启用, 2-禁用, 3-已删除, 4-已废弃")
 
     @field_validator("base_url", mode="before")
@@ -65,6 +66,7 @@ class EnvironmentUpdate(BaseModel):
     description: str | None = Field(default=None, description="环境描述")
     variables: dict[str, Any] | None = Field(default=None, description="环境变量键值对")
     is_default: int | None = Field(default=None, description="是否默认环境: 1-是, 0-否")
+    is_production: int | None = Field(default=None, description="是否生产环境: 1-是, 0-否")
     status: int | None = Field(default=None, description="状态(DataStatus): 1-启用, 2-禁用")
 
     @field_validator("base_url", mode="before")

@@ -9,11 +9,136 @@
 
 ---
 
+## [1.0.2] - 2026-10-20 · LLM 成本账本闭环（`Implemented`）
+
+修复「对话链路不产生 token 统计」：runner 走 `get_model()` 拿到裸 `BaseChatModel` 自行 `bind_tools().astream()`，
+绕过了 `LLMService` 的埋点；同时 `llm_log` 没有任何归因列，即使有数据也算不出「哪个空间/会话花了多少」。
+
+### Added
+
+- **`astream_with_tools()`**（`LLMService` / `LLMGateway`）：把 `bind_tools` + `astream` + 埋点收敛到一处，
+  是 Agent 运行时的唯一正确入口。`runner` 改为调用它并透传 `space_id` / `conversation_id`
+- **`llm_log` 归因与成本列**：`space_id` / `conversation_id`（**无外键**，见下）/ `routing_tier` / `cost_usd`，
+  配 `idx_llm_log_space`、`idx_llm_log_conversation` 复合索引
+- **`GET /api/v1/usage/stats`**：按空间 / 会话 / 时间窗口聚合，返回调用数、失败数、token、成本，
+  以及按模型、按路由档位的分组
+- **`config.pricing`**：自定义模型费率段，补齐 litellm 定价表未收录的厂商（如 `zai/*`），
+  否则这些模型的金额永远算不出来
+
+### Fixed
+
+- **真实模型名被记成 `smart-router`**：`response_metadata["model"]` 是空键，兜底逻辑把所有调用都记成
+  Router 的逻辑组名，而它没有任何定价。改为按 `deployment` → `routing_decision.routed_model` →
+  `deployment_model_name` → `model_name` 的优先级取真实模型（实测拿到 `zai/glm-4-flash`）
+- **流式 token 可能漏记**：原实现只看最后一个 chunk 的 `usage_metadata`，部分 provider 把 usage 放在
+  中间 chunk，会静默记成 0。改为「保留最后一次非空」
+- **成本未知被写成 0**：`litellm.cost_per_token` 对同一模型的行为会随成本表来源漂移
+  （干净进程抛异常、远端表加载后返回 `0.0`）。改为直接查定价表，并强制
+  `LITELLM_LOCAL_MODEL_COST_MAP=True` 关闭远端拉取，避免离线环境阻塞与结果漂移
+- **历史脏数据**：修复前写入的 `cost_usd = 0.0`（实为未知）已清理为 NULL
+
+### Changed
+
+- `LLMGateway.get_model()` 标记为弃用，调用时抛 `DeprecationWarning`；业务代码已无引用
+- `LLMService` 支持注入 `session_scope`，统计可跑在临时库上（此前硬编码全局 DB，无法单测）
+
+### 设计取舍
+
+- **归因列不建外键**：加 CASCADE 会连历史成本一起删掉，加 SET NULL 会变成无法归因的孤儿行。
+  成本要能对账，不该随业务数据消灭（空间 ID 是雪花值，不会被复用）
+- **`cost_usd` 的 NULL 与 0 严格区分**：NULL 表示「定价表查不到」，0 表示「真的免费」。
+  API 用 `cost_usd`（仅已知成本）+ `unpriced_calls`（未计价次数）两个字段表达，
+  避免把部分成本当成全部成本
+- **每轮都记账**：ReAct 的每一轮都是独立计费调用，一轮对话产生 1~N 条记录（实测「读文件再回答」= 2 条）
+
+### 验证
+
+- 新增 41 项测试（`test_llm_usage.py` 23 / `test_runner_attribution.py` 6 / `test_usage_api.py` 12），
+  全量 **490 passed**
+- 真实链路实测：`start → tool_call → tool_result → text_delta → final`，2 轮调用 → 2 条 `llm_log`，
+  归因与会话 ID 一致，`routing_tier=SIMPLE`
+- 老库迁移幂等：补 4 列 + 2 索引，历史 6 行保留；二次启动不再补列
+
+---
+
+## [1.0.1] - 2026-10-20 · 文档全面对齐实现（`Implemented`）
+
+1.0.0 只改了代码，文档仍停留在 LangGraph 时代。本次把「会误导读者照着写出错代码」的部分全部校准。
+
+### Changed
+
+- **[Architecture.md](./design/Architecture.md)**：升级 v1.0 并重写——§二 基础设施（`llm_client` → `llm_gateway`）、§四~§六 路由清单、原 §三「LangGraph 工作流」替换为「Agent 运行时」（四段式流水线 / ReAct 循环 / 模式白名单 / 工具清单 / SSE 协议 / prompt 组装），新增空间沙箱、Skills、记忆三章；同步配置段与前端目录/路由
+- **[ER.md](./design/ER.md)**：补 4 张新表（`space_memory` / `knowledge_document` / `knowledge_chunk` / `skill`）与 `llm_log`；补 3 组新字段与 `mode` 取值变更；新增 CHECK 约束清单与「为什么 `skill` 不建 FK」的说明；图改为 Mermaid（图随文改，不再与 SVG 脱节），PlantUML 源保留供导出
+- **[SystemFlowchart.md](./design/SystemFlowchart.md)**：整篇重写。旧版描述已删除的意图路由与图节点，新版讲四段式流水线、ReAct 循环的三个刻意取舍、六事件协议、工具沙箱约束、模式白名单，附「新旧流程对照」表
+- **[DatabaseDesign.md](./design/DatabaseDesign.md)**：新增 `llm_log` 章节（此前「15 张表」只写了 14 张）；约束与索引名对齐代码（`ck_memory_category` / `ck_memory_status` / `idx_memory_space` / `idx_memory_category` / `idx_document_space` / `idx_chunk_doc` / `idx_chunk_space` / `idx_skill_scope` / `idx_skill_name`）；`skill` 补 `when_to_use` / `version` / `discovered_at` 并删除不存在的 `uq_skill_name_scope`；枚举速查改为 `agent`/`ask`/`plan` 并补 category / status / index_mode / scope
+- **[UI-Design-Guidelines.md](./design/UI-Design-Guidelines.md)**：升级 v0.2.0，新增 §7.9~§7.13——模式分段控件（含「文案必须对齐真实权限边界」纪律）、技能多选器、工具调用卡片（三态配色 + 折叠规范）、上下文栏、三类页面骨架；检查清单补「执行过程必须可见」；文件索引修正已删除的 `security-chat.tsx`
+- **[Mode-System-Design.md](./design/Mode-System-Design.md)**：状态从「待实现的目标架构」改为「核心已落地」，§九 由「落地建议」改写为逐条实现对照（✅ 13 项 / ❌ 3 项 / ⚠️ 1 项），并说明本项目**故意**让 `plan` 过滤写工具的理由与「若做审批续跑必须改回」的前提
+- **[README.md](../README.md) / [README_zh.md](../README_zh.md)**：清除已删模块（`workflow.py` / `graph/` / `prompts/` / `security-chat`）、`.env` 与 `${ENV}` 插值、旧 provider 列表、`project`/`api_info` 旧表名；改为一屏说清「模式 = 工具白名单」「三选择器」「六事件」「三层记忆」，并补模式/工具/事件/记忆/技能对照表
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)**：更新技术栈描述，补「关键目录速查」与提交前自检（含 `allowed_tools` 静默裁工具这一坑）
+- **`backend/config/config.yaml` / `config.yaml.example`**：按 `AppConfig` 重排为同一套 9 个段（`llm` / `model_list` / `database` / `chroma` / `embedding` / `workspace` / `skill` / `logging` / `langsmith`）。模板补此前缺失的 `embedding` / `workspace` / `skill` 三段与 `chroma.enabled`；删除失效的 `execution` 段；逐段加注释说明**开关联动规则**（向量检索需 `chroma.enabled` + `embedding.enabled` + `embedding.model` **三者同时**满足，否则静默降级为词法检索）、`smart-router` 仅异步路径生效、`database.url` 相对路径按进程 cwd 解析的坑
+
+### Fixed
+
+- **文档内的失效链接**：`CHANGELOG` 中指向已删除的 `Refactor-Remaining.md` 与两个 ADR 的链接，改为说明性文字（全库文档链接现零 404）
+- **两处「六 tab」笔误**：空间详情实际是 7 个 tab（概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 测试运行）
+- **配置模板的 `langsmith.project` 字段名错误**：`LangSmithConfig` 的真实字段是 `space`，`project` 会被 Pydantic **静默丢弃**（未设 `extra="forbid"`），导致照模板配置的用户以为开了 LangSmith 却从未上报。已在两个配置文件与 Architecture §十 的 CAUTION 中标注该机制
+- **本地 `config.yaml` 缺 `chroma.enabled`**：该实例配了远程 Chroma 地址与 Token，但缺总开关会走默认 `false`；补 `enabled: true` 的同时注明「`embedding` 未配置模型，因此仍不生效」——避免「配了远程库却没被用上」的静默降级
+
+### Known Issues（文档侧记录的技术债）
+
+- **HTTP 超时没有配置入口**：`send_request` 的超时是工具形参（默认 30s），`AppConfig` 里无对应字段；上一代执行引擎遗留的 `execution` 段已于本次从两个配置文件删除。要支持全局默认值需新增 `http` 配置段并接进 `http_tools`，不要复活旧段。已在 Architecture §十 与 README FAQ 标注
+- ~~`LLMGateway.get_model()` 绕过 `llm_log` 埋点，对话链路不产生 token 统计~~ —— 已在 [1.0.2] 修复
+- 用例生成 / 批量执行 / HTML 报告的代码在重构前已删除，`test_run` 与 `report` 目前只有读接口。README 与 Architecture §十二 已如实说明
+
+---
+
+## [1.0.0] - 2026-10-20 · Agent 运行时重构（`Implemented`）
+
+按 [Refactor-Design.md](./design/Refactor-Design.md) / [Refactor-Plan.md](./design/Refactor-Plan.md) 完成 P0–P5 全量重构。核心变化是**删掉 LangGraph 工作流，换成手写 ReAct 循环**，并把「模式」从 prompt 建议变成工具白名单硬约束。
+
+### Added
+
+- **Agent 运行时**（`backend/src/agent/runner.py`）：手写 ReAct 循环，单轮 `astream` → 累积工具调用分片 → 逐个执行 → `ToolMessage` 回灌。异常一律转成 `ok=false` 的工具结果，不打断流
+- **模式策略**（`backend/src/agent/modes.py`）：`agent` / `ask` / `plan` 三模式落到工具白名单，`filter_tools` 在执行路径上闭环；skill 的 `allowed_tools` 只能**收窄不能放大**
+- **SSE 事件协议**（`backend/src/agent/events.py`）：六种事件 `start` / `text_delta` / `tool_call` / `tool_result` / `final` / `error`，三行帧 + `seq` 递增；`final` 携带完整 answer，前端不靠 delta 拼接
+- **空间工作目录（沙箱）**（`backend/src/workspace/`）：新建空间自动生成 `AGENTS.md` / `memory/MEMORY.md` / `docs/` / `testcases/` / `artifacts/`；所有路径 `resolve()` 后校验不得逃出空间根目录
+- **Skills 子系统**（`backend/src/skill/`）：`SKILL.md` 文件夹规范（frontmatter + 正文），内置（`backend/skills/`）+ 空间私有（`workspaces/{id}/.skills/`）两级发现，zip 导入带 zip-slip 防护，前端可启停
+- **记忆子系统**（`backend/src/memory/longterm.py`）：按 space 隔离的跨会话记忆，DB 为真源 + `memory/MEMORY.md` 全量镜像；召回用关键词抽取（ASCII 整词 + CJK 2-gram）而非整句 LIKE
+- **知识库**（`backend/src/memory/knowledge.py`）：文档切片入库，向量检索（Chroma，默认关闭）失败时降级 SQLite 词法检索
+- **工具集重写**（`backend/src/agent/tools/`）：17 个工具全部绑定空间上下文——`fs`（4）/ `db`（3）/ `http`（2，含生产环境闸门）/ `memory`（3）/ `knowledge`（1）/ `skill`（2）/ `executor`（2）
+- **会话扩展字段**：`conversation.skill_names`（JSON）与 `conversation.environment_id`
+- **数据库 v2 迁移**（`backend/src/data/migration/v2_agent_migration.py`）：`mode` 取值从 `Run/Ask/Plan` 归一到 `agent/ask/plan`，通过「PRAGMA foreign_keys=OFF + 重建表 + 重跑索引」绕过旧 CHECK 约束，且保证消息不丢
+- **前端**：对话页三选择器（空间 / 模式 / 技能）+ 工具调用可折叠卡片；空间详情七 tab（概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 测试运行）；技能管理页
+
+### Changed
+
+- **`POST /api/v1/chat/stream` 重写**：三种模式共用一条流式路径，模式差异只体现在工具白名单；缺 `space_id` 回 `error` 帧而非 400
+- **`conversation.mode` 默认值** `Run` → `agent`，服务层统一 `normalize_mode` 兜底历史值
+- **`GET /conversations`** 返回 `skill_names` 数组与 `environment_id`（DB 存 JSON 字符串，schema 层转换）
+- **前端路由**：`/workflows/chat` → `/chat`（旧路径重定向保留书签可用），新增 `/skills`
+
+### Removed
+
+- **LangGraph 工作流**：`backend/src/graph/`（state / route / nodes）、`backend/src/workflow.py`。理由：只需要「模型 ↔ 工具」两节点循环，StateGraph / reducer / checkpoint 全用不上，却要多维护一套 state schema 与事件映射
+- **旧 Prompt 体系**：`backend/src/prompts/`（builders / formatters / templates / loader）。system prompt 改由 `agent/context.py` 按「人设 → 模式指令 → 空间上下文 → 记忆 → skill → 工具规则」顺序拼装
+- **死代码**：`KnowledgeService` 与 `POST /endpoints/reindex`、`WorkflowRunStreamRequest` 与 `/workflows/run/stream`、前端 `use-security-chat` / `use-workflows`（仅保留 `useParseOpenAPI`）
+
+### Fixed
+
+- **内置 skill 声明的工具名错误**：`api-test-design` / `api-regression-run` 里写的是 `get_endpoint_detail`，实际工具名是 `get_endpoint_detail_by_id`——会导致该工具被静默裁掉。已修正，并新增 `tests/agent/test_skill_tool_contract.py` 把「技能声明的工具必须真实存在且不能被模式放大」钉成契约
+
+### 迁移说明
+
+- 旧 `mode` 值（`Run`/`Ask`/`Plan`）无需手工改，服务层 `normalize_mode` 会归一化；启动时 `migrate_v2` 会重建表并回填
+- 原有空间没有工作目录时会自动补建，不需要手工迁移文件
+
+---
+
 ## [Unreleased]
 
 ### Added
 
-- **剩余重构清单**（[design/Refactor-Remaining.md](./design/Refactor-Remaining.md)）：阶段 0/1 完成后，阶段 2–6 的未改动项（分层契约、工作流结构化、核心层拆分、前端整理、枚举与安全收尾），含文件证据与验收标准
+- **剩余重构清单**（`design/Refactor-Remaining.md`，该文件后续已删除）：阶段 0/1 完成后，阶段 2–6 的未改动项（分层契约、工作流结构化、核心层拆分、前端整理、枚举与安全收尾），含文件证据与验收标准
 - **架构设计文档**（[design/Architecture.md](./design/Architecture.md)）：跨前后端的整体架构总览，反映当前真实实现
   - 顶层架构、后端分层、LangGraph 工作流、数据模型（含新增对话表）、对话历史子系统、前端架构、LLM/Prompt、配置体系
   - 对既有文档做现状校准：对话历史已实现、对话入口已合并为单一 `/workflows/chat`、Ask/Plan 现状、Chroma 仍未接入
@@ -43,7 +168,7 @@
 ### Proposed
 
 - **ADR-001**：引入 Project 工作空间模型（每个 Project = 一个 Codex 式 workspace）
-  - 文档：[adr/ADR_001_project-workspace-ask-plan-chroma.md](./adr/ADR_001_project-workspace-ask-plan-chroma.md)
+  - 文档：`adr/ADR_001_project-workspace-ask-plan-chroma.md`（文件已删除，内容由 [Refactor-Design.md](./design/Refactor-Design.md) 承接）
   - 状态：`Proposed`
 - **对话模式 Ask / Plan / Run**：三种 `conversation_mode`，由 API 显式指定，不纳入意图 LLM 分类
   - Ask：RAG 问答，不执行 HTTP
@@ -58,7 +183,7 @@
   - 新增拟议路由：`/projects/{id}/chat/stream`、`/projects/{id}/plans`、`/projects/{id}/runs`
 - **实施分阶段路线**：Phase 0（工作空间闭环）→ Phase 1（Ask）→ Phase 2（Plan）→ Phase 3（Chroma）→ Phase 4（历史知识）
 - **风险验证清单**：ADR-001 待决事项与验证任务
-  - 文档：[adr/ADR_001_risks-validation-todo.md](./adr/ADR_001_risks-validation-todo.md)
+  - 文档：`adr/ADR_001_risks-validation-todo.md`（文件已删除）
 
 ### Changed（设计层面，待实现）
 

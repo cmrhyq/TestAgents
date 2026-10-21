@@ -1,63 +1,37 @@
-import {
-  Check,
-  ChevronDown,
-  HelpCircle,
-  Loader2,
-  MessageSquare,
-  ListTodo,
-  Send,
-  Zap,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu.tsx";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip.tsx";
-import { cn } from "@/lib/utils";
+import { Loader2, Send } from "lucide-react";
 
-const MODES = [
-  {
-    icon: <Zap />,
-    value: "Run",
-    description: "运行模式：分析需求并执行 API 测试（推荐）",
-    disabled: false,
-  },
-  {
-    icon: <MessageSquare />,
-    value: "Ask",
-    description: "询问模式：解答测试相关问题，不实际执行测试",
-    disabled: false,
-  },
-  {
-    icon: <ListTodo />,
-    value: "Plan",
-    description: "计划模式：生成测试计划（开发中）",
-    disabled: true,
-  },
-] as const;
+import { ModeSelector } from "@/components/chat/mode-selector.tsx";
+import { SkillSelector } from "@/components/chat/skill-selector.tsx";
+import type { ConversationMode } from "@/lib/types";
 
 export interface ChatInputProps {
   instruction: string;
   onInstructionChange(e: React.ChangeEvent<HTMLTextAreaElement>): void;
   onKeyDown(e: React.KeyboardEvent): void;
-  mode: string;
-  onModeChange(mode: string): void;
+  mode: ConversationMode;
+  onModeChange(mode: ConversationMode): void;
+  spaceId: string | null;
+  skillNames: string[];
+  onToggleSkill(name: string): void;
   isStreaming: boolean;
   onSubmit(): void;
 }
 
+/**
+ * 输入区：模式 + 技能 + 提示符输入 + 发送。
+ *
+ * 工具栏从左到右是「影响本轮行为的三个选择」→「动作」，
+ * 顺序固定，用户不用每次找。
+ */
 export function ChatInput({
   instruction,
   onInstructionChange,
   onKeyDown,
   mode,
   onModeChange,
+  spaceId,
+  skillNames,
+  onToggleSkill,
   isStreaming,
   onSubmit,
 }: ChatInputProps) {
@@ -85,50 +59,15 @@ export function ChatInput({
 
         {/* 工具栏 */}
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                )}
-              >
-                {mode}
-                <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="shadow-popover">
-              {MODES.map((m) => (
-                  <DropdownMenuItem
-                    key={m.value}
-                    onClick={() => !m.disabled && onModeChange(m.value)}
-                    disabled={m.disabled}
-                    title={m.disabled ? "开发中" : undefined}
-                  >
-                    {m.icon}
-                    <span className="flex-1">{m.value}</span>
-                    {mode === m.value && <Check className="h-3.5 w-3.5" />}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className="text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          <HelpCircle className="h-3.5 w-3.5" />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="right"
-                        className="max-w-[220px] border-0 bg-popover text-popover-foreground shadow-popover"
-                      >
-                        {m.description}
-                      </TooltipContent>
-                    </Tooltip>
-                  </DropdownMenuItem>
-                ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ModeSelector value={mode} onChange={onModeChange} disabled={isStreaming} />
+            <SkillSelector
+              spaceId={spaceId}
+              selected={skillNames}
+              onToggle={onToggleSkill}
+              disabled={isStreaming}
+            />
+          </div>
 
           <button
             type="button"

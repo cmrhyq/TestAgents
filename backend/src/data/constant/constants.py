@@ -12,7 +12,9 @@ class UserIntent(str, Enum):
     """用户意图。"""
 
     RUN = "run"  # 运行 API 测试
-    ASK = "ask"  # 提问 / 回答（走 answer_question_node）
+    AGENT = "agent"
+    ASK = "ask"  # 提问
+    PLAN = "plan"
 
 
 class TestMode(str, Enum):
@@ -28,16 +30,5 @@ class NodeName(str, Enum):
     值即 LangGraph ``add_node`` / 条件边使用的字符串，保持与既有图结构一致。
     """
 
-    START = "start"
-    PARSE_INPUT = "parse_input"
-    SELECT_ENDPOINTS_AGENT = "select_endpoints_agent"
-    TOOLS = "tools"
-    PARSE_RESULT = "parse_result"
-    GENERATE_SINGLE_CASES = "generate_single_cases"
-    EXECUTE_SINGLE_TESTS = "execute_single_tests"
-    GENERATE_FLOW_CASES = "generate_flow_cases"
-    EXECUTE_FLOW_TESTS = "execute_flow_tests"
-    GENERATE_REPORT = "generate_report"
-    ANSWER_QUESTION = "answer_question"
-    END = "end"
-    ERROR = "error"
+    AGENT = "agent"  # LLM 决策节点：产出文本回答或工具调用请求
+    TOOLS = "tools"  # 工具执行节点：LangGraph ToolNode 统一执行工具

@@ -10,6 +10,14 @@ from src.data.services.base_service import BaseService
 _TITLE_MAX_LEN = 30
 
 
+def _dump_skill_names(names: list[str] | None) -> str:
+    """skill 名列表 → DB 里的 JSON 字符串。"""
+    import json
+
+    cleaned = [str(name).strip() for name in (names or []) if str(name).strip()]
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
 class ConversationService(BaseService[Conversation, ConversationRepository]):
     """会话业务逻辑：创建会话、追加消息并维护会话元数据。"""
 
@@ -39,17 +47,32 @@ class ConversationService(BaseService[Conversation, ConversationRepository]):
         return self.msg_repo.list_by_conversation(conversation_id)
 
     def update_conversation(self, conversation_id: int, fields: dict) -> Conversation:
+        """更新会话字段；``skill_names`` 与 ``mode`` 做落库前归一化。"""
+        if "skill_names" in fields:
+            fields["skill_names"] = _dump_skill_names(fields["skill_names"])
+        if "mode" in fields and fields["mode"] is not None:
+            from src.agent.modes import normalize_mode
+
+            fields["mode"] = normalize_mode(fields["mode"]).value
         return self.update(conversation_id, **fields)
 
     def delete_conversation(self, conversation_id: int) -> None:
         self.delete(conversation_id)
 
     def create_conversation(self, data: ConversationCreate) -> Conversation:
-        """创建新会话。"""
+        """创建新会话。
+
+        ``mode`` 必须归一化：DB 上有 ``CHECK (mode IN ('agent','ask','plan'))``，
+        前端或旧客户端传 ``Ask`` 会直接撞约束——在服务层挡住比在数据库层爆炸好。
+        """
+        from src.agent.modes import normalize_mode
+
         conversation = Conversation(
             space_id=data.space_id,
             title=data.title or "",
-            mode=data.mode or "Ask",
+            mode=normalize_mode(data.mode).value,
+            skill_names=_dump_skill_names(data.skill_names),
+            environment_id=data.environment_id,
         )
         return self.conv_repo.add(conversation)
 

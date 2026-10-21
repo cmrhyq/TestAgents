@@ -34,6 +34,15 @@ class EnvironmentService(BaseService[Environment, EnvironmentRepository]):
             filters.append(or_(Environment.name.ilike(pattern), Environment.description.ilike(pattern)))
         return self.list(page, page_size, *filters)
 
+    def list_by_space(self, space_id: int) -> list[Environment]:
+        """列出空间下全部启用环境（供 Agent 工具与环境选择器使用）。"""
+        items, _ = self.list(1, 200, Environment.space_id == space_id, Environment.status == 1)
+        return items
+
+    def get_by_id(self, env_id: int) -> Environment | None:
+        """按 ID 取环境（工具层拼 base_url 与生产环境闸门用）。"""
+        return self.get(env_id)
+
     def update_environment(self, env_id: int, fields: dict) -> Environment:
         if "name" in fields:
             current = self.get_or_raise(env_id, "环境不存在")

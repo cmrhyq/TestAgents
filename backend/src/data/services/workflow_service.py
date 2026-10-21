@@ -7,18 +7,14 @@
 import json
 import tempfile
 import uuid
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
-from src.core.config import get_config
 from src.core.database.database_manager import init_database_from_config
 from src.core.errors import ConflictError, ValidationError
 from src.core.logging import get_logger
 from src.data.schemas import EnvironmentCreate, EndpointCreate
 from src.data.services import EnvironmentService, EndpointService
 from src.utils.parser import OpenAPIParser
-from src.workflow import TestWorkflow
 
 logger = get_logger(__name__)
 
@@ -169,28 +165,3 @@ class WorkflowService:
             raise ValidationError(f"解析失败: {e}") from e
         finally:
             tmp_path.unlink(missing_ok=True)
-
-    async def run_stream(self, body: Any) -> AsyncIterator[str]:
-        """以 SSE 格式流式运行测试工作流。
-
-        事件以 ``data: {json}\\n\\n`` 输出，事件内容来自
-        ``TestWorkflow.astream`` / ``astream_events`` 的结构化事件 dict。
-        ``body.include_tokens`` 为真时走事件级流式（含 LLM token 增量），
-        否则走节点级进度流式。
-
-        Args:
-            body: ``WorkflowRunStreamRequest`` 请求体
-
-        Yields:
-            str: SSE 格式的文本行
-        """
-        workflow = TestWorkflow(get_config())
-
-        generator = (
-            workflow.astream_events(body.raw_input)
-            if body.include_tokens
-            else workflow.astream(body.raw_input)
-        )
-
-        async for event in generator:
-            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"

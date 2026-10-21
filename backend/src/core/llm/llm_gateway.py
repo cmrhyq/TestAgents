@@ -12,8 +12,8 @@
 提供的适配能力（均为 llm_client 时代的旧接口形态）：
 - ``chat(messages: list[dict]) -> str``：dict 消息 → 纯文本响应
 - ``chat_stream / achat_stream``：dict 消息 → 文本增量（token）
-- ``invoke_with_tools``：BaseMessage → AIMessage（.tool_calls）
-- ``get_model()``：返回底层 BaseChatModel（供 bind_tools 等高级用法）
+- ``invoke_with_tools`` / ``astream_with_tools``：绑定工具调用（**带 llm_log 埋点**）
+- ``get_model()``：返回底层 BaseChatModel —— ⚠️ **已弃用**，绕过了统计埋点
 
 用法::
 
@@ -28,16 +28,20 @@
     for token in gw.chat_stream(messages):
         print(token, end="")
 
-    # 3) 工具调用（LangGraph ToolNode 模式）
+    # 3) 工具调用（非流式）
     response = gw.invoke_with_tools(messages, tools=[search_space])
     print(response.tool_calls)
 
-    # 4) 需要 BaseChatModel 的场景（如 bind_tools + 自行 invoke）
-    model = gw.get_model()
+    # 4) 工具调用（流式 + 成本归因）—— Agent 运行时用这个
+    async for chunk in gw.astream_with_tools(
+        messages, tools, space_id=1, conversation_id=2
+    ):
+        ...
 """
 
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Literal, cast
+import warnings
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -60,6 +64,7 @@ __all__ = [
     "chat_stream",
     "achat_stream",
     "invoke_with_tools",
+    "astream_with_tools",
     "get_model",
 ]
 
@@ -222,16 +227,69 @@ class LLMGateway:
         return response
 
     # ------------------------------------------------------------------
-    # 底层模型透出（bind_tools / astream_events 等高级用法）
+    # 工具调用（流式）：带统计埋点的推荐入口
+    # ------------------------------------------------------------------
+
+    async def astream_with_tools(
+        self,
+        messages: list[BaseMessage] | list[dict[str, str]],
+        tools: list[Any],
+        *,
+        space_id: int | str | None = None,
+        conversation_id: int | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[BaseMessage]:
+        """绑定工具后流式产出 chunk，**并记录 llm_log**（含空间/会话归因）。
+
+        这是 Agent 运行时的正确入口。不要改用 ``get_model()`` 自己
+        ``bind_tools().astream()``——那条路径不产生任何统计。
+
+        Args:
+            messages: BaseMessage 列表（也接受 dict 格式，内部转换）
+            tools: 工具列表；空列表时不绑定
+            space_id: 归因空间
+            conversation_id: 归因会话
+            **kwargs: 透传给底层 astream
+
+        Yields:
+            AIMessageChunk
+        """
+        langchain_messages = self._as_messages(messages)
+        async for chunk in self._service.astream_with_tools(
+            langchain_messages,
+            tools,
+            space_id=space_id,
+            conversation_id=conversation_id,
+            **kwargs,
+        ):
+            yield chunk
+
+    @staticmethod
+    def _as_messages(messages: list[BaseMessage] | list[dict[str, str]]) -> list[BaseMessage]:
+        """dict 消息自动转 BaseMessage；已是 BaseMessage 则原样返回。"""
+        if messages and isinstance(messages[0], BaseMessage):
+            return list(messages)  # type: ignore[arg-type]
+        return convert_to_langchain_messages(messages)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
+    # 底层模型透出（高级用法；不产生统计）
     # ------------------------------------------------------------------
 
     def get_model(self) -> BaseChatModel:
         """返回底层 BaseChatModel（ChatLiteLLMRouter）。
 
-        供需要直接操作模型的场景使用（如 LangGraph ToolNode 的
-        ``model.bind_tools(tools).invoke(...)`` 循环、astream_events）。
-        注意：直接操作 model 不经过 llm_log 统计埋点。
+        .. deprecated::
+            **这条路径不经过 llm_log 埋点**，任何经由它发起的调用都不会被统计。
+            业务代码请改用 :meth:`invoke_with_tools` / :meth:`astream_with_tools`。
+            仅在调试或确实需要直接操作模型时使用。
+
+        供需要直接操作模型的场景使用（如自定义 ``bind_tools`` 循环）。
         """
+        warnings.warn(
+            "get_model() 绕过 llm_log 统计；请改用 astream_with_tools() / invoke_with_tools()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._service.model
 
     async def astream_events(
@@ -289,8 +347,17 @@ def invoke_with_tools(messages: list[BaseMessage], tools: list[Any], **kwargs: A
     return get_llm_gateway().invoke_with_tools(messages, tools, **kwargs)
 
 
+def astream_with_tools(
+    messages: list[BaseMessage] | list[dict[str, str]],
+    tools: list[Any],
+    **kwargs: Any,
+) -> AsyncIterator[BaseMessage]:
+    """模块级便捷函数：流式工具调用（带 llm_log 统计）。"""
+    return get_llm_gateway().astream_with_tools(messages, tools, **kwargs)
+
+
 def get_model() -> BaseChatModel:
-    """模块级便捷函数：获取底层 BaseChatModel。"""
+    """模块级便捷函数：获取底层 BaseChatModel（已弃用，绕过统计埋点）。"""
     return get_llm_gateway().get_model()
 
 

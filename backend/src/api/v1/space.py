@@ -15,6 +15,7 @@ from src.data.schemas.space import (
     SpaceUpdate,
 )
 from src.data.services import SpaceService
+from src.workspace.manager import get_workspace_manager
 
 router = APIRouter(prefix="/spaces", tags=["空间管理"])
 
@@ -82,3 +83,52 @@ async def parse_openapi(
         message=f"文档 {file.filename} 解析成功",
         endpoints_count=result["endpoint_count"],
     )
+
+
+# ─── 工作目录 ────────────────────────────────────────────────────────────
+
+
+@router.get("/{space_id}/tree")
+def get_workspace_tree(
+    space_id: int,
+    max_depth: int | None = Query(default=None, ge=1, le=6, description="展开层数，默认取配置"),
+    db: Session = Depends(get_db),
+):
+    """返回空间工作目录树。
+
+    目录是 Agent 的沙箱，前端「概览」页用它展示空间里都有什么文件。
+    """
+    SpaceService(db).get_or_raise(space_id, "空间不存在")
+    manager = get_workspace_manager()
+    manager.ensure(space_id)
+    return {
+        "space_id": space_id,
+        "root": manager.space_dir(space_id).name,
+        "nodes": manager.tree(space_id, max_depth),
+    }
+
+
+class AgentsMdBody(BaseModel):
+    """空间级智能体指令编辑请求体。"""
+
+    content: str = Field(..., description="AGENTS.md 全文")
+
+
+@router.get("/{space_id}/agents-md")
+def get_agents_md(space_id: int, db: Session = Depends(get_db)):
+    """读取空间的 AGENTS.md（会被注入 system prompt）。"""
+    SpaceService(db).get_or_raise(space_id, "空间不存在")
+    manager = get_workspace_manager()
+    manager.ensure(space_id)
+    path = manager.resolve(space_id, "AGENTS.md")
+    return {"content": path.read_text(encoding="utf-8") if path.is_file() else ""}
+
+
+@router.put("/{space_id}/agents-md")
+def update_agents_md(space_id: int, body: AgentsMdBody, db: Session = Depends(get_db)):
+    """覆盖写入 AGENTS.md。下一轮对话即生效，无需重启。"""
+    SpaceService(db).get_or_raise(space_id, "空间不存在")
+    manager = get_workspace_manager()
+    manager.ensure(space_id)
+    manager.resolve(space_id, "AGENTS.md").write_text(body.content, encoding="utf-8")
+    return {"ok": True, "length": len(body.content)}

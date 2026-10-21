@@ -46,14 +46,35 @@ cd backend && uv run pre-commit install && cd ..
 
 ```
 LLMTestAgent/
-├── backend/      # Python 后端（FastAPI + LangGraph）
+├── backend/      # Python 后端（FastAPI + 手写 ReAct 运行时）
 ├── frontend/     # React 前端（Vite + Tailwind + shadcn/ui）
-├── doc/          # 项目文档
+├── doc/          # 项目文档（架构 / 数据库 / 流程图 / 设计准则）
 └── .github/      # CI 工作流
 ```
 
 - 后端代码修改在 `backend/` 目录下进行
 - 前端代码修改在 `frontend/` 目录下进行
 - 根目录的 `.pre-commit-config.yaml` 统管前后端 lint
+
+### 关键目录速查
+
+| 改动内容 | 目录 |
+|---|---|
+| Agent 工具 / 模式白名单 / ReAct 循环 | `backend/src/agent/` |
+| 空间沙箱与目录模板 | `backend/src/workspace/` |
+| 技能解析与导入 | `backend/src/skill/`、`backend/skills/` |
+| 记忆与知识库 | `backend/src/memory/` |
+| 路由 / 服务 / 模型 | `backend/src/api/v1/`、`backend/src/data/` |
+| 前端页面与 hook | `frontend/src/pages/`、`frontend/src/hooks/` |
+
+### 提交前自检
+
+```bash
+cd backend && uv run pytest
+cd frontend && npm run type-check && npm run lint && npm run build
+```
+
+> 若新增或改名了工具，请同步检查 `backend/skills/*/SKILL.md` 里的 `allowed_tools` ——
+> 声明了不存在的工具**不会报错**，只会让那个工具被静默裁掉。`tests/agent/test_skill_tool_contract.py` 会拦这个。
 
 感谢您的贡献！

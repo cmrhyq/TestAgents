@@ -14,9 +14,26 @@ export const queryKeys = {
   environments: createResourceKeys("environments"),
   testRuns: createResourceKeys("test-runs"),
   reports: createResourceKeys("reports"),
+  skills: createResourceKeys("skills"),
   conversations: {
     ...createResourceKeys("conversations"),
     messages: (id: ResourceId | null | undefined) => ["conversations", "messages", id] as const,
+    bySpace: (spaceId: ResourceId | null | undefined) =>
+      ["conversations", "space", spaceId] as const,
+  },
+  memories: {
+    ...createResourceKeys("memories"),
+    bySpace: (spaceId: ResourceId | null | undefined) => ["memories", "space", spaceId] as const,
+  },
+  knowledge: {
+    all: ["knowledge"] as const,
+    documents: (spaceId: ResourceId | null | undefined) =>
+      ["knowledge", "documents", spaceId] as const,
+    chunks: (documentId: ResourceId) => ["knowledge", "chunks", documentId] as const,
+  },
+  workspace: {
+    tree: (spaceId: ResourceId | null | undefined) => ["workspace", "tree", spaceId] as const,
+    agentsMd: (spaceId: ResourceId | null | undefined) => ["workspace", "agents-md", spaceId] as const,
   },
 };
 

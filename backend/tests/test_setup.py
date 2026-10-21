@@ -10,8 +10,10 @@ class TestPytestSetup:
         assert project_root.exists()
         assert (project_root / "pyproject.toml").exists()
 
-    def test_input_dir_exists(self, input_dir):
-        assert input_dir.exists()
+    def test_source_layout_exists(self, project_root):
+        """重构后的核心包目录应存在。"""
+        for pkg in ("src/agent", "src/data", "src/core", "src/api"):
+            assert (project_root / pkg).is_dir(), f"缺少包目录: {pkg}"
 
     def test_env_is_test(self, monkeypatch):
         import os
@@ -28,18 +30,26 @@ class TestImports:
 
         assert AppConfig is not None
 
-    def test_import_workflow(self):
-        from src.workflow import TestWorkflow, build_graph
+    def test_import_agent_runtime(self):
+        from src.agent.modes import policy_for
+        from src.agent.runner import RunRequest, run
 
-        assert TestWorkflow is not None
-        assert build_graph is not None
+        assert RunRequest is not None
+        assert run is not None
+        assert policy_for("agent").allow_side_effects is True
 
     def test_import_openapi_parser(self):
         from src.utils.parser import OpenAPIParser
 
         assert OpenAPIParser is not None
 
-    def test_import_prompt_loader(self):
-        from src.prompts.loader import PromptLoader
+    def test_import_subsystems(self):
+        """四大子系统都要能独立导入（避免循环依赖）。"""
+        from src.memory import get_knowledge_base, get_long_term_memory
+        from src.skill.service import get_skill_service
+        from src.workspace.manager import get_workspace_manager
 
-        assert PromptLoader is not None
+        assert get_long_term_memory is not None
+        assert get_knowledge_base is not None
+        assert get_skill_service is not None
+        assert get_workspace_manager is not None

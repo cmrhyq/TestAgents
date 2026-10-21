@@ -29,21 +29,32 @@ EXPECTED_TABLES = [
     "conversation",
     "message",
     "llm_log",
+    # v2 新增（Agent 平台）
+    "space_memory",
+    "knowledge_document",
+    "knowledge_chunk",
+    "skill",
 ]
 
 
 def init_database_from_orm(manager: DatabaseManager | None = None) -> None:
     """
-    通过 ORM 模型自动创建所有表
+    通过 ORM 模型自动创建所有表，并执行 v2 迁移
 
     适用于开发和测试环境快速初始化。
-    如果表已存在则跳过。
+    如果表已存在则跳过建表；v2 迁移本身幂等，可重复执行。
 
     Args:
         manager: 数据库管理器实例，为 None 时使用全局单例
     """
     mgr = manager or get_db_manager()
     Base.metadata.create_all(mgr.engine)
+
+    # 延迟导入：避免 migration 模块循环依赖
+    from src.data.migration.v2_agent_migration import migrate_v2
+
+    migrate_v2(mgr.engine)
+
     _create_views(mgr)
     logger.info("通过ORM模型初始化数据库完成", method="orm")
 

@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+import json
+
+from pydantic import BaseModel, Field, field_validator
 
 from src.data.schemas.common import PaginatedResponse
 from src.data.schemas.message import MessageResponse
@@ -9,7 +11,25 @@ class ConversationBase(BaseModel):
 
     space_id: int | None = Field(default=None, description="所属空间ID（可空）")
     title: str = Field(default="", description="会话标题")
-    mode: str = Field(default="Run", description="模式: Run / Ask / Plan")
+    mode: str = Field(default="agent", description="工作模式: agent / ask / plan")
+    skill_names: list[str] = Field(default_factory=list, description="本会话选中的 skill 名")
+    environment_id: int | None = Field(default=None, description="会话绑定的测试环境 ID")
+
+    @field_validator("skill_names", mode="before")
+    @classmethod
+    def _parse_skill_names(cls, value):
+        """DB 里存的是 JSON 字符串，接口对外暴露为数组。
+
+        在 schema 层转换而不是模型层：ORM 保持「原样存什么读什么」，
+        序列化格式属于 API 契约的事。
+        """
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (ValueError, TypeError):
+                return []
+            return [str(item) for item in parsed] if isinstance(parsed, list) else []
+        return value or []
 
 
 class ConversationCreate(ConversationBase):
@@ -21,7 +41,8 @@ class ConversationCreate(ConversationBase):
                 {
                     "space_id": None,
                     "title": "",
-                    "mode": "Ask",
+                    "mode": "ask",
+                    "skill_names": ["api-test-design"],
                 }
             ]
         }
@@ -32,7 +53,9 @@ class ConversationUpdate(BaseModel):
     """更新 Conversation 请求体（所有字段可选）"""
 
     title: str | None = Field(default=None, description="会话标题")
-    mode: str | None = Field(default=None, description="模式: Run / Ask / Plan")
+    mode: str | None = Field(default=None, description="工作模式: agent / ask / plan")
+    skill_names: list[str] | None = Field(default=None, description="本会话选中的 skill 名")
+    environment_id: int | None = Field(default=None, description="会话绑定的测试环境 ID")
     status: int | None = Field(default=None, description="状态: 1-正常, 0-删除")
 
 
@@ -61,10 +84,15 @@ class ConversationListResponse(PaginatedResponse[ConversationResponse]):
 
 
 class ChatStreamRequest(BaseModel):
-    """流式对话请求体。"""
+    """流式对话请求体。
+
+    ``mode`` 只接受 ``agent`` / ``ask`` / ``plan``。历史值（``Run``/``Ask``/``Plan``）
+    在服务层由 ``normalize_mode`` 兜底归一化，避免旧前端直接 422。
+    """
 
     instruction: str = Field(..., min_length=1, description="用户输入的 prompt")
-    api_doc_path: str | None = Field(default=None, description="可选的已上传 OpenAPI 文档路径")
     conversation_id: int | None = Field(default=None, description="会话 ID；缺省时自动新建会话")
-    mode: str = Field(default="Run", description="模式: Run / Ask / Plan")
-    space_id: int | None = Field(default=None, description="新建会话时所属空间 ID（可选）")
+    space_id: int | None = Field(default=None, description="所属测试空间 ID")
+    mode: str = Field(default="agent", description="工作模式: agent / ask / plan")
+    skill_names: list[str] = Field(default_factory=list, description="选中的 skill 名")
+    environment_id: int | None = Field(default=None, description="指定测试环境 ID")
