@@ -1,0 +1,300 @@
+@config "../tailwind.config.ts";
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "./styles/markdown.css";
+
+/*
+ * LLMTestAgent — 「工业蓝图 / Blueprint」设计令牌
+ * 亮色图纸为默认主题，暗色「夜图」通过 html.dark 类覆盖。
+ * 气质：工程图纸 —— 浅蓝纸底 + 工程蓝墨线 + 等宽标注 + 印章式徽章。
+ */
+
+/* ── 色彩值（普通 CSS 变量，供 @theme inline 映射）──────────── */
+:root {
+  /* 亮色图纸（默认） */
+  --background: oklch(0.955 0.012 235);
+  --foreground: oklch(0.3 0.05 250);
+  --card: oklch(0.985 0.006 230);
+  --card-foreground: oklch(0.3 0.05 250);
+  --popover: oklch(0.985 0.006 230);
+  --popover-foreground: oklch(0.3 0.05 250);
+  --sidebar: oklch(0.93 0.015 235);
+  --sidebar-foreground: oklch(0.3 0.05 250);
+  --primary: oklch(0.5 0.13 255);
+  --primary-foreground: oklch(0.985 0.005 250);
+  --secondary: oklch(0.9 0.015 235);
+  --secondary-foreground: oklch(0.3 0.05 250);
+  --muted: oklch(0.93 0.012 235);
+  /* 0.5 保证 11px 等宽小字（annotation/表头）对比度 ≥ 4.5:1（WCAG AA） */
+  --muted-foreground: oklch(0.5 0.05 245);
+  --accent: oklch(0.5 0.13 255);
+  --accent-foreground: oklch(0.985 0.005 250);
+  --destructive: oklch(0.52 0.17 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.78 0.035 240);
+  --border-subtle: oklch(0.87 0.022 240);
+  --input: oklch(0.985 0.006 230);
+  --ring: oklch(0.5 0.13 255 / 0.45);
+
+  --success: oklch(0.55 0.11 150);
+  --warning: oklch(0.62 0.13 75);
+  --info: oklch(0.55 0.1 250);
+
+  --method-get: oklch(0.52 0.11 150);
+  --method-post: oklch(0.52 0.12 250);
+  --method-put: oklch(0.6 0.13 75);
+  --method-delete: oklch(0.52 0.17 25);
+  --method-patch: oklch(0.55 0.12 300);
+}
+
+html.dark {
+  /* 暗色夜图 */
+  --background: oklch(0.18 0.025 250);
+  --foreground: oklch(0.9 0.02 230);
+  --card: oklch(0.22 0.028 250);
+  --card-foreground: oklch(0.9 0.02 230);
+  --popover: oklch(0.25 0.03 250);
+  --popover-foreground: oklch(0.9 0.02 230);
+  --sidebar: oklch(0.15 0.02 250);
+  --sidebar-foreground: oklch(0.9 0.02 230);
+  --primary: oklch(0.72 0.12 240);
+  --primary-foreground: oklch(0.16 0.03 250);
+  --secondary: oklch(0.27 0.03 250);
+  --secondary-foreground: oklch(0.88 0.02 235);
+  --muted: oklch(0.24 0.025 250);
+  --muted-foreground: oklch(0.66 0.04 245);
+  --accent: oklch(0.72 0.12 240);
+  --accent-foreground: oklch(0.16 0.03 250);
+  --destructive: oklch(0.63 0.17 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.34 0.04 245);
+  --border-subtle: oklch(0.28 0.03 245);
+  --input: oklch(0.22 0.028 250);
+  --ring: oklch(0.72 0.12 240 / 0.45);
+
+  --success: oklch(0.72 0.11 150);
+  --warning: oklch(0.76 0.13 80);
+  --info: oklch(0.7 0.1 240);
+
+  --method-get: oklch(0.7 0.11 150);
+  --method-post: oklch(0.7 0.11 240);
+  --method-put: oklch(0.75 0.13 80);
+  --method-delete: oklch(0.63 0.17 25);
+  --method-patch: oklch(0.72 0.11 300);
+}
+
+/* ── Tailwind 主题令牌 ─────────────────────────────────────── */
+@theme {
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display: "Space Grotesk", "Inter", -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+
+  /* 图纸工具感：锐利小圆角 */
+  --radius-sm: 0;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 蓝图以墨线分层，阴影仅作轻微提示 */
+  --shadow-xs: 0 1px 2px 0 rgb(16 52 95 / 0.06);
+  --shadow-card: 0 1px 2px 0 rgb(16 52 95 / 0.05);
+  --shadow-elevated: 0 2px 8px -2px rgb(16 52 95 / 0.08);
+  --shadow-popover: 0 8px 24px -8px rgb(16 52 95 / 0.18), 0 0 0 1px var(--color-border);
+  --shadow-input: 0 0 0 3px oklch(0.5 0.13 255 / 0.12);
+}
+
+html.dark {
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-elevated: 0 2px 8px -2px rgb(0 0 0 / 0.4);
+  --shadow-popover: 0 8px 24px -8px rgb(0 0 0 / 0.5), 0 0 0 1px var(--color-border);
+  --shadow-input: 0 0 0 3px oklch(0.72 0.12 240 / 0.15);
+}
+
+/* 颜色工具类映射 */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+
+  --color-surface-primary: color-mix(in oklab, var(--primary) 8%, transparent);
+  --color-surface-accent: color-mix(in oklab, var(--primary) 8%, transparent);
+  --color-surface-success: color-mix(in oklab, var(--success) 8%, transparent);
+  --color-surface-warning: color-mix(in oklab, var(--warning) 8%, transparent);
+
+  --color-method-get: var(--method-get);
+  --color-method-post: var(--method-post);
+  --color-method-put: var(--method-put);
+  --color-method-delete: var(--method-delete);
+  --color-method-patch: var(--method-patch);
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    margin: 0;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* 全站图纸网格（极淡） */
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--color-primary) 4%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--color-primary) 4%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 16px 16px;
+  }
+
+  a {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  /* 等宽数字对齐 */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 工程标注：mono 大写 + 宽字距 */
+  .annotation {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* 流式大标题：display 字体 + clamp 流体字号 */
+  .text-display {
+    font-family: var(--font-display);
+    font-size: clamp(1.4rem, 1rem + 1.4vw, 1.9rem);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  /* 图纸网格纹理（hero 区，24px） */
+  .bg-blueprint-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--color-primary) 5%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--color-primary) 5%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 24px 24px;
+    background-position: center;
+  }
+
+  /* 全局细滚动条（蓝墨色） */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--color-primary) 25%, transparent);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--color-primary) 40%, transparent);
+  }
+
+  .spaces-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent) transparent;
+  }
+
+  .spaces-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .spaces-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .spaces-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent);
+    border-radius: 9999px;
+    border: none;
+    background-clip: initial;
+  }
+
+  .spaces-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--color-muted-foreground) 55%, transparent);
+  }
+}
+
+/* 尊重系统"减弱动效"偏好：关闭动画与过渡，避免眩晕（UX #9 Reduced Motion） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

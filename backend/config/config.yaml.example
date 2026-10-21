@@ -1,0 +1,164 @@
+# ============================================================================
+# TestAgents 后端配置模板
+# ----------------------------------------------------------------------------
+# 用法：复制为 config/config.yaml 后按需填写（config.yaml 已被 .gitignore 忽略）
+#
+#     cp config/config.yaml.example config/config.yaml
+#
+# 字段以 src/core/config.py 的 AppConfig 为唯一依据。⚠️ 字段名拼错不会报错，
+# Pydantic 会静默丢弃该键（历史坑：langsmith.project 写成 project，实际应为 space）。
+# 改完建议跑一次 python -c "from src.core.config import init_config; print(init_config())"
+# 检查是否被正确识别。
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# LLM 配置
+# ---------------------------------------------------------------------------
+llm:
+  # 默认模型名，必须对应下方 model_list 中的某个 model_name
+  #
+  # - 填具体模型名（如 glm-4-flash）：固定走该模型
+  # - 填 smart-router：按任务复杂度自动分流到不同模型
+  #
+  # ⚠️ smart-router 只在 **异步** 调用路径上生效。
+  #    Router.acompletion 会走 async_pre_routing_hook，同步 Router.completion 不走，
+  #    此时会把 auto_router/complexity_router 当成普通 provider，报
+  #    Unmapped LLM provider。本项目的对话与工具调用均为异步，故默认值安全。
+  default_model: smart-router
+
+# ---------------------------------------------------------------------------
+# LiteLLM 模型池
+# ---------------------------------------------------------------------------
+# model_name 是项目内部引用名；litellm_params.model 是 "provider/真实模型名"。
+# 不同厂商只要 litellm 支持即可，api_key 按需填写（也可用 api_base 指向自建网关）。
+model_list:
+  - model_name: glm-4-flash
+    litellm_params:
+      model: zai/glm-4-flash
+      api_key: ""
+
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: ""
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_key: ""
+
+  # 复杂度路由：按 SIMPLE / MEDIUM / COMPLEX / REASONING 四档自动选择上面的模型。
+  # 成本和能力的平衡点在此处调：常用档位放便宜模型，REASONING 档留给贵模型。
+  - model_name: smart-router
+    litellm_params:
+      model: auto_router/complexity_router
+      complexity_router_config:
+        tiers:
+          SIMPLE: glm-4-flash
+          MEDIUM: deepseek-v4-flash
+          COMPLEX: deepseek-v4-pro      # 可降级为 deepseek-v4-flash 以节省成本
+          REASONING: deepseek-v4-pro
+      complexity_router_default_model: glm-4-flash
+
+# ---------------------------------------------------------------------------
+# 数据库
+# ---------------------------------------------------------------------------
+database:
+  # SQLite 相对路径会相对 **进程工作目录** 解析，不是相对 backend 根。
+  # 为免不同启动方式（uvicorn / pytest / IDE）各建一个库，建议写绝对路径。
+  url: "sqlite:///db/TestAgents.db"
+  echo: false          # true 会打印每条 SQL，排障用，平时关掉
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30     # 取连接超时（秒）
+  pool_recycle: 3600   # 连接回收（秒）
+
+# ---------------------------------------------------------------------------
+# ChromaDB 向量库（知识库语义检索）
+# ---------------------------------------------------------------------------
+# 开关组合规则（缺一不可，否则知识库静默降级为 SQLite 词法匹配）：
+#     chroma.enabled = true
+#     embedding.enabled = true
+#     embedding.model 非空
+# 三者同时满足才会实例化向量检索。判定逻辑见 src/memory/__init__.py 的 _build()。
+chroma:
+  enabled: false       # 总开关；关闭时完全不加载 chromadb 依赖
+  host: "localhost"
+  port: 8000
+  auth_provider: "chromadb.auth.token_authn.TokenAuthClientProvider"
+  auth_credentials: ""                                    # Token 认证填这里
+  auth_token_transport_header: "Authorization"            # 可选 Authorization / X-Chroma-Token
+  tenant: "default_tenant"
+  database: "default_database"
+  default_collection: "default"
+
+# ---------------------------------------------------------------------------
+# 向量化模型（embedding）
+# ---------------------------------------------------------------------------
+# model 用 litellm 格式，如 zai/embedding-3、openai/text-embedding-3-small。
+# dimension 需与所选模型的真实维度一致，否则建集合时校验失败。
+embedding:
+  enabled: false
+  model: ""
+  api_key: ""
+  base_url: ""         # 自建 / 代理网关时填，留空走厂商默认端点
+  dimension: 1024
+
+# ---------------------------------------------------------------------------
+# 空间工作目录
+# ---------------------------------------------------------------------------
+# 每个测试空间在 root 下拥有独立子目录（AGENTS.md / memory / docs / testcases /
+# artifacts），Agent 的文件工具被限制在该目录内，越界会被拒绝。
+# 相对路径以 backend 根为基准（由 resolve_backend_path 解析，与启动 cwd 无关）。
+workspace:
+  root: workspaces
+  max_file_size_kb: 256    # 单次 read_file 上限，超出截断
+  tree_max_depth: 3        # GET /spaces/{id}/tree 默认深度
+  tree_max_entries: 500    # 单层条目上限，防止大目录把响应撑爆
+
+# ---------------------------------------------------------------------------
+# Skills
+# ---------------------------------------------------------------------------
+# builtin_root 下每个子目录是一个 skill（含 SKILL.md），随代码分发；
+# 空间级 skill 存在 workspace/<space>/.skills/ 下，同名时空间优先覆盖内置。
+skill:
+  builtin_root: skills
+  max_skill_chars: 8000    # 单个 skill 注入 system prompt 的正文上限，防止挤掉记忆
+
+# ---------------------------------------------------------------------------
+# 日志
+# ---------------------------------------------------------------------------
+logging:
+  level: INFO          # DEBUG / INFO / WARNING / ERROR
+  format: console      # console（彩色开发输出）/ json（生产环境结构化）
+
+# ---------------------------------------------------------------------------
+# LangSmith 可观测性（可选）
+# ---------------------------------------------------------------------------
+# 启用后会在进程启动时设置 LANGSMITH_* 环境变量，由 LangChain 自动上报追踪。
+# ⚠️ 空间名字段是 space，不是 project。
+langsmith:
+  enabled: false
+  api_key: ""
+  space: TestAgents
+  endpoint: https://api.smith.langchain.com
+
+# ---------------------------------------------------------------------------
+# 自定义模型费率（美元 / token，可选）
+# ---------------------------------------------------------------------------
+# litellm 的定价表不覆盖所有厂商（例如 zai/* 就没有收录）。这类模型的调用
+# 在 llm_log 里 cost_usd 会是 NULL，表示「成本未知」而不是「免费」。
+# 在此补上费率后即可正常计价，`GET /api/v1/usage/stats` 才会给出金额。
+#
+# ⚠️ 不要写进 model_list 的 litellm_params：那些键会被当作 provider 参数透传，
+#    可能导致调用失败。费率必须放在这一段。
+#
+# 示例（按厂商官网价格填写，单位是「美元 / 单个 token」，不是每百万 token）：
+#
+# pricing:
+#   - model: zai/glm-4-flash          # 与 model_list 里的 litellm_params.model 一致
+#     input_cost_per_token: 0.0000001
+#     output_cost_per_token: 0.0000002
+#
+# 不填时：已知定价的模型照常计算（如 deepseek/*），其余记为 NULL。
+pricing: []

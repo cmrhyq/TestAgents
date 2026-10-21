@@ -13,52 +13,69 @@ skinparam diamond {
   BorderColor #856404
 }
 
-title LLMTestAgent System Flowchart
+title TestAgents - Chat Runtime Flowchart (v1.0 ReAct)
 
 start
+:POST /api/v1/chat/stream
+(instruction + space_id? + conversation_id?
+ + mode + skill_names + environment_id?);
 
-:User Input\n(Natural Language Instruction + OpenAPI Doc);
-
-:Intent Recognition\n(LLM Classification);
-
-if (Intent?) then (parse_openapi)
-
-  :Parse OpenAPI Document\n(JSON / YAML);
-
-  :Feature Extraction\n(LLM Analysis);
-
-  :Persist to Database\n(Project + Endpoints);
-
-else (run_test)
-
-  :Parse Input\n(Extract test mode & scope);
-
-  :Select Endpoints Agent\n(LLM + Tool Calling Loop);
-
-  partition "Agent Tool Loop" {
-    :search_project(name);
-    :get_project_endpoints(project_id);
-    :Parse Selected Endpoints;
-  }
-
-  if (Test Mode?) then (single)
-    :Generate Single Cases\n(Per-endpoint LLM generation);
-  else (flow)
-    :Generate Flow Cases\n(Cross-endpoint orchestration);
+partition "① 会话准备（无 LLM）" {
+  if (conversation_id?) then (有)
+    :校验会话存在;
+  else (无)
+    :新建 conversation
+    (mode / skill_names / environment_id);
   endif
+  :落库 user 消息;
+  :响应头 X-Conversation-Id;
+}
 
-  partition "Test Execution" {
-    :CacheResolver.inject();
-    :HTTP Request\n(with retry);
-    :AssertionEngine.evaluate_all();
-    :CacheResolver.extract();
-    :Write TestResult to DB;
-  }
+partition "② 上下文组装（无 LLM）" {
+  :加载空间快照
+  (name / base_url / endpoint 计数) + AGENTS.md;
+  :加载历史消息（最近 N 轮）;
+  :按指令关键词 recall 跨会话记忆;
+  :按选择加载 Skill 正文;
+  note right
+    build_system_prompt 固定顺序：
+    人设 → 模式指令 → 空间上下文
+    → 记忆 → Skill → 工具规则
+    上限 12k 字符，超限先砍 skill 再砍记忆
+  end note
+  :ModePolicy = 工具白名单 + 最大步数;
+  :build_tools 按白名单装配工具;
+}
 
-  :Generate HTML Report;
+partition "③ ReAct 循环（有 LLM）" {
+  :yield start(conversation_id, mode, tools);
+  repeat
+    :model.astream(messages);
+    :分片合并 AIMessageChunk;
+    while (有文本增量?) is (是)
+      :yield text_delta;
+    endwhile
+    if (tool_calls?) then (有)
+      while (逐个工具调用)
+        :yield tool_call(id, name, args);
+        :白名单二次校验 + 沙箱内执行;
+        :yield tool_result(ok, content);
+      endwhile
+      :messages += AIMessage + ToolMessage;
+    else (无)
+      :yield final(answer);
+      stop
+    endif
+  repeat while (step < policy.max_steps) is (是)
+  :yield error("超过最大工具调用轮次");
+}
 
-endif
-
+partition "④ 渲染落库（无 LLM）" {
+  :render(event, seq) →
+  id: / event: / data: 三行帧;
+  :save_answer 落库 assistant 全文;
+  :load_history 排除末尾 user 消息
+  避免下一轮重复;
+}
 stop
-
 @enduml

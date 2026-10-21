@@ -3,6 +3,25 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-06-15
+
+### Added
+
+- 新增前端项目（React 19 + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui）
+- 新增前端 CI 工作流（`.github/workflows/frontend.yml`）
+- 新增前端 pre-commit hooks（ESLint、Prettier、TypeScript 类型检查）
+- 新增前端文档（`frontend/README.md`）
+
+### Changed
+
+- 项目重构为 Monorepo 结构：`backend/` + `frontend/`
+- 后端代码全部迁移至 `backend/` 目录
+- 移除 CLI 入口（`main.py`），仅保留 FastAPI API 服务
+- CI 工作流拆分为 `backend.yml` + `frontend.yml`，按路径触发
+- `.pre-commit-config.yaml` 更新为统管前后端 lint
+- 中英文 README 更新为 Monorepo 结构说明
+- CORS 配置改为通过环境变量控制
+
 ## [1.0.0] - 2026-05-28
 
 ### Added

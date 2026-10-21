@@ -1,0 +1,193 @@
+/* Markdown 渲染子系统样式 — 与 index.css design tokens 对齐 */
+
+.markdown-body {
+  @apply prose prose-neutral max-w-none text-sm leading-relaxed text-foreground;
+  --tw-prose-body: var(--color-foreground);
+  --tw-prose-headings: var(--color-foreground);
+  --tw-prose-bold: var(--color-foreground);
+  --tw-prose-code: var(--color-foreground);
+  --tw-prose-pre-code: var(--color-foreground);
+  --tw-prose-pre-bg: var(--color-background);
+  --tw-prose-quotes: var(--color-foreground);
+}
+
+.markdown-body :where(a) {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.markdown-body :where(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :where(h1, h2, h3, h4, h5, h6, p, li, strong, em) {
+  color: var(--color-foreground);
+}
+
+.markdown-body :where(h1) {
+  @apply mt-6 mb-4 text-2xl font-semibold;
+}
+
+.markdown-body :where(h2) {
+  @apply mt-5 mb-3 text-xl font-semibold;
+}
+
+.markdown-body :where(h3) {
+  @apply mt-4 mb-2 text-lg font-semibold;
+}
+
+.markdown-body :where(p) {
+  @apply my-3;
+}
+
+.markdown-body :where(ul, ol) {
+  @apply my-3 pl-6;
+}
+
+.markdown-body :where(li) {
+  @apply my-1;
+}
+
+.markdown-body :where(blockquote) {
+  border-left-color: var(--color-border-subtle);
+  color: var(--color-foreground);
+  background: color-mix(in srgb, var(--color-secondary) 50%, var(--color-background));
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+.markdown-body :where(hr) {
+  border-color: var(--color-border-subtle);
+}
+
+.markdown-body :where(th, td) {
+  border-color: var(--color-border-subtle);
+  color: var(--color-foreground);
+}
+
+.markdown-body :where(th) {
+  background: var(--color-secondary);
+}
+
+.markdown-inline-code {
+  @apply rounded px-1 py-0.5 font-mono text-xs;
+  color: var(--color-foreground);
+  background: var(--color-secondary);
+  border: 0.5px solid var(--color-border-subtle);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+.markdown-code-block {
+  @apply my-3 overflow-x-auto rounded-[2px] p-3 text-xs leading-relaxed;
+  font-family: var(--font-mono);
+  color: var(--color-foreground);
+  background: var(--color-background);
+  border: 0.5px solid var(--color-border-subtle);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  white-space: pre;
+  tab-size: 4;
+}
+
+.markdown-code-block code {
+  @apply block font-mono text-xs leading-relaxed;
+  color: var(--color-foreground);
+  background: transparent;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.markdown-code-block--highlighted {
+  @apply p-0;
+  color: var(--color-foreground);
+  background: var(--color-background);
+}
+
+.markdown-code-block--highlighted :where(pre) {
+  @apply m-0 overflow-x-auto rounded-md p-3;
+  color: var(--color-foreground) !important;
+  background: var(--color-background) !important;
+}
+
+.markdown-code-block--highlighted :where(.shiki) {
+  background: var(--color-background) !important;
+}
+
+/* Shiki 双主题：亮色由内联 style 提供；暗色夜图切换为 --shiki-dark 变量 */
+html.dark .markdown-code-block--highlighted .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+html.dark .markdown-code-block--highlighted .shiki {
+  background-color: var(--color-background) !important;
+}
+
+.markdown-mermaid-block {
+  @apply my-3 overflow-x-auto rounded-md p-4;
+  color: var(--color-foreground);
+  background: var(--color-background);
+  border: 0.5px solid var(--color-border-subtle);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+/* Mermaid SVG 浅色主题对比度增强 */
+.markdown-mermaid-block :where(svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-mermaid-block :where(.node rect),
+.markdown-mermaid-block :where(.node polygon),
+.markdown-mermaid-block :where(.node circle),
+.markdown-mermaid-block :where(.cluster rect) {
+  stroke: var(--color-foreground) !important;
+}
+
+.markdown-mermaid-block :where(.edgePath path),
+.markdown-mermaid-block :where(line),
+.markdown-mermaid-block :where(path.flowchart-link) {
+  stroke: var(--color-foreground) !important;
+}
+
+.markdown-mermaid-block :where(.nodeLabel),
+.markdown-mermaid-block :where(.edgeLabel),
+.markdown-mermaid-block :where(text),
+.markdown-mermaid-block :where(tspan),
+.markdown-mermaid-block :where(p) {
+  fill: var(--color-foreground) !important;
+  color: var(--color-foreground) !important;
+}
+
+.markdown-table-wrapper {
+  @apply my-3 overflow-x-auto;
+}
+
+.markdown-table-wrapper :where(table) {
+  @apply w-full border-collapse text-sm;
+  border: 0.5px solid var(--color-border-subtle);
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.06),
+    0 1px 2px -1px rgb(0 0 0 / 0.04);
+  color: var(--color-foreground);
+}
+
+.markdown-table-wrapper :where(thead th) {
+  background: var(--color-secondary);
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.markdown-table-wrapper :where(th, td) {
+  border: 0.5px solid var(--color-border-subtle);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  color: var(--color-foreground);
+}
+
+.markdown-table-wrapper :where(tr:nth-child(even) td) {
+  background: color-mix(in srgb, var(--color-secondary) 40%, transparent);
+}
+
+.markdown-streaming-cursor {
+  /* 光标样式由 Tailwind utility 与 index 变量共同定义 */
+}

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <style>
+    .bg { fill: #1a1f2e; }
+    .ring { stroke: #2990f4; }
+    .bracket { stroke: #2990f4; }
+    .check { stroke: #4db810; }
+    @media (prefers-color-scheme: light) {
+      .bg { fill: #f0f4f8; }
+      .ring { stroke: #2563eb; }
+      .bracket { stroke: #2563eb; }
+      .check { stroke: #16a34a; }
+    }
+  </style>
+  <!-- Background circle -->
+  <circle cx="20" cy="20" r="18" class="bg"/>
+  <circle cx="20" cy="20" r="18" class="ring" fill="none" stroke-width="2"/>
+  <!-- Left bracket < (API) -->
+  <path d="M14 14L9 20L14 26" class="bracket" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right bracket > (API) -->
+  <path d="M26 14L31 20L26 26" class="bracket" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Center checkmark (Test passed) -->
+  <path d="M16 20L19 23L24 17" class="check" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

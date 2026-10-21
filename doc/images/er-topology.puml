@@ -8,10 +8,10 @@ skinparam component {
   BorderColor #495057
 }
 
-title LLMTestAgent - Table Relationship Topology
+title TestAgents - Table Relationship Topology
 
 package "Core" {
-  [project] as P
+  [space] as P
   [test_run] as TR
 }
 
@@ -27,9 +27,24 @@ package "Results" {
   [report] as RPT
 }
 
+package "Chat" {
+  [conversation] as CONV
+  [message] as MSG
+}
+
+package "Memory & Knowledge" {
+  [space_memory] as MEM
+  [knowledge_document] as DOC
+  [knowledge_chunk] as CHK
+}
+
+package "Skills" {
+  [skill] as SK
+}
+
 P -down-> ENV : "1:N CASCADE"
 P -down-> EP : "1:N CASCADE"
-P -right-> TR : "1:N SET NULL"
+P -right-> TR : "1:N CASCADE"
 ENV -right-> TR : "1:N SET NULL"
 TR -down-> TC : "1:N CASCADE"
 TR -down-> TRES : "1:N CASCADE"
@@ -37,5 +52,14 @@ TR -down-> TS : "1:1 CASCADE"
 TR -down-> RPT : "1:N CASCADE"
 EP -down-> TC : "1:N SET NULL"
 TC -right-> TRES : "1:N CASCADE"
+P -down-> CONV : "1:N CASCADE"
+P -down-> MEM : "1:N CASCADE"
+P -down-> DOC : "1:N CASCADE"
+DOC -right-> CHK : "1:N CASCADE"
+P --> CHK : "1:N CASCADE 冗余"
+CONV -right-> MSG : "1:N CASCADE"
+CONV --> MEM : "1:N SET NULL"
+ENV --> CONV : "1:N SET NULL"
+SK .up.> P : "space_id 逻辑引用（无 FK）"
 
 @enduml

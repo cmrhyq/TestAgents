@@ -5,16 +5,19 @@
 </p>
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)
-![LangGraph](https://img.shields.io/badge/LangGraph-0.3+-orange.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)
+![React](https://img.shields.io/badge/React-19-61DAFB.svg)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg)
+![ReAct](https://img.shields.io/badge/Agent-ReAct%20runtime-orange.svg)
 ![SQLite](https://img.shields.io/badge/SQLite-3-lightgrey.svg)
-![ChromaDB](https://img.shields.io/badge/ChromaDB-vector--db-purple.svg)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-optional-purple.svg)
+![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)
 
 **LLM-Driven API Automation Testing Agent**
 
-Natural language powered, orchestrating the full pipeline: Parse → Generate → Execute → Report.
+Talk to your APIs in natural language. The agent picks its own tools — under a hard permission boundary.
 
-[Quick Start](#quick-start) · [Configuration](#configuration) · [Usage](#usage) · [Workflow](#workflow-details)
+[Quick Start](#quick-start) · [Configuration](#configuration) · [Agent Runtime](#agent-runtime) · [Memory](#memory-system) · [Development](#development)
 
 [中文](README_zh.md) | English
 
@@ -24,35 +27,65 @@ Natural language powered, orchestrating the full pipeline: Parse → Generate �
 
 ## Features
 
-- Multi-model support: `OpenAI` / `AWS Bedrock` / `Zhipu GLM` / `Tongyi Qwen`
-- Stateful workflow orchestration based on LangGraph with LLM-driven intent recognition and routing
-- OpenAPI 3.x document parsing (JSON / YAML) with automatic endpoint extraction and persistence
-- LLM-driven test case generation (single-endpoint mode + flow mode)
-- Test execution with dependency topological sort, concurrent execution, and dynamic parameter injection (`{{dep:...}}`)
-- Built-in assertion engine supporting JSONPath expressions
-- HTML visual reports with collapsible endpoint groups and expandable case details
-- Full pipeline data persistence (SQLite) for test history tracing and statistical analysis
-- FastAPI RESTful API service for web-based triggering and management
+- **Space-scoped sandbox** — every test space owns a real directory (`AGENTS.md`, `docs/`, `testcases/`, `artifacts/`); file tools can never escape it
+- **Mode = tool whitelist** — `agent` / `ask` / `plan` are enforced on the execution path, not suggested in a prompt. In `ask` mode the model literally has no `write_file` to call
+- **Streaming agent runtime** — hand-written ReAct loop with a 6-event SSE protocol (`start` / `text_delta` / `tool_call` / `tool_result` / `final` / `error`); every tool call is visible in the UI
+- **Skills** — `SKILL.md` folder convention, builtin + per-space discovery, zip import with zip-slip protection, each skill narrows the tool set further
+- **Three-layer memory** — in-request context, cross-session memory per space (DB as source of truth, mirrored to `memory/MEMORY.md`), and a document knowledge base with chunking + optional vector search
+- **OpenAPI 3.x parsing** (JSON / YAML) with automatic endpoint extraction and persistence
+- **Assertion engine** — JSONPath-based rules (`==`, `contains`, `matches`, `status_code`, `response_time`, …) exposed to the agent as tools
+- **Production guard** — environments flagged `is_production` reject write methods and out-of-domain URLs
+- **Graceful degradation** — ChromaDB and embeddings are off by default; the knowledge base falls back to lexical search instead of failing
+- Full pipeline persistence in SQLite (execution/report generation is currently read-only — see [Test Reports](#test-reports))
+
+---
+
+## Project Structure (Monorepo)
+
+```
+LLMTestAgent/
+├── backend/          # Python backend (FastAPI + ReAct agent runtime)
+│   ├── src/          # Source code
+│   ├── skills/       # Builtin SKILL.md folders
+│   ├── workspaces/   # Per-space sandbox directories (gitignored)
+│   ├── tests/        # Unit / API tests
+│   ├── pyproject.toml
+│   └── ...
+├── frontend/         # React frontend (Vite + Tailwind v4 + shadcn/ui)
+│   ├── src/
+│   ├── package.json
+│   └── ...
+├── doc/              # Design documentation
+└── .github/          # CI workflows (backend.yml + frontend.yml)
+```
 
 ---
 
 ## Architecture
 
+The runtime is **four stages**, and only the third one touches an LLM:
+
 ```mermaid
-graph TD
-    Start[Start] --> ParseInput[Intent Parsing]
-    ParseInput -->|run_test| SelectEndpoints[Endpoint Selection]
-    ParseInput -->|parse_openapi| ParseOpenAPI[Parse OpenAPI Doc]
-    SelectEndpoints --> RouteMode{Test Mode}
-    RouteMode -->|single| GenSingle[Single Endpoint Case Gen]
-    RouteMode -->|flow| GenFlow[Flow Case Gen]
-    GenSingle --> ExecSingle[Single Endpoint Execution]
-    GenFlow --> ExecFlow[Flow Execution]
-    ExecSingle --> Report[Generate Report]
-    ExecFlow --> Report
-    Report --> EndNode[End]
-    ParseOpenAPI --> EndNode
+flowchart LR
+    client["Browser / curl"] -->|"POST /api/v1/chat/stream"| api["FastAPI"]
+    api --> prep["① conversation<br/>+ context assembly<br/>(no LLM)"]
+    prep --> runner["② ReAct loop<br/>(LLM + tools)"]
+    runner -->|"SSE events"| client
+    runner -->|"save answer"| db[(SQLite)]
+    runner -.->|"file tools"| ws[("workspaces/&lt;space&gt;/")]
+    runner -.->|"send_request"| target[API under test]
 ```
+
+| Stage | Component | LLM |
+|---|---|:--:|
+| ① Conversation | `ChatStreamService.ensure_conversation` — reuse or create conversation, persist user message | ❌ |
+| ② Context | `prepare()` + `agent/context.py` — snapshots space, history, memories, skills, tool set, `ModePolicy` | ❌ |
+| ③ Reasoning | `agent/runner.py` — ReAct loop, stream events | ✅ |
+| ④ Persist | `api/v1/chat.py` — render SSE frames, save answer | ❌ |
+
+Because stages ① ② ④ are deterministic, "which tools were available this turn" and "why did this message not reach the model" are answerable offline, without trusting the model's self-report.
+
+See [Architecture.md](doc/design/Architecture.md) and [SystemFlowchart.md](doc/design/SystemFlowchart.md) for the full picture.
 
 ---
 
@@ -64,53 +97,58 @@ graph TD
 git clone https://github.com/cmrhyq/LLMTestAgent.git
 cd LLMTestAgent
 
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
+# Backend
+cd backend
+uv sync --extra dev
+cd ..
 
-pip install -e .
+# Frontend
+cd frontend
+npm install
+cd ..
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure the Model
+
+All configuration lives in `backend/config/config.yaml` — there is **no `.env`** and no `${ENV}` interpolation.
+Fill in your provider credentials directly in `model_list`:
+
+```yaml
+llm:
+  default_model: smart-router      # complexity-based auto routing
+
+model_list:
+  - model_name: glm-4-flash
+    litellm_params:
+      model: zai/glm-4-flash
+      api_key: your-api-key
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_key: your-api-key
+```
+
+> `config.yaml` holds plaintext API keys — make sure it stays out of version control.
+
+### 3. Start Services
 
 ```bash
-cp .env.example .env
+# Backend
+cd backend
+uv run python app.py
+# or
+uv run uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+
+# Frontend (another terminal)
+cd frontend
+npm run dev
 ```
 
-Edit `.env` and fill in the API keys for your LLM provider:
+- API docs: http://localhost:8000/docs
+- UI: http://localhost:5173
 
-```dotenv
-# AWS Bedrock (recommended)
-AWS_ACCESS_KEY_ID=your-access-key-id
-AWS_SECRET_ACCESS_KEY=your-secret-access-key
-AWS_SESSION_TOKEN=your-session-token
-
-# OpenAI
-OPENAI_API_KEY=your-openai-api-key
-
-# Zhipu AI
-ZHIPU_API_KEY=your-zhipu-api-key
-
-# Tongyi Qwen
-DASHSCOPE_API_KEY=your-dashscope-api-key
-
-# ChromaDB
-CHROMA_AUTH_TOKEN=your-chroma-auth-token
-```
-
-### 3. Run
-
-```bash
-# Parse an OpenAPI document and store it in the database
-python main.py "Parse this API document and store it" --api-doc input/httpbin_service.json
-
-# Execute tests on stored endpoints
-python main.py "Run single-endpoint tests on all endpoints" --api-doc input/httpbin_service.json
-```
-
-> On first run, the database (`db/LLMTest.db`) and all table schemas are created automatically — no manual initialization required.
+> On first run the database (`backend/db/TestAgents.db`), all 15 tables, and the migration are created automatically.
+> Space directories under `backend/workspaces/` are created the first time you create a space.
 
 ---
 
@@ -118,396 +156,321 @@ python main.py "Run single-endpoint tests on all endpoints" --api-doc input/http
 
 ```text
 LLMTestAgent/
-├── main.py                          # CLI entry point
-├── app.py                           # FastAPI web service entry
-├── config/
-│   └── config.yaml                  # Application config
-├── db/
-│   └── LLMTest.db                   # SQLite database (auto-created)
-├── input/                           # OpenAPI document input directory
-├── output/                          # Test report output directory
-│   └── <timestamp>/reports/         # HTML test reports
-├── src/
-│   ├── workflow.py                  # LangGraph workflow orchestration
-│   ├── api/                         # FastAPI route layer
-│   ├── core/
-│   │   ├── config.py                # Configuration loading
-│   │   ├── chroma/                  # ChromaDB vector database management
-│   │   ├── database/                # Database connection management
-│   │   ├── llm/                     # Unified LLM client
-│   │   └── logging.py              # Structured logging
-│   ├── data/
-│   │   ├── models/                  # SQLAlchemy ORM models
-│   │   ├── repositories/            # Data repository layer
-│   │   ├── schemas/                 # Pydantic data validation
-│   │   ├── services/                # Business logic services
-│   │   └── migration/               # Database migrations
-│   ├── graph/
-│   │   ├── state.py                 # Workflow state definition
-│   │   ├── route.py                 # Conditional routing functions
-│   │   ├── nodes/                   # Workflow node implementations
-│   │   ├── executor/                # Test execution engine
-│   │   └── tools/                   # LangGraph Agent tools
-│   ├── prompts/                     # Prompt templates (YAML)
-│   └── utils/                       # Utilities (HTTP, parser, ID generation)
-├── pyproject.toml                   # Project metadata and tool config
-├── .env.example                     # Environment variable template
-└── conftest.py                      # Pytest global fixtures
+├── backend/
+│   ├── app.py                           # FastAPI entry (lifespan: config → db → migration)
+│   ├── config/config.yaml               # Application config (only source of config)
+│   ├── db/TestAgents.db                 # SQLite database (auto-created)
+│   ├── skills/                          # Builtin skills (SKILL.md folders)
+│   ├── workspaces/                      # Per-space sandbox dirs (auto-created, gitignored)
+│   └── src/
+│       ├── agent/                       # Agent runtime
+│       │   ├── modes.py                 # Mode → tool whitelist (the permission boundary)
+│       │   ├── context.py               # system prompt assembly (≤12k chars)
+│       │   ├── events.py                # SSE event protocol
+│       │   ├── runner.py                # Hand-written ReAct loop
+│       │   └── tools/                   # fs / http / db / memory / knowledge / skill / executor tools
+│       ├── workspace/                   # Space directory + path sandbox
+│       ├── skill/                       # SKILL.md parsing, discovery, zip import, enable flags
+│       ├── memory/                      # Long-term memory + knowledge base
+│       ├── api/                         # FastAPI route layer
+│       ├── core/                        # config, database, llm gateway, chroma, cache, logging
+│       ├── data/                        # models / schemas / repositories / services / migration
+│       └── utils/                       # snowflake IDs, HTTP helpers, OpenAPI parser
+├── frontend/src/
+│   ├── pages/                           # dashboard / spaces(+7 tabs) / chat / skills / run / report
+│   ├── components/chat/                 # mode & skill selectors, tool-call cards, bubbles
+│   ├── hooks/                           # TanStack Query hooks + use-chat (stream orchestration)
+│   └── lib/                             # api client, SSE parser, typed domain models
+└── doc/                                 # Design docs
 ```
 
 ---
 
-## Configuration
+## Agent Runtime
 
-Config file: `config/config.yaml`, supports `${ENV_VAR}` syntax for referencing environment variables.
+### Modes
 
-### Full Configuration Example
+| Mode | Meaning | Tools | Max steps |
+|---|---|:--:|:--:|
+| `agent` (default) | Pick tools and actually test | 17 | 12 |
+| `ask` | Answer questions only | 12 (read-only) | 12 |
+| `plan` | Produce a plan, execute nothing | 12 (read-only) | 8 |
 
-```yaml
-llm:
-  provider: bedrock                    # openai / bedrock / zhipu / qwen
-  bedrock:
-    region: us-east-1
-    model_id: us.anthropic.claude-opus-4-5-20251101-v1:0
-    max_tokens: 4096
-    access_key: ${AWS_ACCESS_KEY_ID}
-    secret_key: ${AWS_SECRET_ACCESS_KEY}
-    session_token: ${AWS_SESSION_TOKEN}
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    model: gpt-4
-  zhipu:
-    api_key: ${ZHIPU_API_KEY}
-  qwen:
-    api_key: ${DASHSCOPE_API_KEY}
+`ask` / `plan` never receive `send_request`, `write_file`, `delete_file`, `remember`, or `forget`.
+Selecting a skill can only **narrow** this set further, never widen it.
 
-database:
-  url: "sqlite:///db/LLMTest.db"
-  echo: false
-  pool_size: 5
-  pool_recycle: 3600
+### Tools
 
-chroma:
-  host: "your-chromadb-host"
-  port: 8000
-  auth_provider: "chromadb.auth.token_authn.TokenAuthClientProvider"
-  auth_credentials: ${CHROMA_AUTH_TOKEN}
-  auth_token_transport_header: "Authorization"
-  tenant: "default_tenant"
-  database: "default_database"
-  default_collection: "default"
+| Group | Tools | Guard |
+|---|---|---|
+| Files | `read_file`, `write_file`, `list_directory`, `delete_file` | Resolved path must stay inside the space root; `AGENTS.md` and `memory/MEMORY.md` are protected |
+| HTTP | `list_environments`, `send_request` | Write methods rejected on production environments; URL must belong to that environment |
+| Data | `get_space_endpoints`, `get_endpoint_detail_by_id`, `search_space` | Always filtered by `space_id` |
+| Memory | `recall`, `remember`, `forget` | Writes are mirrored to `memory/MEMORY.md` |
+| Usage | `/api/v1/usage` | `GET /stats` — token and cost aggregated by space / conversation / window |
+| Knowledge | `knowledge_search` | Falls back to lexical search when vectors are unavailable |
+| Skills | `list_skills`, `read_skill` | Read-only |
+| Assertions | `evaluate_assertions`, `extract_jsonpath` | Pure functions |
 
-execution:
-  connect_timeout: 5
-  read_timeout: 30
-  total_timeout: 60
-  retry:
-    max_retries: 2
-    retry_interval: 1
-    retry_on_status: [500, 502, 503, 504]
-  concurrency:
-    enabled: true
-    max_workers: 5
-  dependency_failure: skip             # skip / abort
+### SSE events
 
-logging:
-  level: INFO
-  format: console                      # console / json
+| Event | Payload |
+|---|---|
+| `start` | `conversation_id`, `space_id`, `mode`, `tools` |
+| `text_delta` | `content` |
+| `tool_call` | `id`, `name`, `args` |
+| `tool_result` | `id`, `name`, `ok`, `content`, `duration_ms` |
+| `final` | `answer`, `usage` |
+| `error` | `message` |
 
-langsmith:
-  enabled: false                       # set to true to enable LangSmith tracing
-  api_key: ${LANGSMITH_API_KEY}
-  project: LLMTestAgent
-  endpoint: https://api.smith.langchain.com
+Tool failures do not break the stream — they come back as `ok=false` results so the model can correct itself.
+
+---
+
+## Memory System
+
+| Layer | Storage | Editable | Purpose |
+|---|---|:--:|---|
+| Context | Assembled per request | ❌ | What the model sees this turn |
+| Cross-session | `space_memory` table + `memory/MEMORY.md` mirror, isolated per space | ✅ | Conventions, past conclusions, known pitfalls |
+| Knowledge base | `knowledge_document` + `knowledge_chunk`, optional vectors | ✅ | Requirement docs, API specs |
+
+Memory recall uses keyword extraction plus SQL `LIKE` rather than vector search: entries are few and precise,
+and explainability matters more than recall here. The knowledge base is the layer that benefits from embeddings.
+
+```bash
+# Add a memory to a space
+curl -X POST http://localhost:8000/api/v1/spaces/<space_id>/memories \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Auth header", "content": "All endpoints need X-Token", "category": "fact"}'
+
+# Upload a document to the knowledge base
+curl -X POST http://localhost:8000/api/v1/spaces/<space_id>/documents \
+  -F "file=@requirements.docx"
 ```
+
+---
+
+## Skills
+
+```
+backend/skills/api-test-design/
+└── SKILL.md
+```
+
+```markdown
+---
+name: api-test-design
+description: Design API test scenario matrices
+allowed_tools: [get_space_endpoints, read_file]
+---
+
+Methodology injected into the system prompt…
+```
+
+Discovery is two-level: `backend/skills/` (builtin) and `<space>/.skills/` (space-scoped, overrides builtin by name).
+Import a zip via `POST /api/v1/skills/import` (≤20MB, path escape rejected).
 
 ---
 
 ## Usage
 
-### CLI Mode
-
-```bash
-python main.py "<natural language instruction>" [--api-doc <path>] [--config <path>]
-```
-
-| Argument | Short | Description | Required |
-|----------|-------|-------------|----------|
-| `instruction` | - | Natural language instruction | Yes |
-| `--api-doc` | `-a` | OpenAPI document path | No |
-| `--config` | `-c` | Config file path | No |
-
-```bash
-# Parse document
-python main.py "Parse this API document and store it" --api-doc input/httpbin_service.json
-
-# Single-endpoint testing
-python main.py "Run single-endpoint tests on all endpoints" --api-doc input/httpbin_service.json
-
-# Flow testing (with inter-endpoint dependencies)
-python main.py "Run flow tests" --api-doc input/panji.yaml
-```
-
-### Web API Mode (FastAPI)
-
-```bash
-python app.py
-# or
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Visit http://localhost:8000/docs for the Swagger documentation after startup.
+### API Modules
 
 | Module | Path Prefix | Function |
-|--------|-------------|----------|
-| Projects | `/api/v1/projects` | Project CRUD |
+|---|---|---|
+| Spaces | `/api/v1/spaces` | CRUD, workspace tree, `AGENTS.md`, memories, documents |
 | Endpoints | `/api/v1/endpoints` | Endpoint definition CRUD |
-| Environments | `/api/v1/environments` | Environment config CRUD |
-| Test Runs | `/api/v1/test-runs` | Execution history query |
-| Workflows | `/api/v1/workflows` | Parse docs, trigger tests |
+| Environments | `/api/v1/environments` | Environment CRUD (incl. `is_production`) |
+| Test Runs | `/api/v1/test/runs` | Execution history |
+| Reports | `/api/v1/reports` | Report list / detail / download |
+| Chat | `/api/v1/chat` | `POST /stream` — the single agent entry point (SSE) |
+| Conversations | `/api/v1/conversations` | Session list, messages, rename, delete |
+| Skills | `/api/v1/skills` | List / detail / zip import / enable |
+| Memory | `/api/v1/memories` | Update / delete an entry |
+| Knowledge | `/api/v1/documents` | Chunks / reindex / delete |
+| OpenAPI | `/api/v1/spaces/parse/openapi/{space_id}` · `/api/v1/workflows/upload/openapi` | Parse and persist a spec |
+
+### Example Requests
 
 ```bash
-# Upload and parse an OpenAPI document
-curl -X POST http://localhost:8000/api/v1/workflows/parse-openapi \
-  -F "file=@input/httpbin_service.json"
+# Parse an OpenAPI document into a space
+curl -X POST "http://localhost:8000/api/v1/spaces/<space_id>/parse/openapi" \
+  -F "file=@httpbin_service.json"
 
-# Trigger test execution
-curl -X POST http://localhost:8000/api/v1/workflows/run-test \
+# Ask the agent to test something (streaming)
+curl -N -X POST http://localhost:8000/api/v1/chat/stream \
   -H "Content-Type: application/json" \
-  -d '{"instruction": "Run single-endpoint tests on all endpoints"}'
+  -d '{"instruction": "Test the login endpoint with valid and invalid credentials",
+       "space_id": <space_id>,
+       "mode": "agent",
+       "skill_names": ["api-test-design"]}'
 ```
+
+The response carries an `X-Conversation-Id` header so clients can continue the same session.
 
 ---
 
 ## Test Reports
 
-After execution, HTML reports are output to `output/<timestamp>/reports/`.
-
-Reports use a two-level collapsible structure:
-- **Level 1**: Grouped by endpoint (collapsible)
-- **Level 2**: Expanded by test case, including request method, URL, headers, body, status code, response data, latency, and error messages
-
----
-
-## Workflow Details
-
-Built on [LangGraph](https://github.com/langchain-ai/langgraph) StateGraph.
-
-### Node Descriptions
-
-| Node | Function |
-|------|----------|
-| `start` | Validate input, initialize state |
-| `parse_input` | LLM intent recognition (`run_test` / `parse_openapi`) |
-| `select_endpoints_agent` | Agent + Tool loop, autonomously queries DB to select target endpoints |
-| `generate_single_cases` | LLM generates single-endpoint test cases |
-| `generate_flow_cases` | LLM generates flow test cases (with dependencies) |
-| `execute_single_tests` | HTTP execution + assertion validation |
-| `execute_flow_tests` | Sequential execution + context passing |
-| `generate_report` | Aggregate results, generate HTML report |
-| `parse_openapi_doc` | Parse OpenAPI document and persist |
-
-### Routing Logic
-
-- **Intent routing**: `parse_input` → LLM identifies instruction intent → routes to test flow or document parsing
-- **Mode routing**: Routes to corresponding branch based on test mode (`single` / `flow`)
-- **Step routing**: Each node controls flow via `current_step`; exceptions route to `error` node
+> **Status note**: the report *generation* pipeline (case generation → execution → HTML rendering) was removed
+> ahead of the v1.0 refactor. What remains is the read side: `GET /api/v1/reports`, `/{id}`, `/{id}/download`,
+> serving records already present in the `report` table. Rebuilding generation on top of the agent runtime is on the roadmap.
 
 ---
 
 ## Database
 
-Uses SQLite + SQLAlchemy ORM. Database and tables are created automatically on first run.
-
-### Core Tables
+SQLite + SQLAlchemy 2.0, snowflake IDs (non-autoincrement), created and migrated on first run.
 
 | Table | Description |
-|-------|-------------|
-| `project` | Project information |
-| `environment` | Test environment configuration |
-| `api_info` | API endpoint information |
-| `api_dependency` | Endpoint dependency relationships |
-| `test_run` | Test run records |
-| `test_case` | Test cases |
-| `test_result` | Test results |
-| `test_summary` | Test summary statistics |
-| `report` | Report records |
+|---|---|
+| `space` | Test space (owns a workspace directory) |
+| `environment` | Environment config (`is_production` gate) |
+| `endpoint` | Parsed API definitions |
+| `test_run` / `test_case` / `test_result` / `test_summary` / `report` | Execution and reporting |
+| `conversation` / `message` | Sessions (`mode`, `skill_names`, `environment_id`) |
+| `space_memory` | Cross-session memory |
+| `knowledge_document` / `knowledge_chunk` | Knowledge base |
+| `skill` | Skill discovery cache + enable flag |
+| `llm_log` | LLM call accounting: real model, tokens, routing tier, cost, attributed to space + conversation |
 
 ### Reset Database
 
 ```bash
-# Delete and re-run to rebuild
-del db\LLMTest.db          # Windows
-rm db/LLMTest.db           # macOS / Linux
+rm backend/db/TestAgents.db     # macOS / Linux
+del backend\db\TestAgents.db    # Windows
 ```
 
 ### ER Diagram
 
-See [Database ER Diagram](doc/ER.md) (PlantUML + SVG) and [Database Design Document](doc/DatabaseDesign.md).
+See [ER.md](doc/design/ER.md) and [DatabaseDesign.md](doc/design/DatabaseDesign.md).
 
 ---
 
-## ChromaDB Vector Database
+## ChromaDB (Optional)
 
-This project uses [ChromaDB](https://www.trychroma.com/) as the vector database for document embedding storage and semantic similarity retrieval.
-
-### Deployment
-
-ChromaDB is deployed as a standalone service on a Kubernetes cluster. For deployment configuration, refer to: [ContainerBuildTemplate/Kubernetes/chromadb](https://github.com/cmrhyq/ContainerBuildTemplate/tree/main/Kubernetes/chromadb)
-
-### Configuration
-
-Configure ChromaDB connection in `config/config.yaml`:
+ChromaDB is **off by default**. With it disabled the knowledge base still works through lexical search.
 
 ```yaml
 chroma:
-  host: "your-chromadb-host"           # ChromaDB server address
-  port: 8000                           # ChromaDB server port
-  auth_provider: "chromadb.auth.token_authn.TokenAuthClientProvider"
-  auth_credentials: ${CHROMA_AUTH_TOKEN}  # Auth token (injected via env var)
-  auth_token_transport_header: "Authorization"
-  tenant: "default_tenant"             # Tenant name
-  database: "default_database"         # Database name
-  default_collection: "default"        # Default collection name
+  enabled: false                   # set true to use vector search
+  host: "your-chromadb-host"
+  port: 8000
+  auth_credentials: your-token
+  tenant: default_tenant
+  database: default_database
+
+embedding:
+  enabled: false                   # also needs to be true for vectors
+  model: zai/embedding-3           # any litellm-compatible embedding model
+  api_key: your-api-key
+  dimension: 1024
 ```
 
-Add the auth token to `.env`:
-
-```dotenv
-CHROMA_AUTH_TOKEN=your-chroma-auth-token
-```
-
-### Usage
-
-```python
-from src.core.chroma import init_chroma_from_config, get_chroma_manager
-
-# Initialize at application startup (call once)
-manager = init_chroma_from_config()
-
-# Verify connection
-assert manager.check_connection()
-
-# Collection operations
-collections = manager.list_collections()
-manager.get_or_create_collection("my_collection")
-manager.delete_collection("my_collection")
-
-# Document operations
-manager.add_documents(
-    collection_name="my_collection",
-    documents=["Document content 1", "Document content 2"],
-    metadatas=[{"source": "api"}, {"source": "doc"}],
-    ids=["doc-1", "doc-2"],
-)
-
-results = manager.query(
-    query_texts=["search query"],
-    collection_name="my_collection",
-    n_results=5,
-)
-
-# LangChain VectorStore integration
-from langchain_openai import OpenAIEmbeddings
-
-vector_store = manager.get_vector_store(
-    embedding_function=OpenAIEmbeddings(),
-    collection_name="my_collection",
-)
-docs = vector_store.similarity_search("semantic search query")
-```
+When both flags are on, `knowledge_search` uses vectors and automatically degrades to lexical search on failure.
+Existing documents can be re-indexed with `POST /api/v1/documents/{id}/reindex`.
 
 ---
 
 ## Development
 
-### Setup Development Environment
-
 ```bash
-uv sync --extra dev
-uv run pre-commit install
+# Backend tests
+cd backend
+uv run pytest
+uv run pytest --cov=src --cov-report=html
+
+# Frontend checks
+cd frontend
+npm run type-check && npm run lint && npm run build
 ```
 
-### Run Tests
+### Add a Tool
 
-```bash
-pytest
-# or with coverage
-pytest --cov=src --cov-report=html
-```
+1. Write a `make_*_tools(...)` factory in `backend/src/agent/tools/` that returns `@tool` functions
+2. Register it in `build_tools()` (`backend/src/agent/tools/registry.py`)
+3. Classify it in `src/agent/modes.py` — add it to `SIDE_EFFECT_TOOL_NAMES` unless it is read-only
+4. Add a test; `tests/agent/test_skill_tool_contract.py` will fail if a skill declares a tool that does not exist
 
-### Add a Workflow Node
+### Add a Skill
 
-1. Create a node function in `src/graph/nodes/`
-2. Register the node and edges in `src/workflow.py`
-3. If routing logic is needed, add it to `src/graph/route.py`
+Create `backend/skills/<name>/SKILL.md` with `name`, `description`, and optional `allowed_tools`.
+`allowed_tools` must reference **real** tool names — a typo silently removes that tool from the bundle.
 
 ### Database Changes
 
-Models are defined in `src/data/models/`. After modification, delete the `.db` file and re-run to rebuild (development). For production, use Alembic migrations.
+Models live in `backend/src/data/models/`. New tables are picked up by `init_database_from_orm()`;
+schema changes to existing tables need a migration module (see `data/migration/v2_agent_migration.py`),
+because SQLite cannot alter CHECK constraints in place.
 
 ---
 
 ## Tech Stack
 
 | Component | Technology |
-|-----------|------------|
-| Workflow Engine | LangGraph |
-| LLM Framework | LangChain |
-| Vector Database | ChromaDB |
+|---|---|
+| Agent orchestration | Hand-written ReAct loop (no LangGraph) |
+| LLM framework | LangChain messages + tool binding, LiteLLM Router |
+| Vector database | ChromaDB (optional) |
 | Observability | LangSmith (optional) |
-| Web Framework | FastAPI + Uvicorn |
+| Web framework | FastAPI + Uvicorn |
 | Database ORM | SQLAlchemy 2.0 |
-| Data Validation | Pydantic 2.0 |
-| HTTP Client | httpx |
+| Data validation | Pydantic 2 |
+| HTTP client | httpx |
 | Logging | structlog |
-| Report Generation | Jinja2 (HTML templates) |
-| Configuration | PyYAML + python-dotenv |
+| Configuration | PyYAML |
 
 ---
 
 ## LangSmith Observability (Optional)
 
-The project supports [LangSmith](https://smith.langchain.com/) tracing. When enabled, all LangChain/LangGraph calls (LLM requests, tool invocations, node transitions) are automatically reported to the LangSmith platform for debugging and performance analysis.
-
-### Enable
-
-1. Fill in the API key in `.env`:
-
-```dotenv
-LANGSMITH_API_KEY=your-langsmith-api-key
-```
-
-2. Enable in `config/config.yaml`:
-
 ```yaml
 langsmith:
   enabled: true
-  api_key: ${LANGSMITH_API_KEY}
-  project: LLMTestAgent              # Project name in LangSmith
+  api_key: your-langsmith-api-key
+  space: LLMTestAgent
   endpoint: https://api.smith.langchain.com
 ```
 
-### Disable
-
-Set `langsmith.enabled` to `false` (default) — no network requests or performance overhead will occur.
+Set `langsmith.enabled` to `false` (default) to disable — no network calls, no overhead.
 
 ---
 
 ## FAQ
 
-**Where is the database file?** Default `db/LLMTest.db`, created automatically on first run. Modify the path in `config/config.yaml` under `database.url`.
+**Where is the database file?** `backend/db/TestAgents.db`, created on first run. Change `database.url` in `config.yaml`.
 
-**Bedrock error `security token is invalid`?** Verify your AK/SK are correct; when using temporary credentials ensure `AWS_SESSION_TOKEN` is set; confirm credentials haven't expired.
+**Why can't the agent write files in `ask` mode?** By design — `ask` and `plan` only bind read-only tools.
+It is not a prompt instruction the model might ignore; the tool simply is not in the list.
 
-**How to switch LLM provider?** Change `llm.provider` in `config/config.yaml` to `openai` / `bedrock` / `zhipu` / `qwen`, and ensure the corresponding API keys are configured.
+**Why does `knowledge_search` not use vectors?** `chroma.enabled` and `embedding.enabled` both default to `false`.
+Enable both, then call `reindex` on existing documents.
 
-**No report generated after running?** Verify the OpenAPI document format is correct (3.0.x / 3.1.x), LLM credentials are valid, and the database contains endpoint data (run the "parse document" instruction first).
+**Changing HTTP timeouts in `config.yaml` has no effect.** There is no timeout section in the config schema.
+`send_request` takes its timeout as a tool argument (default 30s); the old `execution` block inherited from the
+previous engine has been removed from both `config.yaml` and the template. If you need a global default,
+wire it into `src/agent/tools/http_tools.py` rather than adding YAML nobody reads.
 
-**How to enable LangSmith tracing?** Set `langsmith.enabled: true` in `config/config.yaml` and fill in `LANGSMITH_API_KEY` in `.env`. Once enabled, no business code changes are needed — the LangChain SDK automatically reports tracing data.
+**No report after running?** Verify the OpenAPI document parses (3.0.x / 3.1.x), the model credentials are valid,
+and the space actually contains endpoints.
+
+**Why is `cost_usd` `null` in `/api/v1/usage/stats`?** It means no call in the window could be priced —
+**not free**. Usually the model is missing from litellm's price table (`zai/*` is). Add a rate in
+`config.yaml` (unit is USD per single token):
+
+```yaml
+pricing:
+  - model: zai/glm-4-flash
+    input_cost_per_token: 0.0000001
+    output_cost_per_token: 0.0000002
+```
+
+Check `unpriced_calls` alongside it: `cost_usd` only sums the priced calls, so reading it alone
+understates the real spend.
 
 ---
 
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).
