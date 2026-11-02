@@ -21,11 +21,10 @@ from enum import StrEnum
 
 from langchain_core.tools import BaseTool
 
-# 默认模式的最大工具调用轮次。12 轮足够「拉清单 → 查详情 → 取 token → 发请求 →
-# 断言 → 落盘」这类真实链路，又能兜住模型陷入死循环的情况。
-DEFAULT_MAX_STEPS = 12
+# 默认模式的最大工具调用轮次。兜住模型陷入死循环的情况。
+DEFAULT_MAX_STEPS = 100
 # 计划模式只需要读信息 + 输出计划，轮次更少
-PLAN_MAX_STEPS = 8
+PLAN_MAX_STEPS = 80
 
 
 class Mode(StrEnum):
