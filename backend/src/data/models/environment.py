@@ -9,8 +9,8 @@ from src.data.models.base import Base, local_now
 from src.utils.id import next_id
 
 if TYPE_CHECKING:
+    from src.data.models.agent_run import AgentRun
     from src.data.models.space import Space
-    from src.data.models.test_run import TestRun
 
 
 class Environment(Base):
@@ -32,6 +32,6 @@ class Environment(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
 
     space: Mapped[Space] = relationship(back_populates="environments")
-    test_runs: Mapped[list[TestRun]] = relationship(back_populates="environment")
+    agent_runs: Mapped[list[AgentRun]] = relationship(back_populates="environment")
 
     __table_args__ = (Index("idx_env_space", "space_id"),)

@@ -10,7 +10,6 @@ from src.utils.id import next_id
 
 if TYPE_CHECKING:
     from src.data.models.space import Space
-    from src.data.models.test_case import TestCase
 
 
 class Endpoint(Base):
@@ -40,7 +39,6 @@ class Endpoint(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
 
     space: Mapped[Space] = relationship(back_populates="endpoints")
-    test_cases: Mapped[list[TestCase]] = relationship(back_populates="endpoint")
 
     __table_args__ = (
         CheckConstraint("method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')", name="ck_api_method"),

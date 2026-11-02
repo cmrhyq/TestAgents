@@ -116,7 +116,12 @@ class DatabaseManager:
 
     @staticmethod
     def _configure_sqlite_pragmas(engine: Engine) -> None:
-        """为每个 SQLite 连接启用 WAL 模式和外键约束"""
+        """为每个 SQLite 连接启用 WAL 模式、外键约束与写锁等待。
+
+        ``busy_timeout`` 是必须的：WAL 只允许一个写者，Agent 每轮对话要写
+        1 条执行记录 + N 条工具留痕，多会话并发时没有等待窗口会直接抛
+        ``database is locked``，把执行记录整条丢光。
+        """
 
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn, _connection_record):
@@ -124,6 +129,7 @@ class DatabaseManager:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA encoding='UTF-8'")
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     @staticmethod

@@ -21,10 +21,8 @@ EXPECTED_TABLES = [
     "space",
     "environment",
     "endpoint",
-    "test_run",
-    "test_case",
-    "test_result",
-    "test_summary",
+    "agent_run",
+    "agent_tool_call",
     "report",
     "conversation",
     "message",
@@ -52,8 +50,10 @@ def init_database_from_orm(manager: DatabaseManager | None = None) -> None:
 
     # 延迟导入：避免 migration 模块循环依赖
     from src.data.migration.v2_agent_migration import migrate_v2
+    from src.data.migration.v3_agent_run_migration import migrate_v3
 
     migrate_v2(mgr.engine)
+    migrate_v3(mgr.engine)
 
     _create_views(mgr)
     logger.info("通过ORM模型初始化数据库完成", method="orm")
@@ -176,64 +176,70 @@ def ensure_database(
 
 
 def _create_views(manager: DatabaseManager) -> None:
-    """创建分析视图（仅 ORM 建表模式下调用）"""
-    views = [
-        """
-        CREATE VIEW IF NOT EXISTS v_run_overview AS
-        SELECT
-            tr.id           AS run_id,
-            p.name          AS space_name,
-            e.name          AS environment_name,
-            tr.status       AS run_status,
-            tr.trigger_type,
-            tr.llm_provider,
-            tr.llm_model,
-            ts.total, ts.passed, ts.failed, ts.skipped, ts.error,
-            ts.pass_rate, ts.avg_response_time, ts.p95_response_time,
-            ts.total_duration,
-            tr.started_at, tr.finished_at, tr.created_at
-        FROM test_run tr
-        LEFT JOIN space      p  ON tr.space_id     = p.id
-        LEFT JOIN environment  e  ON tr.environment_id  = e.id
-        LEFT JOIN test_summary ts ON ts.run_id          = tr.id
-        """,
-        """
-        CREATE VIEW IF NOT EXISTS v_api_pass_rate AS
-        SELECT
-            tr.request_url, tr.request_method,
-            COUNT(*)                                                AS total_executions,
-            SUM(CASE WHEN tr.status = 'passed' THEN 1 ELSE 0 END) AS passed_count,
-            SUM(CASE WHEN tr.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-            ROUND(SUM(CASE WHEN tr.status = 'passed' THEN 1.0 ELSE 0 END)
-                  / NULLIF(COUNT(*), 0) * 100, 2)                  AS pass_rate,
-            ROUND(AVG(tr.response_time), 2)                        AS avg_response_time,
-            ROUND(MIN(tr.response_time), 2)                        AS min_response_time,
-            ROUND(MAX(tr.response_time), 2)                        AS max_response_time
-        FROM test_result tr
-        WHERE tr.status IN ('passed','failed')
-        GROUP BY tr.request_url, tr.request_method
-        """,
-        """
-        CREATE VIEW IF NOT EXISTS v_scenario_distribution AS
-        SELECT
-            tc.scenario_type,
-            COUNT(*)                                                AS total_cases,
-            SUM(CASE WHEN tr.status = 'passed' THEN 1 ELSE 0 END) AS passed,
-            SUM(CASE WHEN tr.status = 'failed' THEN 1 ELSE 0 END) AS failed,
-            SUM(CASE WHEN tr.status = 'error'  THEN 1 ELSE 0 END) AS errors,
-            ROUND(SUM(CASE WHEN tr.status = 'passed' THEN 1.0 ELSE 0 END)
-                  / NULLIF(SUM(CASE WHEN tr.status IN ('passed','failed') THEN 1 ELSE 0 END), 0) * 100, 2)
-                                                                    AS pass_rate
-        FROM test_case tc
-        LEFT JOIN test_result tr ON tr.test_case_id = tc.id
-        GROUP BY tc.scenario_type
-        """,
-    ]
+    """创建分析视图（仅 ORM 建表模式下调用）。
 
-    with manager.engine.connect() as conn:
-        for view_sql in views:
-            conn.execute(text(view_sql))
-        conn.commit()
+    ⚠️ 必须先 ``DROP VIEW`` 再 ``CREATE``，不能沿用 ``CREATE VIEW IF NOT EXISTS``：
+    SQLite 不会更新已存在的视图，语义一变（尤其是从 test_* 迁到 agent_*）旧定义
+    会永远留在库里，表现为「查询一个不存在的表」。
+    """
+    views = {
+        "v_run_overview": """
+            SELECT
+                r.id            AS run_id,
+                s.name          AS space_name,
+                e.name          AS environment_name,
+                r.status        AS run_status,
+                r.mode,
+                r.title,
+                r.tool_call_count,
+                r.ok_count,
+                r.error_count,
+                r.success_rate,
+                r.avg_response_time,
+                r.duration_ms,
+                r.llm_call_count,
+                r.total_tokens,
+                r.cost_usd,
+                r.started_at, r.finished_at, r.created_at
+            FROM agent_run r
+            LEFT JOIN space       s ON r.space_id       = s.id
+            LEFT JOIN environment e ON r.environment_id = e.id
+        """,
+        # 工具维度：哪个工具最常失败、哪个最慢
+        "v_tool_call_stats": """
+            SELECT
+                tool_name,
+                tool_type,
+                COUNT(*)                                                  AS total_calls,
+                SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)                   AS ok_calls,
+                SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)                   AS error_calls,
+                ROUND(SUM(CASE WHEN ok = 1 THEN 1.0 ELSE 0 END)
+                      / NULLIF(COUNT(*), 0) * 100, 2)                     AS success_rate,
+                ROUND(AVG(duration_ms), 2)                                AS avg_response_time,
+                MIN(duration_ms)                                          AS min_response_time,
+                MAX(duration_ms)                                          AS max_response_time
+            FROM agent_tool_call
+            GROUP BY tool_name, tool_type
+        """,
+        # 接口维度：替代旧的 v_api_pass_rate，但口径改成 HTTP 状态码
+        "v_http_endpoint_stats": """
+            SELECT
+                http_url,
+                http_method,
+                COUNT(*)                                                   AS total_executions,
+                SUM(CASE WHEN http_status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS success_count,
+                SUM(CASE WHEN http_status_code >= 400 OR http_status_code IS NULL THEN 1 ELSE 0 END) AS error_count,
+                ROUND(AVG(duration_ms), 2)                                 AS avg_response_time
+            FROM agent_tool_call
+            WHERE http_url IS NOT NULL AND http_url <> ''
+            GROUP BY http_url, http_method
+        """,
+    }
+
+    with manager.engine.begin() as conn:
+        for name, select_sql in views.items():
+            conn.execute(text(f"DROP VIEW IF EXISTS {name}"))
+            conn.execute(text(f"CREATE VIEW {name} AS {select_sql}"))
 
 
 def _parse_sql_statements(sql_content: str) -> list[str]:
