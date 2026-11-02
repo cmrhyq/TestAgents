@@ -74,7 +74,7 @@ def _extract_json_str(text: str) -> str | None:
 def parse_llm_json_response(
     response: str,
     *,
-    list_key: str = "test_cases",
+    list_key: str = "items",
     sort_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """从 LLM 响应文本中解析 JSON 列表。
