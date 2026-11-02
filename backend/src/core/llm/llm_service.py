@@ -171,6 +171,7 @@ class LLMService:
         *,
         space_id: int | str | None = None,
         conversation_id: int | None = None,
+        run_id: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[BaseMessage]:
         """绑定工具后异步流式，并**记录每次调用的 token 与成本**。
@@ -184,6 +185,7 @@ class LLMService:
             tools: 工具列表；为空时**不**调用 bind_tools（部分 provider 拒绝空数组）
             space_id: 归因到的空间
             conversation_id: 归因到的会话
+            run_id: 归因到的执行记录（agent_run.id），让成本能按轮次聚合
             **kwargs: 透传给底层 astream
 
         Yields:
@@ -195,6 +197,7 @@ class LLMService:
             bound,
             space_id=space_id,
             conversation_id=conversation_id,
+            run_id=run_id,
             request_type="tools",
             **kwargs,
         ):
@@ -207,6 +210,7 @@ class LLMService:
         *,
         space_id: int | str | None = None,
         conversation_id: int | None = None,
+        run_id: int | None = None,
         request_type: str = "astream",
         **kwargs: Any,
     ) -> AsyncIterator[BaseMessage]:
@@ -228,6 +232,7 @@ class LLMService:
                 duration_ms=_elapsed_ms(start),
                 space_id=space_id,
                 conversation_id=conversation_id,
+                run_id=run_id,
                 routing_tier=tracker.tier,
             )
         except Exception as e:
@@ -240,6 +245,7 @@ class LLMService:
                 duration_ms=_elapsed_ms(start),
                 space_id=space_id,
                 conversation_id=conversation_id,
+                run_id=run_id,
                 routing_tier=tracker.tier,
             )
             raise
@@ -308,6 +314,7 @@ class LLMService:
         duration_ms: int = 0,
         space_id: int | str | None = None,
         conversation_id: int | None = None,
+        run_id: int | None = None,
         routing_tier: str = "",
     ) -> None:
         """将一次 LLM 调用的 token / 模型 / 成本写入 ``llm_log`` 表。
@@ -322,6 +329,7 @@ class LLMService:
             duration_ms: 耗时毫秒
             space_id: 归因空间
             conversation_id: 归因会话
+            run_id: 归因执行记录（agent_run.id）
             routing_tier: smart-router 决策档位
         """
         usage = usage or {}
@@ -347,6 +355,7 @@ class LLMService:
                         error_message=(error_message or "")[:500],
                         space_id=_as_int(space_id),
                         conversation_id=_as_int(conversation_id),
+                        run_id=_as_int(run_id),
                         routing_tier=routing_tier or "",
                         cost_usd=_estimate_cost(
                             resolved_model, prompt_tokens, completion_tokens, self._config.pricing

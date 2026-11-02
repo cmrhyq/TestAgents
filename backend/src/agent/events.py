@@ -30,6 +30,9 @@ class StartEvent:
     space_id: int | None
     mode: str
     skills: list[str] = field(default_factory=list)
+    # 执行记录 ID：前端拿到它可以直达「本次执行详情」。
+    # 加字段属于向后兼容的增量，不改任何事件名与已有载荷语义。
+    run_id: int | None = None
 
     EVENT_NAME: ClassVar[str] = "start"
 
@@ -39,6 +42,7 @@ class StartEvent:
             "space_id": self.space_id,
             "mode": self.mode,
             "skills": self.skills,
+            "run_id": self.run_id,
         }
 
 

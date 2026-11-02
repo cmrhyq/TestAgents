@@ -237,9 +237,10 @@ class LLMGateway:
         *,
         space_id: int | str | None = None,
         conversation_id: int | None = None,
+        run_id: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[BaseMessage]:
-        """绑定工具后流式产出 chunk，**并记录 llm_log**（含空间/会话归因）。
+        """绑定工具后流式产出 chunk，**并记录 llm_log**（含空间/会话/轮次归因）。
 
         这是 Agent 运行时的正确入口。不要改用 ``get_model()`` 自己
         ``bind_tools().astream()``——那条路径不产生任何统计。
@@ -249,6 +250,7 @@ class LLMGateway:
             tools: 工具列表；空列表时不绑定
             space_id: 归因空间
             conversation_id: 归因会话
+            run_id: 归因执行记录（agent_run.id）
             **kwargs: 透传给底层 astream
 
         Yields:
@@ -260,6 +262,7 @@ class LLMGateway:
             tools,
             space_id=space_id,
             conversation_id=conversation_id,
+            run_id=run_id,
             **kwargs,
         ):
             yield chunk
