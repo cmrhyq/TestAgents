@@ -29,9 +29,6 @@ logger = get_logger(__name__)
 
 SessionScope = Callable[[], AbstractContextManager[Session]]
 
-# 响应体回填模型时的字符上限，防止一个大列表把上下文吃干
-MAX_RESPONSE_CHARS = 8000
-
 
 def make_http_tools(
     space_id: int | str,
@@ -188,9 +185,14 @@ def _do_request(
         try:
             resp_body: Any = response.json()
         except ValueError:
-            resp_body = response.text[:MAX_RESPONSE_CHARS]
+            resp_body = response.text
 
-        payload = json.dumps(
+        # 这里**不做长度截断**：截断由下游按用途分层处理——
+        #   给模型  runner._for_model（8000 字符，控上下文）
+        #   落库    AgentRunRecorder._cap_body（2MB 字节，控库体积）
+        # 工具层再截一次会让「完整留痕」永远拿不到全量。
+        # set-cookie 仍然剔除：它是凭证，回灌给模型等于开了会话劫持的口子。
+        return json.dumps(
             {
                 "status_code": response.status_code,
                 "response_time_ms": round(response.elapsed.total_seconds() * 1000, 2),
@@ -202,16 +204,6 @@ def _do_request(
             ensure_ascii=False,
             default=str,
         )
-        if len(payload) > MAX_RESPONSE_CHARS:
-            truncated = json.dumps(
-                {
-                    "note": f"响应体过大，已截断至 {MAX_RESPONSE_CHARS} 字符",
-                    "preview": payload[:MAX_RESPONSE_CHARS],
-                },
-                ensure_ascii=False,
-            )
-            return truncated
-        return payload
     except Exception as exc:
         logger.error("HTTP 请求失败", url=url, error=str(exc))
         return json.dumps(

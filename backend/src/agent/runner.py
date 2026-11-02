@@ -41,6 +41,7 @@ from src.agent.events import (
     ToolResultEvent,
 )
 from src.agent.modes import filter_tools
+from src.agent.recording import RunRecorder, ToolOutcome
 from src.agent.tools.registry import ToolBundle, build_tools
 from src.core.logging import get_logger
 
@@ -70,6 +71,7 @@ class RunRequest:
         memories: 待注入的跨会话记忆
         skill_blocks: 已渲染的 skill 文本块
         history: 历史消息
+        run_id: 执行记录 ID，由调用方在 recorder.start() 后回填（供 llm_log 归因）
     """
 
     instruction: str
@@ -85,6 +87,7 @@ class RunRequest:
     memories: list[dict[str, Any]] = field(default_factory=list)
     skill_blocks: str = ""
     history: list[BaseMessage] = field(default_factory=list)
+    run_id: int | None = None
 
 
 async def run(
@@ -92,6 +95,7 @@ async def run(
     *,
     model: Any | None = None,
     bundle: ToolBundle | None = None,
+    recorder: RunRecorder | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """执行一轮对话，逐事件产出。
 
@@ -99,6 +103,7 @@ async def run(
         request: 本轮输入
         model: 聊天模型（测试注入用）；None 时取全局 gateway
         bundle: 工具集合（测试注入用）；None 时按请求装配
+        recorder: 执行记录器；None 表示不落库（单测、无 DB 场景）
 
     Yields:
         AgentEvent：start → (text_delta | tool_call | tool_result)* → final | error
@@ -119,6 +124,7 @@ async def run(
         space_id=request.space_id,
         mode=policy.mode.value,
         skills=list(request.skill_names),
+        run_id=request.run_id,
     )
 
     messages: list[BaseMessage] = [
@@ -128,6 +134,8 @@ async def run(
     ]
     chat = _make_streamer(model, allowed, request)
     tool_map = {tool.name: tool for tool in allowed}
+    # seq 用局部计数器，别用模块级全局（并发多轮会互相污染）
+    seq_counter = iter(range(1, 1_000_000))
 
     logger.info(
         "Agent 轮次开始",
@@ -167,12 +175,30 @@ async def run(
             yield ToolCallEvent(id=call_id, name=name, args=dict(args))
 
             started = perf_counter()
-            ok, content = await _execute(tool_map, name, args)
-            duration_ms = int((perf_counter() - started) * 1000)
+            outcome: ToolOutcome | None = None
+            try:
+                outcome = await _execute(tool_map, name, args)
+            finally:
+                # 记录放在 finally：即便恰在此刻被断流，已完成的调用也要留痕。
+                # 这里只做同步调用（recorder 内部是短事务），不 await、不 yield。
+                duration_ms = int((perf_counter() - started) * 1000)
+                if outcome is not None and recorder is not None:
+                    try:
+                        recorder.tool_call(
+                            step=step,
+                            seq=next(seq_counter),
+                            call_id=call_id,
+                            name=name,
+                            args=dict(args),
+                            outcome=outcome,
+                            duration_ms=duration_ms,
+                        )
+                    except Exception:  # 记录层内部已兜，这里防未知错误打断流
+                        logger.warning("工具调用记录失败", tool=name)
 
-            yield ToolResultEvent(
-                id=call_id, name=name, ok=ok, content=content, duration_ms=duration_ms
-            )
+            # 模型看到的内容与前端看到的内容必须一致，否则排障时必然误判
+            content = _for_model(outcome.text)
+            yield ToolResultEvent(id=call_id, name=name, ok=outcome.ok, content=content, duration_ms=duration_ms)
             messages.append(ToolMessage(content=content, tool_call_id=call_id, name=name or None))
 
     logger.warning("Agent 超过最大轮次", max_steps=policy.max_steps)
@@ -216,6 +242,7 @@ def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest
             tools,
             space_id=request.space_id,
             conversation_id=request.conversation_id,
+            run_id=request.run_id,
         )
 
     return _stream
@@ -285,28 +312,42 @@ def _assistant_message(accumulated: Any, calls: list[dict]) -> AIMessage:
 # 工具执行
 # ---------------------------------------------------------------------------
 
-async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any]) -> tuple[bool, str]:
-    """执行单个工具调用，返回 ``(是否成功, 结果文本)``。
+async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any]) -> ToolOutcome:
+    """执行单个工具调用，返回 ``ToolOutcome``。
 
     任何异常都在这里被吃掉并转成文本——工具失败是**正常业务分支**，
     不是链路故障。模型需要看到失败原因才能自我修正。
+
+    同时把异常类型与原文一并带出（``ToolOutcome.error_type`` /
+    ``error_message``）：记录层需要它才能回答「这个工具为什么常年失败」，
+    而这些信息一旦被压成话术就再也拿不回来了。
     """
     tool = tool_map.get(name)
     if tool is None:
-        return False, (
+        return ToolOutcome(
+            False,
             f"工具 {name} 不存在。当前可用工具：{', '.join(sorted(tool_map)) or '（无）'}。"
-            f"请只调用列表中存在的工具。"
+            f"请只调用列表中存在的工具。",
+            "not_found",
+            f"tool {name} not found",
         )
 
     try:
         result = await _ainvoke(tool, args)
     except ValidationError as exc:  # 参数不符合 schema：最常见的模型失误
-        return False, f"工具 {name} 参数不合法：{_validation_message(exc)}"
+        message = _validation_message(exc)
+        return ToolOutcome(False, f"工具 {name} 参数不合法：{message}", "validation", message)
     except Exception as exc:
         logger.warning("工具执行失败", tool=name, error=str(exc))
-        return False, f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+        return ToolOutcome(
+            False,
+            f"工具 {name} 执行失败：{type(exc).__name__}: {exc}",
+            type(exc).__name__,
+            str(exc),
+        )
 
-    return True, _stringify(result)
+    # ⚠️ 这里返回**全量**文本：落库需要它。给模型的截断在 _for_model 里做。
+    return ToolOutcome(True, _raw_text(result))
 
 
 def _validation_message(exc: Exception) -> str:
@@ -340,20 +381,23 @@ async def _ainvoke(tool: BaseTool, args: dict[str, Any]) -> Any:
 _MAX_RESULT_CHARS = 8_000
 
 
-def _stringify(result: Any) -> str:
-    """工具返回值归一化为文本，并做长度上限。
+def _raw_text(result: Any) -> str:
+    """工具返回值归一化为文本，**不做长度限制**（供落库与后续截断复用）。"""
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        return str(result)
+
+
+def _for_model(raw: str) -> str:
+    """给模型看的版本：8000 字符上限。
 
     上限比 SSE 下发（4k）更宽：模型看到的内容要多于用户看到的内容，
-    否则模型会以为自己读到的就是全部。
+    否则模型会以为自己读到的就是全部。落库则由 recorder 单独限 2MB，
+    三者是各自独立的三级台阶，不要互相复用同一个常量。
     """
-    if isinstance(result, str):
-        text = result
-    else:
-        try:
-            text = json.dumps(result, ensure_ascii=False, default=str)
-        except Exception:
-            text = str(result)
-
-    if len(text) > _MAX_RESULT_CHARS:
-        return text[:_MAX_RESULT_CHARS] + f"\n…（工具结果已截断，原始长度 {len(text)} 字符）"
-    return text
+    if len(raw) <= _MAX_RESULT_CHARS:
+        return raw
+    return raw[:_MAX_RESULT_CHARS] + f"\n…（工具结果已截断，原始长度 {len(raw)} 字符）"

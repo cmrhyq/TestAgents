@@ -34,6 +34,7 @@ from src.agent.runner import RunRequest, run as run_agent
 from src.core.database.database_manager import get_db_manager
 from src.core.logging import get_logger
 from src.data.models.space import Space
+from src.data.recording import AgentRunRecorder
 from src.data.schemas.conversation import ConversationCreate
 from src.data.services.conversation_service import ConversationService
 from src.data.services.environment_service import EnvironmentService
@@ -280,6 +281,8 @@ class ChatStreamService:
         seq = 0
         answer = ""
         failed = False
+        settled = False  # 是否走到了明确终态（final / error / 未捕获异常）
+        error_message = ""
 
         try:
             request = await run_in_threadpool(self.prepare, body, conversation_id)
@@ -288,27 +291,61 @@ class ChatStreamService:
             yield render(ErrorEvent(message=f"上下文准备失败：{exc}"), 0)
             return
 
+        # 记录必须在 prepare 成功之后创建：放前面会在上下文装配失败时留下
+        # 一条永远 running 的僵尸记录，而那时 finally 还没建立。
+        recorder = AgentRunRecorder()
+        request.run_id = recorder.start(
+            space_id=int(body.space_id),
+            environment_id=getattr(body, "environment_id", None),
+            conversation_id=conversation_id or None,
+            mode=request.mode,
+            title=(body.instruction or "").strip().replace("\n", " ")[:50],
+        )
+
         try:
-            async for event in run_agent(request):
+            async for event in run_agent(request, recorder=recorder):
                 if isinstance(event, FinalEvent):
                     answer = event.answer
+                    settled = True
                 elif isinstance(event, ErrorEvent):
                     failed = True
+                    settled = True
+                    error_message = event.message
                 yield render(event, seq)
                 seq += 1
         except Exception as exc:  # runner 内部已兜住绝大多数异常，这里兜最后一道
             logger.error("流式执行失败", error=str(exc), conversation_id=conversation_id)
-            yield render(ErrorEvent(message=str(exc)), seq)
+            error_message = str(exc)
             failed = True
+            settled = True
+            yield render(ErrorEvent(message=str(exc)), seq)
+        finally:
+            # ⚠️ 这个 finally 会在客户端断流时执行（Starlette 对生成器调 aclose()，
+            #    在挂起点抛 GeneratorExit）。铁律三条：
+            #      1) 不能 await —— 取消态下 await 立刻抛 CancelledError，收尾被吞
+            #      2) 不能 yield —— GeneratorExit 期间 yield 会抛 RuntimeError
+            #      3) 不能外抛 —— 会覆盖正在传播的 GeneratorExit
+            #    「settled=False」即代表断流，落库记 cancelled。
+            try:
+                recorder.finish(
+                    status=("cancelled" if not settled else ("failed" if failed else "completed")),
+                    error_message=error_message,
+                )
+            except Exception:  # finish 内部已吞异常，这里防未知错误影响后续收尾
+                logger.warning("执行记录收尾异常", conversation_id=conversation_id)
 
-        logger.info(
-            "对话流结束",
-            conversation_id=conversation_id,
-            mode=request.mode,
-            events=seq,
-            failed=failed,
-            duration_ms=int((perf_counter() - started) * 1000),
-        )
-
-        if not failed:
-            self.save_answer(conversation_id, answer)
+            try:
+                if settled and not failed:
+                    self.save_answer(conversation_id, answer)
+                logger.info(
+                    "对话流结束",
+                    conversation_id=conversation_id,
+                    mode=request.mode,
+                    run_id=request.run_id,
+                    events=seq,
+                    failed=failed,
+                    settled=settled,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                )
+            except Exception:
+                logger.warning("对话收尾落库异常", conversation_id=conversation_id)
