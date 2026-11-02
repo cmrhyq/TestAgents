@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Folder, Globe, CheckCircle, MessageSquare } from "lucide-react";
+import { Folder, Globe, CheckCircle, MessageSquare, Activity } from "lucide-react";
 
 import { useSpaces } from "@/hooks/use-spaces";
-import { useTestRuns } from "@/hooks/use-test-runs";
+import { useAgentRuns } from "@/hooks/use-agent-runs";
 import { useEndpoints } from "@/hooks/use-endpoints";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -24,28 +24,35 @@ function CornerMarks() {
 
 export default function DashboardPage() {
   const { data: spacesData } = useSpaces({ page: 1, page_size: 1 });
-  const { data: testRunsData } = useTestRuns();
+  const { data: agentRunsData } = useAgentRuns();
   const { data: endpointsData } = useEndpoints();
 
   const stats = useMemo(() => {
-    const runs = testRunsData?.items ?? [];
+    const runs = agentRunsData?.items ?? [];
     const totalSpaces = spacesData?.total ?? 0;
     const totalEndpoints = endpointsData?.total ?? 0;
+    const totalRuns = agentRunsData?.total ?? 0;
 
-    const avgPassRate =
-      runs.length > 0 ? Math.round(runs.reduce((sum, r) => sum + r.pass_rate, 0) / runs.length) : 0;
+    // 加权成功率：按调用次数汇总再相除，而不是「每个 run 的 success_rate 求平均」。
+    // 前者才是真实成功率——一个调了 1 次工具的 run 和一个调了 50 次的 run
+    // 在算术平均里权重相同，会把大盘数字带偏。
+    const totalCalls = runs.reduce((sum, r) => sum + r.tool_call_count, 0);
+    const totalOk = runs.reduce((sum, r) => sum + r.ok_count, 0);
+    const avgSuccessRate = totalCalls > 0 ? Math.round((totalOk / totalCalls) * 100) : 0;
 
     return {
       totalSpaces,
       totalEndpoints,
-      avgPassRate,
+      totalRuns,
+      avgSuccessRate,
     };
-  }, [spacesData, testRunsData, endpointsData]);
+  }, [spacesData, agentRunsData, endpointsData]);
 
   const statItems = [
     { label: "空间总数", value: stats.totalSpaces, unit: "", icon: Folder },
     { label: "接口总数", value: stats.totalEndpoints, unit: "", icon: Globe },
-    { label: "平均通过率", value: stats.avgPassRate, unit: "%", icon: CheckCircle },
+    { label: "执行记录", value: stats.totalRuns, unit: "", icon: Activity },
+    { label: "平均成功率", value: stats.avgSuccessRate, unit: "%", icon: CheckCircle },
   ];
 
   return (

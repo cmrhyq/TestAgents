@@ -12,7 +12,11 @@ export const queryKeys = {
   spaces: createResourceKeys("spaces"),
   endpoints: createResourceKeys("endpoints"),
   environments: createResourceKeys("environments"),
-  testRuns: createResourceKeys("test-runs"),
+  agentRuns: {
+    ...createResourceKeys("agent-runs"),
+    toolCalls: (runId: ResourceId, includeBody: boolean) =>
+      ["agent-runs", "tool-calls", runId, includeBody] as const,
+  },
   reports: createResourceKeys("reports"),
   skills: createResourceKeys("skills"),
   conversations: {
@@ -33,7 +37,8 @@ export const queryKeys = {
   },
   workspace: {
     tree: (spaceId: ResourceId | null | undefined) => ["workspace", "tree", spaceId] as const,
-    agentsMd: (spaceId: ResourceId | null | undefined) => ["workspace", "agents-md", spaceId] as const,
+    agentsMd: (spaceId: ResourceId | null | undefined) =>
+      ["workspace", "agents-md", spaceId] as const,
   },
 };
 

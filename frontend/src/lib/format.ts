@@ -52,11 +52,30 @@ export function formatDate(value: string | null | undefined): string {
   return date.toLocaleDateString();
 }
 
-export function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return "--";
-  return `${seconds.toFixed(1)}s`;
+/**
+ * 毫秒耗时格式化。
+ *
+ * 后端 `duration_ms` 一律是毫秒整数，用它替代老的 `total_duration`（秒）。
+ * 分级是为了读数带好看：一次工具调用 45ms 显示成 "0.05s" 毫无信息量。
+ */
+export function formatDurationMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || ms <= 0) return "--";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m${seconds}s`;
 }
 
-export function formatResponseTime(ms: number): string {
-  return `${ms.toFixed(1)} ms`;
+/** 成本格式化：小额给到 4 位小数，否则 2 位。 */
+export function formatCost(usd: number | null | undefined): string {
+  if (!usd || usd <= 0) return "$0";
+  return usd < 1 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
+/** token 数：千级以上压缩成 12.3k，读数带不被挤爆。 */
+export function formatTokens(tokens: number | null | undefined): string {
+  if (!tokens || tokens <= 0) return "0";
+  if (tokens < 1000) return String(tokens);
+  return `${(tokens / 1000).toFixed(1)}k`;
 }

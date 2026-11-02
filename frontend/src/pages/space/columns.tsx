@@ -12,15 +12,18 @@ import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { HttpMethodBadge } from "@/components/shared/http-method-badge.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import type { Column } from "@/components/shared/data-table.tsx";
-import type { Endpoint, TestRun } from "@/lib/types.ts";
-import { formatDate, formatDuration } from "@/lib/format";
+import type { AgentRun, Endpoint } from "@/lib/types.ts";
+import { formatDate, formatDurationMs } from "@/lib/format";
 
 export interface EndpointRowHandlers {
   onEdit(endpoint: Endpoint): void;
   onDelete(endpoint: Endpoint): void;
 }
 
-export function buildEndpointColumns({ onEdit, onDelete }: EndpointRowHandlers): Column<Endpoint>[] {
+export function buildEndpointColumns({
+  onEdit,
+  onDelete,
+}: EndpointRowHandlers): Column<Endpoint>[] {
   return [
     {
       key: "method",
@@ -76,14 +79,14 @@ export function buildEndpointColumns({ onEdit, onDelete }: EndpointRowHandlers):
   ];
 }
 
-export function buildTestRunColumns(): Column<TestRun>[] {
+export function buildAgentRunColumns(): Column<AgentRun>[] {
   return [
     {
-      key: "name",
-      header: "名称",
+      key: "title",
+      header: "执行标题",
       render: (_, row) => (
         <Link to={`/runs/${row.id}`} className="font-medium text-accent hover:text-accent/80">
-          {row.name}
+          {row.title || `执行 ${row.id}`}
         </Link>
       ),
     },
@@ -93,15 +96,31 @@ export function buildTestRunColumns(): Column<TestRun>[] {
       render: (_, row) => <StatusBadge status={row.status} />,
     },
     {
-      key: "pass_rate",
-      header: "通过率",
-      render: (_, row) => <PassRateBar passed={row.passed_cases} total={row.total_cases} />,
+      key: "tool_call_count",
+      header: "工具调用",
+      render: (_, row) => (
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          {row.tool_call_count}
+          {row.error_count > 0 && (
+            <span className="ml-1 text-destructive">({row.error_count} 失败)</span>
+          )}
+        </span>
+      ),
     },
     {
-      key: "total_duration",
+      key: "success_rate",
+      header: "成功率",
+      // PassRateBar 传的是「分子/分母」而不是百分比：tool_call_count 为 0
+      // 时它会渲染 "--"，避免把「没调过工具」显示成「0% 全失败」。
+      render: (_, row) => <PassRateBar passed={row.ok_count} total={row.tool_call_count} />,
+    },
+    {
+      key: "duration_ms",
       header: "耗时",
       render: (_, row) => (
-        <span className="text-sm text-muted-foreground">{formatDuration(row.total_duration)}</span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          {formatDurationMs(row.duration_ms)}
+        </span>
       ),
     },
     {

@@ -1,5 +1,5 @@
 import type { Id, PaginatedResponse } from "./common";
-import type { TestRun } from "./test-run";
+import type { AgentRunBrief, AgentToolCallDetail } from "./agent-run";
 
 export interface Report {
   id: Id;
@@ -7,37 +7,25 @@ export interface Report {
   format: string;
   file_size: number;
   generated_at: string;
-  test_run_name: string;
+  /** 所属执行记录的标题（后端 join 出来，不是报告自己的字段） */
+  run_title: string;
 }
 
 export type ReportListResponse = PaginatedResponse<Report>;
 
-export interface TestResultDetail {
-  id: Id;
-  case_id: string;
-  case_name: string;
-  status: string;
-  request_url: string;
-  request_method: string;
-  request_headers: string;
-  request_body: string | null;
-  query_params: string | null;
-  response_status_code: number | null;
-  response_headers: string;
-  response_body: string | null;
-  response_time: number;
-  error_message: string;
-  retry_count: number;
-  started_at: string | null;
-  finished_at: string | null;
-}
-
+/**
+ * 报告详情。
+ *
+ * 改造前这里是 `test_run` + `test_results`；现在挂的是执行记录本身
+ * （`run`）和工具调用留痕（`tool_calls`）——报告的语义从「测试用例跑了
+ * 什么结果」变成了「这轮 ReAct 调了哪些工具、返回了什么」。
+ */
 export interface ReportDetail {
   id: Id;
   run_id: Id;
   format: string;
   file_size: number;
   generated_at: string;
-  test_run: TestRun;
-  test_results: TestResultDetail[];
+  run: AgentRunBrief;
+  tool_calls: AgentToolCallDetail[];
 }

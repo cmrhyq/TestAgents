@@ -1,11 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
-import type { TestResultDetail } from "@/lib/types.ts";
-import { formatResponseTime } from "@/lib/format";
+import { formatDurationMs } from "@/lib/format";
 import { computeResponseStats } from "@/lib/stats";
 
-/** 响应耗时统计卡片（avg/min/max/p95）。 */
-export function ResponseTimeStats({ results }: { results: TestResultDetail[] }) {
-  const stats = computeResponseStats(results.map((r) => r.response_time));
+interface ResponseTimeStatsProps {
+  /** 每次工具调用的耗时（毫秒） */
+  durations: number[];
+  /** 读数带标题后缀，默认「响应」 */
+  label?: string;
+}
+
+/** 工具调用耗时统计卡片（avg/min/max/p95，单位毫秒）。 */
+export function ResponseTimeStats({ durations, label = "响应" }: ResponseTimeStatsProps) {
+  const stats = computeResponseStats(durations);
   if (!stats) return null;
 
   const items = [
@@ -21,12 +27,13 @@ export function ResponseTimeStats({ results }: { results: TestResultDetail[] }) 
         <Card key={s.label}>
           <CardHeader className="pb-2">
             <CardTitle className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              {s.label}响应
+              {s.label}
+              {label}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="font-display text-2xl font-semibold tabular-nums tracking-tight">
-              {formatResponseTime(s.value)}
+              {formatDurationMs(s.value)}
             </p>
           </CardContent>
         </Card>

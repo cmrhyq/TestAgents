@@ -14,8 +14,8 @@ type ReportRow = Report & Record<string, unknown>;
 
 const columns: Column<ReportRow>[] = [
   {
-    key: "test_run_name",
-    header: "测试运行",
+    key: "run_title",
+    header: "执行记录",
     render: (val) => <span className="font-medium">{(val as string) || "—"}</span>,
   },
   {
@@ -59,19 +59,11 @@ export default function ReportsPage() {
     header: "操作",
     render: (_, row) => (
       <div className="flex items-center gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate(`/reports/${row.id}`)}
-        >
+        <Button variant="outline" size="sm" onClick={() => navigate(`/reports/${row.id}`)}>
           <Eye className="h-3.5 w-3.5" />
           查看
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => downloadReport(row.id)}
-        >
+        <Button variant="outline" size="sm" onClick={() => downloadReport(row.id)}>
           <Download className="h-3.5 w-3.5" />
           下载
         </Button>
@@ -82,9 +74,9 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="测试报告"
+        title="执行报告"
         annotation="FIG.03 — REPORTS"
-        description="查看与下载已生成的测试报告。"
+        description="查看与下载 Agent 执行轮次生成的报告。"
       />
 
       <DataTable

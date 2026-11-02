@@ -1,9 +1,9 @@
 import { DataTable } from "@/components/shared/data-table.tsx";
-import { buildTestRunColumns } from "../columns";
-import type { TestRun } from "@/lib/types.ts";
+import { buildAgentRunColumns } from "../columns";
+import type { AgentRun } from "@/lib/types.ts";
 
-export interface TestRunsTabProps {
-  data: TestRun[];
+export interface AgentRunsTabProps {
+  data: AgentRun[];
   total: number;
   loading: boolean;
   error?: boolean;
@@ -13,7 +13,7 @@ export interface TestRunsTabProps {
   onPageChange(page: number): void;
 }
 
-export function TestRunsTab({
+export function AgentRunsTab({
   data,
   total,
   loading,
@@ -22,15 +22,15 @@ export function TestRunsTab({
   page,
   pageSize,
   onPageChange,
-}: TestRunsTabProps) {
+}: AgentRunsTabProps) {
   return (
     <DataTable
-      columns={buildTestRunColumns()}
+      columns={buildAgentRunColumns()}
       data={data}
       loading={loading}
       error={error}
       onRetry={onRetry}
-      emptyText="该空间暂无测试运行。"
+      emptyText="该空间暂无执行记录。"
       pagination={{
         page,
         pageSize,

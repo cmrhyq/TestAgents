@@ -4,12 +4,13 @@ import { ArrowLeft, Download } from "lucide-react";
 import { useReportDetail, downloadReport } from "@/hooks/use-reports.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
-import { TestResultsTable } from "@/components/report/test-results-table.tsx";
+import { ToolCallsTable } from "@/components/report/tool-calls-table.tsx";
 import { ResponseTimeStats } from "@/components/report/response-time-stats.tsx";
 import { cn } from "@/lib/utils";
-import { formatDuration } from "@/lib/format";
+import { formatCost, formatDurationMs, formatTokens } from "@/lib/format";
 
 export default function ReportViewPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,30 +52,37 @@ export default function ReportViewPage() {
     );
   }
 
-  const { test_run, test_results } = data;
-  const failedResults = test_results.filter((r) => r.status === "failed" || r.status === "error");
+  const { run, tool_calls } = data;
+  const failedCalls = tool_calls.filter((c) => c.ok !== 1);
+  const durations = tool_calls.map((c) => c.duration_ms);
 
   const summaryItems = [
-    { label: "总数", value: test_run.total_cases, className: "", dot: null as string | null },
-    {
-      label: "已通过",
-      value: test_run.passed_cases,
-      className: "text-success",
-      dot: "bg-success",
-    },
+    { label: "工具调用", value: run.tool_call_count, className: "", dot: null as string | null },
+    { label: "已成功", value: run.ok_count, className: "text-success", dot: "bg-success" },
     {
       label: "已失败",
-      value: test_run.failed_cases,
+      value: run.error_count,
       className: "text-destructive",
       dot: "bg-destructive",
     },
     {
-      label: "已跳过",
-      value: test_run.skipped_cases,
+      label: "LLM 调用",
+      value: run.llm_call_count,
       className: "",
-      dot: "bg-muted-foreground/50",
+      dot: null as string | null,
     },
-    { label: "错误", value: test_run.error_cases, className: "text-warning", dot: "bg-warning" },
+    {
+      label: "Tokens",
+      value: formatTokens(run.total_tokens),
+      className: "",
+      dot: null as string | null,
+    },
+    {
+      label: "成本",
+      value: formatCost(run.cost_usd),
+      className: "",
+      dot: null as string | null,
+    },
   ];
 
   return (
@@ -86,11 +94,15 @@ export default function ReportViewPage() {
           </Button>
           <div>
             <div className="annotation mb-1 text-primary">REPORT_{data.id}</div>
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-              {test_run.name}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+                {run.title || `执行 ${data.run_id}`}
+              </h1>
+              <StatusBadge status={run.status} />
+            </div>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              {test_run.llm_provider} / {test_run.llm_model} &middot; 生成于 {data.generated_at}
+              {run.llm_provider || "—"} / {run.llm_model || "—"} &middot; 模式 {run.mode} &middot;
+              生成于 {data.generated_at}
             </p>
           </div>
         </div>
@@ -122,37 +134,37 @@ export default function ReportViewPage() {
             </div>
           ))}
           <div className="flex flex-1 flex-col justify-center gap-2 px-6 py-5">
-            <span className="text-xs text-muted-foreground">通过率</span>
-            <PassRateBar passed={test_run.passed_cases} total={test_run.total_cases} />
+            <span className="text-xs text-muted-foreground">成功率</span>
+            <PassRateBar passed={run.ok_count} total={run.tool_call_count} />
           </div>
           <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
             <span className="text-xs text-muted-foreground">耗时</span>
             <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {formatDuration(test_run.total_duration)}
+              {formatDurationMs(run.duration_ms)}
             </span>
           </div>
         </div>
       </div>
 
-      {/* 响应时间统计 */}
-      <ResponseTimeStats results={test_results} />
+      {/* 工具调用耗时统计 */}
+      <ResponseTimeStats durations={durations} label="工具耗时" />
 
-      {/* 失败/错误用例 */}
-      {failedResults.length > 0 && (
+      {/* 失败调用 */}
+      {failedCalls.length > 0 && (
         <div className="space-y-3">
           <h2 className="font-display text-lg font-semibold text-destructive">
-            失败 / 错误用例（{failedResults.length}）
+            失败调用（{failedCalls.length}）
           </h2>
-          <TestResultsTable results={failedResults} danger />
+          <ToolCallsTable calls={failedCalls} bodyLoaded emptyText="没有失败的调用" danger />
         </div>
       )}
 
-      {/* 全部测试结果 */}
+      {/* 全部工具调用 */}
       <div className="space-y-3">
         <h2 className="font-display text-lg font-semibold text-foreground">
-          全部测试结果（{test_results.length}）
+          全部工具调用（{tool_calls.length}）
         </h2>
-        <TestResultsTable results={test_results} />
+        <ToolCallsTable calls={tool_calls} bodyLoaded emptyText="这轮执行没有调用任何工具" />
       </div>
     </div>
   );

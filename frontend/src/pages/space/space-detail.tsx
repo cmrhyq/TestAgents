@@ -5,7 +5,7 @@ import { MessageSquare } from "lucide-react";
 import { useSpace } from "@/hooks/use-spaces.ts";
 import { useEndpoints, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
 import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
-import { useTestRuns } from "@/hooks/use-test-runs.ts";
+import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
 import { Card, CardContent } from "@/components/ui/card.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -18,7 +18,7 @@ import { EnvironmentFormDialog } from "@/components/environment/environment-form
 import type { Endpoint, Environment } from "@/lib/types.ts";
 import { EndpointsTab } from "./tabs/endpoints-tab";
 import { EnvironmentsTab } from "./tabs/environments-tab";
-import { TestRunsTab } from "./tabs/test-runs-tab";
+import { AgentRunsTab } from "./tabs/agent-runs-tab";
 import { OverviewTab } from "./tabs/overview-tab";
 import { ConversationsTab } from "./tabs/conversations-tab";
 import { MemoriesTab } from "./tabs/memories-tab";
@@ -39,7 +39,7 @@ export default function SpaceDetailPage() {
   const { data: space, isLoading: spaceLoading } = useSpace(spaceId);
 
   const [endpointPage, setEndpointPage] = useState(1);
-  const [testRunPage, setTestRunPage] = useState(1);
+  const [agentRunPage, setAgentRunPage] = useState(1);
   const [endpointKeyword, setEndpointKeyword] = useState("");
   const debouncedEndpointKeyword = useDebouncedValue(endpointKeyword, 300);
 
@@ -68,13 +68,13 @@ export default function SpaceDetailPage() {
     space_id: spaceId,
   });
   const {
-    data: testRunsData,
-    isLoading: testRunsLoading,
-    isError: testRunsError,
-    refetch: refetchTestRuns,
-  } = useTestRuns({
+    data: agentRunsData,
+    isLoading: agentRunsLoading,
+    isError: agentRunsError,
+    refetch: refetchAgentRuns,
+  } = useAgentRuns({
     space_id: spaceId,
-    page: testRunPage,
+    page: agentRunPage,
     page_size: PAGE_SIZE,
   });
 
@@ -143,7 +143,7 @@ export default function SpaceDetailPage() {
           <TabsTrigger value="environments">环境</TabsTrigger>
           <TabsTrigger value="memories">记忆</TabsTrigger>
           <TabsTrigger value="knowledge">知识库</TabsTrigger>
-          <TabsTrigger value="test-runs">测试运行</TabsTrigger>
+          <TabsTrigger value="agent-runs">执行记录</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -205,16 +205,16 @@ export default function SpaceDetailPage() {
           <KnowledgeTab spaceId={spaceId} />
         </TabsContent>
 
-        <TabsContent value="test-runs" className="space-y-4">
-          <TestRunsTab
-            data={testRunsData?.items ?? []}
-            total={testRunsData?.total ?? 0}
-            loading={testRunsLoading}
-            error={testRunsError}
-            onRetry={() => refetchTestRuns()}
-            page={testRunPage}
+        <TabsContent value="agent-runs" className="space-y-4">
+          <AgentRunsTab
+            data={agentRunsData?.items ?? []}
+            total={agentRunsData?.total ?? 0}
+            loading={agentRunsLoading}
+            error={agentRunsError}
+            onRetry={() => refetchAgentRuns()}
+            page={agentRunPage}
             pageSize={PAGE_SIZE}
-            onPageChange={setTestRunPage}
+            onPageChange={setAgentRunPage}
           />
         </TabsContent>
       </Tabs>
