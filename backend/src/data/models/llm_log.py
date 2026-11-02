@@ -34,6 +34,9 @@ class LLMLog(Base):
     # ---- 归因维度（无外键，见类 docstring）----
     space_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="所属空间 ID（可空）")
     conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="所属会话 ID（可空）")
+    # 所属执行记录（agent_run.id）。同样不建外键：清理 90 天前的执行记录时
+    # 成本历史必须留存，加 FK 会被级联删除或被置空变孤儿。
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="所属执行记录 ID（可空）")
 
     # ---- 路由与成本 ----
     routing_tier: Mapped[str] = mapped_column(
@@ -51,4 +54,5 @@ class LLMLog(Base):
         # 成本按「空间/会话 + 时间」聚合是最常见的查询形态，建复合索引
         Index("idx_llm_log_space", "space_id", "created_at"),
         Index("idx_llm_log_conversation", "conversation_id", "created_at"),
+        Index("idx_llm_log_run", "run_id", "created_at"),
     )
