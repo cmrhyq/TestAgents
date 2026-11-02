@@ -16,14 +16,14 @@ class SpaceRepository(BaseRepository[Space]):
         return self._session.scalar(stmt)
 
     def delete_cascade(self, space_id: int) -> bool:
-        """级联删除空间及其关联的 environments、endpoints、test_runs 等数据。"""
+        """级联删除空间及其关联的 environments、endpoints、agent_runs 等数据。"""
         stmt = (
             select(Space)
             .where(Space.id == space_id)
             .options(
                 selectinload(Space.endpoints),
                 selectinload(Space.environments),
-                selectinload(Space.test_runs),
+                selectinload(Space.agent_runs),
             )
         )
         space = self._session.scalar(stmt)

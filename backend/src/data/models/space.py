@@ -9,12 +9,12 @@ from src.data.models.base import Base, local_now
 from src.utils.id import next_id
 
 if TYPE_CHECKING:
+    from src.data.models.agent_run import AgentRun
     from src.data.models.conversation import Conversation
     from src.data.models.endpoint import Endpoint
     from src.data.models.environment import Environment
     from src.data.models.knowledge import KnowledgeDocument
     from src.data.models.space_memory import SpaceMemory
-    from src.data.models.test_run import TestRun
 
 
 class Space(Base):
@@ -36,7 +36,7 @@ class Space(Base):
 
     endpoints: Mapped[list[Endpoint]] = relationship(back_populates="space", cascade="all, delete-orphan")
     environments: Mapped[list[Environment]] = relationship(back_populates="space", cascade="all, delete-orphan")
-    test_runs: Mapped[list[TestRun]] = relationship(back_populates="space", cascade="all, delete-orphan")
+    agent_runs: Mapped[list[AgentRun]] = relationship(back_populates="space", cascade="all, delete-orphan")
     conversations: Mapped[list[Conversation]] = relationship(back_populates="space", cascade="all, delete-orphan")
     memories: Mapped[list[SpaceMemory]] = relationship(back_populates="space", cascade="all, delete-orphan")
     documents: Mapped[list[KnowledgeDocument]] = relationship(

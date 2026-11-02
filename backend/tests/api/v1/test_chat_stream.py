@@ -29,6 +29,7 @@ from src.agent.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from src.agent.recording import NullRecorder
 from src.api.v1.chat import router as chat_router
 from src.data.services.chat_stream_service import ChatStreamService
 
@@ -52,7 +53,7 @@ def _frame_ids(body: str) -> list[int]:
     return [int(line.split(":", 1)[1].strip()) for line in body.split("\n") if line.startswith("id:")]
 
 
-async def _fake_run(_request):
+async def _fake_run(_request, *, recorder=None):
     """预置事件序列：工具调用一次，再给最终回答。"""
     yield StartEvent(conversation_id=7, space_id=1, mode="agent", skills=["s"])
     yield ToolCallEvent(id="c1", name="get_space_endpoints", args={"space_id": 1})
@@ -62,9 +63,57 @@ async def _fake_run(_request):
     yield FinalEvent(answer="空间 1 共有 0 个接口。")
 
 
-async def _failing_run(_request):
+async def _failing_run(_request, *, recorder=None):
     yield StartEvent(conversation_id=7, space_id=1, mode="agent", skills=[])
     yield ErrorEvent(message="模型调用失败：网关超时")
+
+
+class _SpyRecorder:
+    """记录调用过程的假记录器，供终态断言使用。"""
+
+    run_id: int | None = None
+
+    def __init__(self) -> None:
+        self.started: dict | None = None
+        self.finished: dict | None = None
+        self.tool_calls: list[dict] = []
+
+    def start(self, **kwargs) -> int | None:
+        self.started = kwargs
+        self.run_id = 9001
+        return 9001
+
+    def tool_call(self, **kwargs) -> None:
+        self.tool_calls.append(kwargs)
+
+    def finish(self, *, status: str, error_message: str = "") -> None:
+        self.finished = {"status": status, "error_message": error_message}
+
+
+def _spy_factory() -> tuple[_SpyRecorder, type]:
+    """构造「同一个实例」的记录器类，便于测试拿到实例断言。"""
+    spy = _SpyRecorder()
+
+    class _Factory(_SpyRecorder):
+        def __new__(cls, *args, **kwargs):
+            return spy
+
+    return spy, _Factory
+
+
+def _make_body(**overrides):
+    from types import SimpleNamespace as NS
+
+    payload = {
+        "instruction": "空间 1 有哪些接口",
+        "space_id": 1,
+        "conversation_id": 7,
+        "mode": "agent",
+        "skill_names": [],
+        "environment_id": None,
+    }
+    payload.update(overrides)
+    return NS(**payload)
 
 
 @pytest.fixture()
@@ -75,14 +124,19 @@ def client() -> TestClient:
 
 
 @contextmanager
-def patched(*, runner=_fake_run, prepare=None, conversation_id: int = 7):
-    """替换外部依赖：会话落库、上下文装配、回答落库、runner。"""
+def patched(*, runner=_fake_run, prepare=None, conversation_id: int = 7, recorder_cls=NullRecorder):
+    """替换外部依赖：会话落库、上下文装配、回答落库、runner、执行记录器。
+
+    执行记录器换成 ``NullRecorder``：这组测试聚焦 SSE 协议，不该因为
+    测试环境没有数据库而反复打印「记录创建失败」并让断言依赖 DB。
+    """
     prepare = prepare or (lambda body, cid: RunRequest(instruction="问", space_id=1, mode="agent"))
     with (
         patch.object(ChatStreamService, "ensure_conversation", return_value=conversation_id),
         patch.object(ChatStreamService, "prepare", side_effect=prepare),
         patch.object(ChatStreamService, "save_answer") as save,
         patch("src.data.services.chat_stream_service.run_agent", side_effect=runner),
+        patch("src.data.services.chat_stream_service.AgentRunRecorder", recorder_cls),
     ):
         yield SimpleNamespace(save=save)
 
@@ -234,3 +288,98 @@ class TestPreconditions:
 
         assert response.status_code == 200
         assert _parse_frames(response.text)[0]["type"] == "start"
+
+
+# ---------------------------------------------------------------------------
+# 执行记录生命周期
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRunRecorderLifecycle:
+    """终态判定是本轮改造的核心：``finally`` 必须把三种收尾都写对。
+
+    最要紧的是**断流**：客户端关标签页时 Starlette 对生成器调 ``aclose()``，
+    挂起点抛 ``GeneratorExit``。如果 ``finally`` 里 ``await``（写库）就会被
+    ``CancelledError`` 打断，记录永久卡在 ``running``——清理任务还不敢碰它。
+    """
+
+    async def test_start_is_called_with_request_context(self):
+        spy, factory = _spy_factory()
+
+        with patched(recorder_cls=factory):
+            async for _ in ChatStreamService().stream_answer(_make_body(), 7):
+                pass
+
+        assert spy.started is not None
+        assert spy.started["space_id"] == 1
+        assert spy.started["conversation_id"] == 7
+        assert spy.started["mode"] == "agent"
+        assert spy.started["title"] == "空间 1 有哪些接口"
+
+    async def test_run_id_is_backfilled_into_request(self):
+        seen: dict = {}
+
+        async def _capture(request, *, recorder=None):
+            seen["run_id"] = request.run_id
+            seen["recorder"] = recorder
+            yield StartEvent(conversation_id=7, space_id=1, mode="agent", skills=[])
+            yield FinalEvent(answer="好")
+
+        spy, factory = _spy_factory()
+        with patched(runner=_capture, recorder_cls=factory):
+            async for _ in ChatStreamService().stream_answer(_make_body(), 7):
+                pass
+
+        # run_id 必须回填，否则 runner 里的工具埋点与 llm_log 的 run_id 会全是空
+        assert seen["run_id"] == 9001
+        assert seen["recorder"] is spy
+
+    async def test_completed_status_and_answer_persisted(self):
+        spy, factory = _spy_factory()
+
+        with patched(recorder_cls=factory) as mocks:
+            async for _ in ChatStreamService().stream_answer(_make_body(), 7):
+                pass
+
+        assert spy.finished == {"status": "completed", "error_message": ""}
+        mocks.save.assert_called_once_with(7, "空间 1 共有 0 个接口。")
+
+    async def test_error_event_marks_failed_and_skips_persist(self):
+        spy, factory = _spy_factory()
+
+        with patched(runner=_failing_run, recorder_cls=factory) as mocks:
+            async for _ in ChatStreamService().stream_answer(_make_body(), 7):
+                pass
+
+        assert spy.finished["status"] == "failed"
+        assert "网关超时" in spy.finished["error_message"]
+        mocks.save.assert_not_called()
+
+    async def test_generator_aclose_marks_cancelled(self):
+        """模拟客户端断连：取到第一帧就 aclose，终态必须是 cancelled。"""
+        spy, factory = _spy_factory()
+
+        with patched(recorder_cls=factory) as mocks:
+            gen = ChatStreamService().stream_answer(_make_body(), 7)
+            first = await gen.__anext__()
+            assert "event: start" in first
+            await gen.aclose()
+
+        assert spy.finished == {"status": "cancelled", "error_message": ""}
+        # 半截回答不能落库：断流时 answer 还没拼完
+        mocks.save.assert_not_called()
+
+    async def test_prepare_failure_creates_no_record(self):
+        """上下文装配就失败时不该留下任何记录——那时 finally 还没建立。"""
+        spy, factory = _spy_factory()
+
+        def boom(_body, _cid):
+            raise RuntimeError("db down")
+
+        with patched(prepare=boom, recorder_cls=factory):
+            async for _ in ChatStreamService().stream_answer(_make_body(), 7):
+                pass
+
+        assert spy.started is None
+        assert spy.finished is None
