@@ -5,7 +5,7 @@ interface PassRateBarProps {
   total: number;
 }
 
-/** 蓝图式通过率：mono 读数 + 墨线刻度条（填充带垂直刻度线）。 */
+/** 通过率：百分比读数与刻度条，总数为 0 时显示占位符。 */
 export function PassRateBar({ passed, total }: PassRateBarProps) {
   if (total === 0) {
     return <span className="font-mono text-sm text-muted-foreground">--</span>;

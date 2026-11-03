@@ -1,4 +1,4 @@
-/** 领域类型聚合导出（按域拆分于 ./types/ 目录）。 */
+/** 领域类型的聚合出口，各域定义位于 `./types/`。 */
 
 export * from "./types/common";
 export * from "./types/space";

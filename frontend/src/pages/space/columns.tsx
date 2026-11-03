@@ -15,11 +15,13 @@ import type { Column } from "@/components/shared/data-table.tsx";
 import type { AgentRun, Endpoint } from "@/lib/types.ts";
 import { formatDate, formatDurationMs } from "@/lib/format";
 
+/** 接口表格行的编辑与删除回调。 */
 export interface EndpointRowHandlers {
   onEdit(endpoint: Endpoint): void;
   onDelete(endpoint: Endpoint): void;
 }
 
+/** 构建接口表格的列定义。 */
 export function buildEndpointColumns({
   onEdit,
   onDelete,
@@ -79,6 +81,7 @@ export function buildEndpointColumns({
   ];
 }
 
+/** 构建执行记录表格的列定义。 */
 export function buildAgentRunColumns(): Column<AgentRun>[] {
   return [
     {
@@ -110,8 +113,7 @@ export function buildAgentRunColumns(): Column<AgentRun>[] {
     {
       key: "success_rate",
       header: "成功率",
-      // PassRateBar 传的是「分子/分母」而不是百分比：tool_call_count 为 0
-      // 时它会渲染 "--"，避免把「没调过工具」显示成「0% 全失败」。
+      // 传分子与分母而非百分比：调用数为 0 时渲染占位符，不显示为 0%
       render: (_, row) => <PassRateBar passed={row.ok_count} total={row.tool_call_count} />,
     },
     {

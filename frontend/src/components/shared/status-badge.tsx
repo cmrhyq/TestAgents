@@ -4,7 +4,7 @@ interface StatusBadgeProps {
   status: string | number;
 }
 
-/** 印章式状态徽章：描边 + mono 标注，pending 用虚线（草稿批注感）。 */
+/** 各状态名的徽章配色。 */
 const statusStyles: Record<string, string> = {
   completed: "border-success/50 bg-success/5 text-success",
   passed: "border-success/50 bg-success/5 text-success",
@@ -37,7 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
   deprecated: "已废弃",
 };
 
-/** 数值状态（DataStatus：1 启用 / 2 禁用 / 3 删除 / 4 废弃）→ 语义名。 */
+/** 数值状态（1 启用 / 2 禁用 / 3 删除 / 4 废弃）到语义名的映射。 */
 const NUMERIC_STATUS: Record<number, string> = {
   1: "active",
   2: "inactive",
@@ -45,6 +45,7 @@ const NUMERIC_STATUS: Record<number, string> = {
   4: "deprecated",
 };
 
+/** 状态徽章：把字符串或数值状态统一渲染为带配色的标签。 */
 export function StatusBadge({ status }: StatusBadgeProps) {
   const normalized = (
     typeof status === "number" ? (NUMERIC_STATUS[status] ?? "") : status

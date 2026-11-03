@@ -12,6 +12,7 @@ import { ResponseTimeStats } from "@/components/report/response-time-stats.tsx";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/format";
 
+/** 报告详情页：执行汇总、工具耗时统计与工具调用明细。 */
 export default function ReportViewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -112,7 +113,6 @@ export default function ReportViewPage() {
         </Button>
       </div>
 
-      {/* 汇总读数带：去卡片化分组横排 */}
       <div className="rounded-[4px] border border-border bg-card shadow-xs">
         <div className="flex flex-col divide-y divide-border-subtle sm:flex-row sm:divide-x sm:divide-y-0">
           {summaryItems.map((item) => (
@@ -146,10 +146,8 @@ export default function ReportViewPage() {
         </div>
       </div>
 
-      {/* 工具调用耗时统计 */}
       <ResponseTimeStats durations={durations} label="工具耗时" />
 
-      {/* 失败调用 */}
       {failedCalls.length > 0 && (
         <div className="space-y-3">
           <h2 className="font-display text-lg font-semibold text-destructive">
@@ -159,7 +157,6 @@ export default function ReportViewPage() {
         </div>
       )}
 
-      {/* 全部工具调用 */}
       <div className="space-y-3">
         <h2 className="font-display text-lg font-semibold text-foreground">
           全部工具调用（{tool_calls.length}）

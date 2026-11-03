@@ -1,3 +1,5 @@
+/** 应用入口：挂载查询客户端、路由与全局 Provider。 */
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
@@ -8,6 +10,7 @@ import { router } from "./router";
 import { useTheme } from "./hooks/use-theme";
 import "./index.css";
 
+// 全局查询默认值：30 秒内视为新鲜，失败只重试 1 次，窗口重新聚焦不重取
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

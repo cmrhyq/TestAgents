@@ -1,3 +1,4 @@
+/** 标签：`variant` 控制配色，其余外观由 `className` 覆盖。 */
 import type { HTMLAttributes } from "react";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";

@@ -1,6 +1,6 @@
 import type { Id, PaginatedResponse } from "./common";
 
-/** 工具分类（与后端 agent_tool_call.tool_type 的 CHECK 约束一一对应） */
+/** 工具分类，取值与后端 `agent_tool_call.tool_type` 的 CHECK 约束一致。 */
 export type ToolType =
   | "http"
   | "db"
@@ -12,7 +12,7 @@ export type ToolType =
   | "search"
   | "other";
 
-/** 执行记录状态。刻意没有 pending——记录在「本轮开始」时才插入，插入即 running。 */
+/** 执行记录状态；记录在轮次开始时插入，因此不存在 pending 态。 */
 export type AgentRunStatus = "running" | "completed" | "failed" | "cancelled";
 
 /** 一轮 ReAct 对话的执行记录。 */
@@ -33,7 +33,7 @@ export interface AgentRun {
   ok_count: number;
   /** 失败的工具调用数 */
   error_count: number;
-  /** 工具调用成功率（0-100 百分比） */
+  /** 工具调用成功率，取值 0-100 */
   success_rate: number;
   /** 工具调用平均耗时（毫秒） */
   avg_response_time: number;
@@ -72,7 +72,7 @@ export interface AgentRunBrief {
   finished_at: string | null;
 }
 
-/** 工具调用留痕摘要（不含请求/响应正文）。 */
+/** 工具调用留痕摘要，不含请求与响应正文。 */
 export interface AgentToolCallBrief {
   id: Id;
   seq: number;
@@ -89,7 +89,7 @@ export interface AgentToolCallBrief {
   created_at: string;
 }
 
-/** 工具调用留痕（列表口径，不含正文）。 */
+/** 工具调用留痕的列表形态，不含正文。 */
 export interface AgentToolCall extends AgentToolCallBrief {
   run_id: Id;
   step_index: number;
@@ -101,7 +101,7 @@ export interface AgentToolCall extends AgentToolCallBrief {
   response_size_bytes: number;
 }
 
-/** 工具调用留痕详情（include_body=true 时才有正文字段）。 */
+/** 工具调用留痕详情；仅 `include_body=true` 时返回正文字段。 */
 export interface AgentToolCallDetail extends AgentToolCall {
   args_json: string;
   request_headers: string | null;
@@ -113,12 +113,12 @@ export interface AgentToolCallDetail extends AgentToolCall {
 
 export type AgentToolCallListResponse = PaginatedResponse<AgentToolCall>;
 
-/** 执行记录详情（含工具调用摘要列表，不含正文）。 */
+/** 执行记录详情，含工具调用摘要列表但不含正文。 */
 export interface AgentRunDetail extends AgentRun {
   tool_calls: AgentToolCallBrief[];
 }
 
-/** 清理接口返回。 */
+/** 清理接口的返回结果。 */
 export interface AgentCleanupResult {
   cutoff: string;
   days: number;

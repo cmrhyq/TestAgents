@@ -1,3 +1,4 @@
+/** 加载骨架占位块。 */
 import type { HTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";

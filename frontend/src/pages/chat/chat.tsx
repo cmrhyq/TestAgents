@@ -15,11 +15,9 @@ import {
 import { SpaceSelector } from "@/components/space/space-selector";
 
 /**
- * 对话页。
+ * 对话页：URL 中的 `space_id` 与 `conversation_id` 是唯一状态源。
  *
- * URL 是唯一状态源：``space_id`` + ``conversation_id``。
- * 这样刷新、分享链接、浏览器后退都能还原到同一轮对话，
- * 组件内部不再维护一份「当前会话」的副本。
+ * 刷新、分享链接与浏览器前进后退都按 URL 还原，组件内部不保留当前会话的副本。
  */
 export default function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -57,12 +55,11 @@ export default function ChatPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 有新内容时滚动到底部
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [serverMessages.length, pendingUser, answer, tools.length]);
 
-  /** 切空间：清空 conversation_id（会话归属空间，错配会串上下文）。 */
+  /** 切换空间：同时清空 `conversation_id`，避免跨空间串上下文。 */
   const handleSpaceChange = (nextSpaceId: string | number) => {
     setSearchParams({ space_id: String(nextSpaceId) }, { replace: true });
   };
@@ -94,7 +91,6 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      {/* 左：空间下的会话列表 */}
       <div className="hidden w-[220px] shrink-0 md:block">
         <ConversationListPanel
           spaceId={spaceId}
@@ -104,7 +100,6 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* 右：对话区 */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
           <SpaceSelector value={spaceId} onChange={handleSpaceChange} />
@@ -158,7 +153,6 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Composer：固定在页面底部 */}
         <div className="shrink-0 px-4 pb-6">
           <ChatInput
             instruction={instruction}

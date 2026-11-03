@@ -31,6 +31,7 @@ const SPACE_STATUS_MAP: Record<number, string> = {
 
 const PAGE_SIZE = 10;
 
+/** 空间详情页：概览、会话、接口、环境、记忆、知识库与执行记录。 */
 export default function SpaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -43,7 +44,6 @@ export default function SpaceDetailPage() {
   const [endpointKeyword, setEndpointKeyword] = useState("");
   const debouncedEndpointKeyword = useDebouncedValue(endpointKeyword, 300);
 
-  // 搜索条件变化时回到第 1 页
   useEffect(() => {
     setEndpointPage(1);
   }, [debouncedEndpointKeyword]);
@@ -124,7 +124,6 @@ export default function SpaceDetailPage() {
               )}
             </div>
 
-            {/* 空间是对话的入口：从这里进去会自动带上 space_id */}
             <Button asChild size="sm">
               <Link to={`/chat?space_id=${space.id}`}>
                 <MessageSquare className="mr-2 h-3.5 w-3.5" />

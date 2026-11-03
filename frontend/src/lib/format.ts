@@ -10,6 +10,7 @@ const RELATIVE_UNITS: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
   { unit: "second", ms: 1000 },
 ];
 
+/** 把 ISO 时间格式化为中文相对时间；非法时间返回空串。 */
 export function formatRelativeTime(isoString: string): string {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) {
@@ -28,12 +29,14 @@ export function formatRelativeTime(isoString: string): string {
   return rtf.format(0, "second");
 }
 
+/** 把字节数格式化为带单位的字符串（B / KB / MB）。 */
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** 美化 JSON 字符串；解析失败时原样返回，空输入返回空串。 */
 export function formatJson(raw: string | null | undefined): string {
   if (!raw) return "";
   try {
@@ -43,6 +46,7 @@ export function formatJson(raw: string | null | undefined): string {
   }
 }
 
+/** 格式化为本地日期字符串；空值或非法时间返回 `--`。 */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "--";
   const date = new Date(value);
@@ -53,10 +57,9 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /**
- * 毫秒耗时格式化。
+ * 把毫秒耗时格式化为可读字符串，按毫秒、秒、分秒三级切换。
  *
- * 后端 `duration_ms` 一律是毫秒整数，用它替代老的 `total_duration`（秒）。
- * 分级是为了读数带好看：一次工具调用 45ms 显示成 "0.05s" 毫无信息量。
+ * 入参为后端的 `duration_ms` 字段，单位固定为毫秒；空值或非正数返回 `--`。
  */
 export function formatDurationMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || ms <= 0) return "--";
@@ -67,13 +70,13 @@ export function formatDurationMs(ms: number | null | undefined): string {
   return `${minutes}m${seconds}s`;
 }
 
-/** 成本格式化：小额给到 4 位小数，否则 2 位。 */
+/** 成本格式化：小于 1 美元保留 4 位小数，否则保留 2 位。 */
 export function formatCost(usd: number | null | undefined): string {
   if (!usd || usd <= 0) return "$0";
   return usd < 1 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
-/** token 数：千级以上压缩成 12.3k，读数带不被挤爆。 */
+/** 把 token 数格式化为带 k 单位的字符串，千级以下原样返回。 */
 export function formatTokens(tokens: number | null | undefined): string {
   if (!tokens || tokens <= 0) return "0";
   if (tokens < 1000) return String(tokens);

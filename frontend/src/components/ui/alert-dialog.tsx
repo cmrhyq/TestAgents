@@ -1,3 +1,4 @@
+/** 警告对话框：Radix AlertDialog 的样式封装，用于不可撤销操作的二次确认。 */
 import type { HTMLAttributes, MouseEvent, ReactNode } from "react";
 import { forwardRef, useCallback } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";

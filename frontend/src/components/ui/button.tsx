@@ -1,3 +1,4 @@
+/** 按钮：`variant` 控制视觉变体，`size` 控制尺寸，`asChild` 时把样式交给子元素。 */
 import type { ButtonHTMLAttributes } from "react";
 import { forwardRef } from "react";
 import { Slot } from "@radix-ui/react-slot";
