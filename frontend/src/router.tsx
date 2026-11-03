@@ -83,7 +83,8 @@ export const router = createBrowserRouter([
             },
           },
           {
-            path: "reports/:id",
+            // 报告以 run 为单位：路由参数就是 run_id
+            path: "reports/:runId",
             lazy: async () => {
               const { default: Component } = await import("./pages/report/report-view.tsx");
               return { Component };

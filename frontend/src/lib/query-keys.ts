@@ -17,7 +17,12 @@ export const queryKeys = {
     toolCalls: (runId: ResourceId, includeBody: boolean) =>
       ["agent-runs", "tool-calls", runId, includeBody] as const,
   },
-  reports: createResourceKeys("reports"),
+  reports: {
+    ...createResourceKeys("reports"),
+    /** 单条请求正文（详情页展开时按需拉） */
+    request: (runId: ResourceId, requestId: ResourceId) =>
+      ["reports", "request", runId, requestId] as const,
+  },
   skills: createResourceKeys("skills"),
   conversations: {
     ...createResourceKeys("conversations"),

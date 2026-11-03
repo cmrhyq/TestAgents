@@ -48,7 +48,6 @@ def mock_chat_model():
 
 
 @pytest.fixture(autouse=True)
-def _env_setup(tmp_path, monkeypatch):
-    """确保测试环境不读取真实配置，使用临时目录存放输出。"""
+def _env_setup(monkeypatch):
+    """确保测试环境不读取真实配置。"""
     monkeypatch.setenv("LLMTESTAGENT_ENV", "test")
-    monkeypatch.setenv("REPORT_OUTPUT_DIR", str(tmp_path / "reports"))

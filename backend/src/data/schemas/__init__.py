@@ -69,6 +69,7 @@ from src.data.schemas.report import (
     ReportDetailResponse,
     ReportListResponse,
     ReportResponse,
+    ReportStat,
 )
 
 __all__ = [
@@ -116,6 +117,7 @@ __all__ = [
     "ReportResponse",
     "ReportListResponse",
     "ReportDetailResponse",
+    "ReportStat",
     "ConversationBase",
     "ConversationCreate",
     "ConversationUpdate",

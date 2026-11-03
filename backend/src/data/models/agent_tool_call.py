@@ -75,5 +75,7 @@ class AgentToolCall(Base):
         CheckConstraint("ok IN (0,1)", name="ck_tool_call_ok"),
         Index("idx_atc_run", "run_id", "seq"),
         Index("idx_atc_tool_created", "tool_name", "created_at"),
+        # 测试报告按 tool_name 过滤 + 按 run_id 分组，这条索引专供它
+        Index("idx_atc_tool_run", "tool_name", "run_id"),
         Index("idx_atc_http_url", "http_url"),
     )

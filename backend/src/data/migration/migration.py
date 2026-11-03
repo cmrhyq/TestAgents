@@ -23,7 +23,6 @@ EXPECTED_TABLES = [
     "endpoint",
     "agent_run",
     "agent_tool_call",
-    "report",
     "conversation",
     "message",
     "llm_log",
@@ -51,9 +50,12 @@ def init_database_from_orm(manager: DatabaseManager | None = None) -> None:
     # 延迟导入：避免 migration 模块循环依赖
     from src.data.migration.v2_agent_migration import migrate_v2
     from src.data.migration.v3_agent_run_migration import migrate_v3
+    from src.data.migration.v4_remove_report_table import migrate_v4
 
     migrate_v2(mgr.engine)
     migrate_v3(mgr.engine)
+    # 必须排在 v3 之后：v3 会在历史库上重建 report 表，v4 再把它删掉
+    migrate_v4(mgr.engine)
 
     _create_views(mgr)
     logger.info("通过ORM模型初始化数据库完成", method="orm")

@@ -11,7 +11,6 @@ from src.utils.id import next_id
 if TYPE_CHECKING:
     from src.data.models.agent_tool_call import AgentToolCall
     from src.data.models.environment import Environment
-    from src.data.models.report import Report
     from src.data.models.space import Space
 
 
@@ -77,7 +76,6 @@ class AgentRun(Base):
         cascade="all, delete-orphan",
         order_by="AgentToolCall.seq",
     )
-    reports: Mapped[list[Report]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("status IN ('running','completed','failed','cancelled')", name="ck_agent_run_status"),

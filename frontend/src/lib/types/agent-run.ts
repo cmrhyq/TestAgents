@@ -126,7 +126,4 @@ export interface AgentCleanupResult {
   dry_run: boolean;
   deleted_runs: number;
   deleted_tool_calls: number;
-  deleted_reports: number;
-  /** 已删库但磁盘文件仍在的报告路径 */
-  orphan_files: string[];
 }

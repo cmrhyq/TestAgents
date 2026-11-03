@@ -3,7 +3,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, FileText } from "lucide-react";
 
 import { useAgentRunDetail, useAgentToolCalls } from "@/hooks/use-agent-runs.ts";
-import { useReports } from "@/hooks/use-reports.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
@@ -28,11 +27,10 @@ export default function RunDetailPage() {
     refetch: refetchCalls,
   } = useAgentToolCalls(runId, { includeBody: wantBody });
 
-  const { data: reportsData } = useReports({ run_id: runId });
-
   const isActive = data?.status === "running";
-  const firstReport = reportsData?.items?.[0];
   const calls = callsData?.items ?? [];
+  // 报告 = 这轮执行里的 send_request，没有 HTTP 调用就没有报告可看
+  const hasHttpCalls = calls.some((call) => call.tool_name === "send_request");
 
   if (isLoading) {
     return (
@@ -115,11 +113,11 @@ export default function RunDetailPage() {
           </span>
           {isActive && <Loader2 className="h-4 w-4 animate-spin text-info" />}
         </div>
-        {firstReport && (
+        {hasHttpCalls && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/reports/${firstReport.id}`)}
+            onClick={() => navigate(`/reports/${String(data.id)}`)}
           >
             <FileText className="mr-2 h-4 w-4" />
             查看报告

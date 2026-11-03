@@ -166,26 +166,12 @@ CREATE TABLE IF NOT EXISTS agent_tool_call
 
 CREATE INDEX IF NOT EXISTS idx_atc_run          ON agent_tool_call (run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_atc_tool_created ON agent_tool_call (tool_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_atc_tool_run     ON agent_tool_call (tool_name, run_id);
 CREATE INDEX IF NOT EXISTS idx_atc_http_url     ON agent_tool_call (http_url);
 
 
--- ============================================================================
--- 6. 报告记录表 (report)
---     记录每次生成的报告文件路径与元信息
--- ============================================================================
-CREATE TABLE IF NOT EXISTS report
-(
-    id           INTEGER PRIMARY KEY,
-    run_id       INTEGER NOT NULL,
-    format       TEXT    NOT NULL CHECK (format IN ('excel', 'html', 'markdown', 'json')),
-    file_path    TEXT    NOT NULL,
-    file_size    INTEGER          DEFAULT 0,
-    generated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (run_id) REFERENCES agent_run (id) ON DELETE CASCADE
-);
+-- 测试报告不再建表：报告 = 按 run_id 聚合 agent_tool_call 中 tool_name='send_request' 的行
 
-CREATE INDEX IF NOT EXISTS idx_report_run ON report (run_id);
-CREATE INDEX IF NOT EXISTS idx_report_format ON report (format);
 
 -- ============================================================================
 -- 9. 会话表 (conversation)

@@ -282,8 +282,8 @@ Import a zip via `POST /api/v1/skills/import` (≤20MB, path escape rejected).
 | Spaces | `/api/v1/spaces` | CRUD, workspace tree, `AGENTS.md`, memories, documents |
 | Endpoints | `/api/v1/endpoints` | Endpoint definition CRUD |
 | Environments | `/api/v1/environments` | Environment CRUD (incl. `is_production`) |
-| Test Runs | `/api/v1/test/runs` | Execution history |
-| Reports | `/api/v1/reports` | Report list / detail / download |
+| Test Runs | `/api/v1/agent/runs` | Execution history, tool-call traces, cleanup |
+| Reports | `/api/v1/reports` | Per-run HTTP report aggregated from `send_request` calls |
 | Chat | `/api/v1/chat` | `POST /stream` — the single agent entry point (SSE) |
 | Conversations | `/api/v1/conversations` | Session list, messages, rename, delete |
 | Skills | `/api/v1/skills` | List / detail / zip import / enable |
@@ -313,9 +313,21 @@ The response carries an `X-Conversation-Id` header so clients can continue the s
 
 ## Test Reports
 
-> **Status note**: the report *generation* pipeline (case generation → execution → HTML rendering) was removed
-> ahead of the v1.0 refactor. What remains is the read side: `GET /api/v1/reports`, `/{id}`, `/{id}/download`,
-> serving records already present in the `report` table. Rebuilding generation on top of the agent runtime is on the roadmap.
+A report is no longer a file row — it is **one execution's HTTP calls**, aggregated on the fly from
+`agent_tool_call` where `tool_name = 'send_request'`:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/reports?space_id=&status=&page=&page_size=` | One row per `run_id` that issued HTTP requests, with counts and success rate |
+| `GET /api/v1/reports/{run_id}` | Run summary + per-request list (no bodies) |
+| `GET /api/v1/reports/{run_id}/requests/{request_id}` | One request's full request/response payload (lazy-loaded by the UI) |
+
+Success rate is computed from **HTTP 2xx**, not the tool-layer `ok` flag: `send_request` never raises on
+4xx/5xx, so `ok=1 + status 500` is a real combination. Failures are split into `error_count` (response
+received, non-2xx) and `exception_count` (no status code at all — network error, invalid args, or blocked
+by the production gate).
+
+The old `report` table and the file-download endpoint are gone; migration `v4` drops the table if it exists.
 
 ---
 

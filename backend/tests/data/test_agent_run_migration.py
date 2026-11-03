@@ -1,11 +1,12 @@
-"""v3 迁移测试：test_* 执行链路 -> agent_run / agent_tool_call。
+"""v3 / v4 迁移测试：test_* 执行链路 -> agent_run / agent_tool_call。
 
-重点验证四件事：
+重点验证五件事：
 
 1. ``test_run`` 的行按语义映射进 ``agent_run``，且**主键保留**
 2. ``report`` 的外键改指 ``agent_run``，且**行不能在 DROP test_run 时被级联删光**
 3. 遗留三张用例表 + 旧视图彻底消失
 4. 迁移幂等：连跑两次结果一致
+5. v4 删掉 ``report`` 表并补上报告聚合索引（报告改为按 run 实时聚合）
 """
 
 import sqlite3
@@ -15,6 +16,7 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 
 from src.data.migration.v3_agent_run_migration import migrate_v3
+from src.data.migration.v4_remove_report_table import migrate_v4
 
 # 旧 schema 的最小复刻：test_run 及其三张子表、report 的旧外键、旧视图
 _OLD_SCHEMA = """
@@ -195,19 +197,20 @@ class TestMigrationV3:
             status = conn.execute(text("SELECT status FROM agent_run WHERE id = 5002")).scalar()
         assert status == "cancelled"
 
-    def test_report_kept_and_fk_points_to_agent_run(self, old_db):
+    def test_v4_drops_report_table_and_adds_index(self, old_db):
+        """v4 之后 report 表消失，报告改为按 run 聚合 send_request。"""
         engine = _engine(old_db)
         migrate_v3(engine)
+        migrate_v4(engine)
 
-        ddl = None
         with engine.connect() as conn:
-            ddl = conn.execute(text("SELECT sql FROM sqlite_master WHERE name = 'report'")).scalar()
-            count = conn.execute(text("SELECT COUNT(*) FROM report")).scalar()
+            tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+            indexes = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='index'"))}
 
-        assert "agent_run" in ddl
-        assert "test_run" not in ddl
-        # 关键断言：DROP test_run 不能把 report 行级联删光
-        assert count == 1
+        assert "report" not in tables
+        assert "idx_atc_tool_run" in indexes
+        # 幂等：再跑一次不报错
+        migrate_v4(engine)
 
     def test_llm_log_gets_run_id_column(self, old_db):
         engine = _engine(old_db)

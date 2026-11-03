@@ -36,7 +36,7 @@
 - **断言引擎** — 基于 JSONPath 的规则（`==`、`contains`、`matches`、`status_code`、`response_time` 等），以工具形式暴露给 Agent
 - **生产环境闸门** — 标记 `is_production` 的环境拒绝写方法与越界域名
 - **优雅降级** — ChromaDB 与 embedding 默认关闭，知识库自动走词法检索而不是直接报错
-- SQLite 全链路持久化（执行与报告生成为只读，见 [测试报告](#测试报告)）
+- SQLite 全链路持久化（报告改为按 run 实时聚合，见 [测试报告](#测试报告)）
 
 ---
 
@@ -282,8 +282,8 @@ allowed_tools: [get_space_endpoints, read_file]
 | 空间 | `/api/v1/spaces` | CRUD、目录树、`AGENTS.md`、记忆、文档 |
 | 接口 | `/api/v1/endpoints` | 接口定义 CRUD |
 | 环境 | `/api/v1/environments` | 环境 CRUD（含 `is_production`） |
-| 测试运行 | `/api/v1/test/runs` | 执行历史查询 |
-| 报告 | `/api/v1/reports` | 列表 / 详情 / 下载 |
+| 测试运行 | `/api/v1/agent/runs` | 执行历史、工具调用留痕、清理 |
+| 报告 | `/api/v1/reports` | 按 run 聚合 `send_request` 的接口调用报告 |
 | 对话 | `/api/v1/chat` | `POST /stream` —— 唯一 Agent 入口（SSE） |
 | 会话 | `/api/v1/conversations` | 会话列表、消息、重命名、删除 |
 | 技能 | `/api/v1/skills` | 列表 / 详情 / zip 导入 / 启停 |
@@ -314,9 +314,20 @@ curl -N -X POST http://localhost:8000/api/v1/chat/stream \
 
 ## 测试报告
 
-> **状态说明**：报告的**生成**链路（用例生成 → 执行 → HTML 渲染）在 v1.0 重构前已被移除。
-> 目前保留的是读取侧：`GET /api/v1/reports`、`/{id}`、`/{id}/download`，
-> 服务于 `report` 表中已有记录。基于 Agent 运行时重建生成链路在规划中。
+报告不再是一行文件记录，而是**一次执行里的 HTTP 调用**，实时从 `agent_tool_call`
+（`tool_name = 'send_request'`）聚合出来：
+
+| 接口 | 返回 |
+|---|---|
+| `GET /api/v1/reports?space_id=&status=&page=&page_size=` | 一行一个发过 HTTP 请求的 `run_id`，带请求数与成功率 |
+| `GET /api/v1/reports/{run_id}` | 执行摘要 + 请求清单（不含正文） |
+| `GET /api/v1/reports/{run_id}/requests/{request_id}` | 单条请求的完整请求/响应正文（前端展开时懒加载） |
+
+成功率按 **HTTP 2xx** 计算，不看工具层的 `ok`：`send_request` 对 4xx/5xx 不抛异常，
+`ok=1` + 状态码 500 是真实存在的组合。失败拆成两类：`error_count`（拿到响应但非 2xx）
+与 `exception_count`（完全没有状态码——网络异常、参数不合法、被生产环境闸门拦截）。
+
+旧的 `report` 表与文件下载接口已删除，迁移 `v4` 会在老库上 DROP 该表。
 
 ---
 
@@ -452,8 +463,7 @@ langsmith:
 （默认 30s）。上一代执行引擎留下的 `execution` 段已从 `config.yaml` 与模板中一并删除——留着它只会让人以为能改。
 若需要全局默认值，应该接进 `src/agent/tools/http_tools.py`，而不是加一段没人读的 YAML。
 
-**运行后没有生成报告？** 报告生成链路当前不在代码库中（见 [测试报告](#测试报告)），
-`/api/v1/reports` 只读取 `report` 表里已有的记录。
+**运行后报告里没有内容？** 报告只统计 `send_request` 的调用（见 [测试报告](#测试报告)）。
 
 **`GET /api/v1/usage/stats` 返回的 `cost_usd` 是 `null`？** 表示窗口内没有任何一次调用能定价，
 **不是免费**。常见原因是模型不在 litellm 定价表里（`zai/*` 就没有）。在 `config.yaml` 的

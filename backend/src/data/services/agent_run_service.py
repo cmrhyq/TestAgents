@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from src.core.logging import get_logger
 from src.data.models.agent_run import AgentRun
-from src.data.repositories import AgentRunRepository, AgentToolCallRepository, ReportRepository
+from src.data.repositories import AgentRunRepository, AgentToolCallRepository
 from src.data.repositories.agent_run_repository import cutoff_before
 from src.data.services.base_service import BaseService
 
@@ -47,7 +47,7 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
         dry_run: bool = False,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> dict:
-        """删除 N 天前的**终态**执行记录及其工具留痕与报告行。
+        """删除 N 天前的**终态**执行记录及其工具留痕。
 
         几条硬规则（每条都对应一个真实故障场景）：
 
@@ -56,7 +56,9 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
         2. **时间口径用 created_at**：``started_at`` 可空，不可靠。
         3. **分批提交**：一次大事务会长时间占住 WAL 写锁，把正在进行的对话
            全部卡死。
-        4. **不删报告文件**：返回 ``orphan_files`` 让人自己决定，文件删除不可逆。
+
+        报告不再是独立表：它按 ``run_id`` 聚合 ``agent_tool_call``，
+        删掉 run 与留痕，报告自然消失，无需额外清理。
 
         Args:
             days: 保留最近多少天
@@ -76,8 +78,6 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
             "dry_run": dry_run,
             "deleted_runs": 0,
             "deleted_tool_calls": 0,
-            "deleted_reports": 0,
-            "orphan_files": [],
         }
 
         if dry_run:
@@ -85,19 +85,12 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
             return result
 
         tool_repo = AgentToolCallRepository(self._session)
-        report_repo = ReportRepository(self._session)
 
         while True:
             run_ids = self.repo.find_cleanup_candidates(cutoff, space_id, batch_size)
             if not run_ids:
                 break
 
-            # 先收集报告文件路径，再删行——删完就查不到了
-            for report in report_repo.get_by_run_ids(run_ids):
-                if report.file_path and report.file_path not in result["orphan_files"]:
-                    result["orphan_files"].append(report.file_path)
-
-            result["deleted_reports"] += report_repo.delete_by_run_ids(run_ids)
             result["deleted_tool_calls"] += tool_repo.delete_by_run_ids(run_ids)
 
             for run_id in run_ids:
@@ -113,7 +106,6 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
             space_id=space_id,
             deleted_runs=result["deleted_runs"],
             deleted_tool_calls=result["deleted_tool_calls"],
-            deleted_reports=result["deleted_reports"],
         )
         return result
 

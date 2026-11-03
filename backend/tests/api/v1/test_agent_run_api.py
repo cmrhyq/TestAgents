@@ -8,7 +8,8 @@
    活会话，也可能是正在跑的用户请求。
 3. 列表默认不返回 ``response_body``（可能是 MB 级），只有显式
    ``include_body=true`` 才带出来。
-4. 报告详情返回的是 ``run``（AgentRunBrief）而不是改造前的 ``test_run``。
+4. 报告不再有独立的 ``report`` 表：它按 ``run_id`` 聚合 ``agent_tool_call``
+   里 ``tool_name='send_request'`` 的行，成功率按 **HTTP 2xx** 计算。
 """
 
 from __future__ import annotations
@@ -107,6 +108,7 @@ def seed(factory):
         ok: int = 1,
         with_http: bool = True,
         response_body: str = '{"code": 0}',
+        status_code: int | None = None,
     ) -> int:
         from src.data.models.agent_tool_call import AgentToolCall
 
@@ -115,7 +117,9 @@ def seed(factory):
             kwargs = {
                 "http_method": "POST",
                 "http_url": "https://api.example.com/v1/orders",
-                "http_status_code": 200 if ok else 500,
+                # ok 与状态码刻意解耦：send_request 对 4xx/5xx 不抛异常，
+                # 「ok=1 + 500」是真实存在的组合，报告的成功率必须按 2xx 算
+                "http_status_code": status_code if status_code is not None else (200 if ok else 500),
                 "request_headers": '{"content-type": "application/json"}',
                 "request_body": '{"page": 1}',
                 "response_headers": '{"server": "nginx"}',
@@ -143,19 +147,10 @@ def seed(factory):
             session.commit()
             return row.id
 
-    def _seed_report(run_id: int, *, file_path: str = "reports/agent_1.html") -> int:
-        from src.data.models.report import Report
-
-        with factory() as session:
-            row = Report(run_id=run_id, format="html", file_path=file_path, file_size=1024)
-            session.add(row)
-            session.commit()
-            return row.id
-
     return type(
         "Seed",
         (),
-        {"run": staticmethod(_seed_run), "tool_call": staticmethod(_seed_tool_call), "report": staticmethod(_seed_report)},
+        {"run": staticmethod(_seed_run), "tool_call": staticmethod(_seed_tool_call)},
     )
 
 
@@ -303,17 +298,16 @@ class TestCleanupRoute:
     def test_real_cleanup_removes_old_terminal_runs(self, client, seed):
         seed.run(run_id=1401, created_at="2020-01-01T00:00:00.000", status="completed")
         seed.tool_call(1401, seq=1)
-        seed.report(1401, file_path="reports/old_1401.html")
 
         body = client.delete("/api/v1/agent/runs/cleanup", params={"days": 90}).json()
 
         assert body["deleted_runs"] == 1
         assert body["deleted_tool_calls"] == 1
-        assert body["deleted_reports"] == 1
-        # 报告文件不代删，只报路径
-        assert body["orphan_files"] == ["reports/old_1401.html"]
+        # 报告不再是独立表，跟着 run 一起消失，没有额外的清理计数
+        assert "deleted_reports" not in body
         assert client.get("/api/v1/agent/runs/").json()["total"] == 0
         assert client.get("/api/v1/agent/runs/1401").status_code == 404
+        assert client.get("/api/v1/reports/").json()["total"] == 0
 
     def test_running_runs_never_cleaned(self, client, seed):
         seed.run(run_id=1402, created_at="2020-01-01T00:00:00.000", status="running")
@@ -344,38 +338,112 @@ class TestCleanupRoute:
         assert [i["id"] for i in remaining] == [1405]
 
 
-class TestReportRelink:
-    def test_report_list_exposes_run_title(self, client, seed):
+class TestReportApi:
+    """报告 = 一次执行里所有 send_request 的请求/响应，成功率按 HTTP 2xx 算。"""
+
+    def test_list_groups_by_run_and_only_counts_http_calls(self, client, seed):
         seed.run(run_id=1500, title="验证下单链路")
-        seed.report(1500)
+        seed.tool_call(1500, seq=1)
+        seed.tool_call(1500, seq=2, tool_name="query_db", with_http=False)
+        # 只有 query_db、没有 send_request 的执行不该出现在报告里
+        seed.run(run_id=1503, title="只查库的执行")
+        seed.tool_call(1503, seq=1, tool_name="query_db", with_http=False)
 
         body = client.get("/api/v1/reports/").json()
 
         assert body["total"] == 1
         item = body["items"][0]
         assert item["run_id"] == 1500
-        assert item["run_title"] == "验证下单链路"
-        assert "test_run_name" not in item
+        assert item["title"] == "验证下单链路"
+        assert item["request_count"] == 1
+        assert item["success_count"] == 1
+        assert item["success_rate"] == 100.0
+        # 旧的报告行字段必须彻底消失
+        assert "file_path" not in item
+        assert "run_title" not in item
 
-    def test_report_detail_returns_run_and_tool_calls(self, client, seed):
-        seed.run(run_id=1501, title="验证退款链路")
-        seed.tool_call(1501, seq=1)
-        report_id = seed.report(1501)
+    def test_success_rate_uses_http_2xx_not_tool_ok(self, client, seed):
+        """ok=1 但状态码 500 必须算失败——这是最容易搞错的口径。"""
+        seed.run(run_id=1510)
+        seed.tool_call(1510, seq=1, ok=1, status_code=200)
+        seed.tool_call(1510, seq=2, ok=1, status_code=500)
+        seed.tool_call(1510, seq=3, ok=0, with_http=False)  # 连响应都没有
 
-        body = client.get(f"/api/v1/reports/{report_id}").json()
+        item = client.get("/api/v1/reports/").json()["items"][0]
 
-        assert "test_run" not in body
-        assert body["run"]["id"] == 1501
+        assert item["request_count"] == 3
+        assert item["success_count"] == 1
+        assert item["error_count"] == 1
+        assert item["exception_count"] == 1
+        assert item["success_rate"] == 33.33
+
+    def test_ok_without_status_code_counts_as_exception(self, client, seed):
+        """返回 {"error": ...} 时 ok=1 但没有状态码——必须算异常，不能算成功。"""
+        seed.run(run_id=1515)
+        seed.tool_call(1515, seq=1, ok=1, with_http=False)
+
+        item = client.get("/api/v1/reports/").json()["items"][0]
+
+        assert item["success_count"] == 0
+        assert item["exception_count"] == 1
+        assert item["error_count"] == 0
+        assert item["success_rate"] == 0.0
+
+    def test_filter_by_space_and_status(self, client, seed):
+        seed.run(run_id=1520, space_id=SPACE_ID, status="completed")
+        seed.run(run_id=1521, space_id=OTHER_SPACE_ID, status="completed")
+        seed.run(run_id=1522, space_id=SPACE_ID, status="failed")
+        for run_id in (1520, 1521, 1522):
+            seed.tool_call(run_id, seq=1)
+
+        by_space = client.get("/api/v1/reports/", params={"space_id": SPACE_ID}).json()
+        assert {i["run_id"] for i in by_space["items"]} == {1520, 1522}
+        assert by_space["total"] == 2
+
+        by_status = client.get("/api/v1/reports/", params={"status": "failed"}).json()
+        assert {i["run_id"] for i in by_status["items"]} == {1522}
+
+    def test_detail_returns_stat_and_requests_without_body(self, client, seed):
+        seed.run(run_id=1530, title="验证退款链路")
+        seed.tool_call(1530, seq=1, status_code=200)
+        seed.tool_call(1530, seq=2, status_code=404)
+
+        body = client.get("/api/v1/reports/1530").json()
+
+        assert body["run"]["id"] == 1530
         assert body["run"]["title"] == "验证退款链路"
-        assert body["run"]["success_rate"] == 50.0
-        assert len(body["tool_calls"]) == 1
-        assert body["tool_calls"][0]["response_body"] == '{"code": 0}'
+        assert body["stat"]["request_count"] == 2
+        assert body["stat"]["success_count"] == 1
+        assert body["stat"]["error_count"] == 1
+        assert body["stat"]["success_rate"] == 50.0
+        assert len(body["requests"]) == 2
+        # 正文必须留给懒加载接口，列表里不出现
+        assert "response_body" not in body["requests"][0]
+        assert "request_body" not in body["requests"][0]
 
-    def test_deleting_run_cascades_report_rows(self, client, seed):
-        """report.run_id 外键指向 agent_run，清 run 时报告行随之消失。"""
-        seed.run(run_id=1502, created_at="2020-01-01T00:00:00.000")
-        seed.report(1502)
+    def test_detail_404_when_run_missing(self, client):
+        assert client.get("/api/v1/reports/999999").status_code == 404
 
-        client.delete("/api/v1/agent/runs/cleanup", params={"days": 90})
+    def test_single_request_returns_full_payload(self, client, seed):
+        seed.run(run_id=1540)
+        request_id = seed.tool_call(1540, seq=1, response_body='{"code": 0, "data": []}')
 
-        assert client.get("/api/v1/reports/").json()["total"] == 0
+        body = client.get(f"/api/v1/reports/1540/requests/{request_id}").json()
+
+        assert body["request_body"] == '{"page": 1}'
+        assert body["response_body"] == '{"code": 0, "data": []}'
+        assert body["http_status_code"] == 200
+
+    def test_single_request_scoped_by_run(self, client, seed):
+        """用别的 run 的 id 拼 URL 读不到——避免越权拿别次执行的响应体。"""
+        seed.run(run_id=1550)
+        seed.run(run_id=1551)
+        request_id = seed.tool_call(1550, seq=1)
+
+        assert client.get(f"/api/v1/reports/1551/requests/{request_id}").status_code == 404
+
+    def test_single_request_rejects_non_http_tool(self, client, seed):
+        seed.run(run_id=1560)
+        request_id = seed.tool_call(1560, seq=1, tool_name="query_db", with_http=False)
+
+        assert client.get(f"/api/v1/reports/1560/requests/{request_id}").status_code == 404

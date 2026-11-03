@@ -3,7 +3,6 @@ from src.data.models import (
     AgentToolCall,
     Endpoint,
     Environment,
-    Report,
     Space,
 )
 from src.data.repositories import (
@@ -12,7 +11,6 @@ from src.data.repositories import (
     BaseRepository,
     EndpointRepository,
     EnvironmentRepository,
-    ReportRepository,
     SpaceRepository,
 )
 
@@ -22,12 +20,10 @@ __all__ = [
     "Endpoint",
     "AgentRun",
     "AgentToolCall",
-    "Report",
     "BaseRepository",
     "SpaceRepository",
     "EnvironmentRepository",
     "EndpointRepository",
     "AgentRunRepository",
     "AgentToolCallRepository",
-    "ReportRepository",
 ]

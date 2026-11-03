@@ -105,5 +105,3 @@ class AgentCleanupResult(BaseModel):
     dry_run: bool = Field(default=False, description="是否为试运行（未真删）")
     deleted_runs: int = Field(default=0, description="删除的执行记录数")
     deleted_tool_calls: int = Field(default=0, description="删除的工具调用留痕数")
-    deleted_reports: int = Field(default=0, description="删除的报告行数")
-    orphan_files: list[str] = Field(default_factory=list, description="已删库但磁盘文件仍在的报告路径")

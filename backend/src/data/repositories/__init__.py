@@ -5,7 +5,6 @@ from src.data.repositories.conversation_repository import ConversationRepository
 from src.data.repositories.endpoint_repository import EndpointRepository
 from src.data.repositories.environment_repository import EnvironmentRepository
 from src.data.repositories.message_repository import MessageRepository
-from src.data.repositories.report_repository import ReportRepository
 from src.data.repositories.space_repository import SpaceRepository
 
 __all__ = [
@@ -17,7 +16,6 @@ __all__ = [
     "EndpointRepository",
     "AgentRunRepository",
     "AgentToolCallRepository",
-    "ReportRepository",
     "ConversationRepository",
     "MessageRepository",
 ]
