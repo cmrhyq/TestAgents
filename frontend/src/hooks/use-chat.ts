@@ -7,26 +7,32 @@ import { streamChatEvents, type AgentStreamEvent } from "@/lib/stream.ts";
 import { queryKeys } from "@/lib/query-keys";
 import type { ConversationMode } from "@/lib/types";
 
-/** 一次工具调用的完整记录，前端用它渲染可折叠卡片。 */
+/** 一次工具调用的完整记录，用于渲染可折叠卡片。 */
 export interface ToolCallRecord {
   id: string;
   name: string;
   args: Record<string, unknown> | null;
   status: "running" | "ok" | "error";
-  /** 工具返回内容（后端已截断到 4k） */
+  /** 工具返回内容，后端已截断到 4k 字符 */
   content: string;
   durationMs: number;
 }
 
+/** `useChat` 的入参。 */
 export interface UseChatParams {
   conversationId: string | null;
   spaceId: string | null;
-  /** 新建会话后回调（容器负责把新会话 ID 写回 URL）。 */
+  /** 新建会话后的回调，由调用方把新会话 ID 写回 URL。 */
   onConversationCreated(conversationId: string): void;
 }
 
 const EMPTY_TOOLS: ToolCallRecord[] = [];
 
+/**
+ * 对话页的流式状态：把 SSE 事件累积为本地 overlay，并暴露提交与输入控制。
+ *
+ * overlay 仅在流式期间存在；请求结束后以服务端消息列表为准，不做本地持久化。
+ */
 export function useChat({ conversationId, spaceId, onConversationCreated }: UseChatParams) {
   const queryClient = useQueryClient();
 
@@ -44,9 +50,8 @@ export function useChat({ conversationId, spaceId, onConversationCreated }: UseC
     useConversationMessages(conversationId);
   const serverMessages = messagesData?.items ?? [];
 
-  // 切换会话时清空进行中的本地 overlay。
-  // 采用 React 官方支持的 render 期 setState（derive state from props）模式，
-  // 避免在 effect 中 setState 导致旧会话 overlay 闪一帧。
+  // 切换会话时清空进行中的 overlay。用 render 期 setState 而非 effect，
+  // 避免 effect 晚一帧执行导致旧会话的 overlay 短暂闪现。
   const [trackedConversationId, setTrackedConversationId] = useState(conversationId);
   if (conversationId !== trackedConversationId) {
     setTrackedConversationId(conversationId);
@@ -93,7 +98,7 @@ export function useChat({ conversationId, spaceId, onConversationCreated }: UseC
         );
         return;
       case "final":
-        // final 带完整回答，覆盖 delta 拼接结果——拼接会因丢帧错位
+        // final 携带完整回答，直接覆盖 delta 拼接结果，避免丢帧造成错位
         setAnswer(event.answer);
         return;
       case "error":
@@ -145,13 +150,12 @@ export function useChat({ conversationId, spaceId, onConversationCreated }: UseC
       setIsStreaming(false);
 
       if (!conversationId && newConversationId) {
-        // 新建会话：刷新会话列表并把新会话 ID 写回 URL。
-        // URL 变化会让上面的 render 期同步逻辑触发 reset()，overlay 自然清掉。
+        // 新建会话：刷新会话列表后回写 URL，URL 变化会触发 render 期同步逻辑清空 overlay
         await queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
         onConversationCreated(newConversationId);
       } else if (conversationId) {
-        // 存量会话：先等消息列表刷新完，再清 overlay——
-        // 反过来会出现「历史里还没有、overlay 已消失」的空窗，答案闪一下不见。
+        // 存量会话：必须等消息列表刷新完再清 overlay，否则会出现历史尚未返回、
+        // overlay 已消失的空窗
         await queryClient.invalidateQueries({
           queryKey: queryKeys.conversations.messages(conversationId),
         });

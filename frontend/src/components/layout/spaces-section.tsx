@@ -235,6 +235,7 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
   );
 }
 
+/** 侧边栏的空间区块：按空间折叠列出会话，支持重命名与删除。 */
 export function SpacesSection() {
   const [sectionOpen, setSectionOpen] = useState(true);
   const { data, isLoading, isError } = useSpaces({ page_size: 100, status: 1 });

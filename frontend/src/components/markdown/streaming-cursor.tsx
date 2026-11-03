@@ -1,4 +1,4 @@
-/** 流式输出末尾光标：1px 精致闪烁竖线（step 动画，不抢眼）。 */
+/** 流式输出末尾的闪烁光标。 */
 export function StreamingCursor() {
   return (
     <span

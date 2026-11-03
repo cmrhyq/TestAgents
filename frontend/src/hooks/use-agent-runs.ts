@@ -16,7 +16,7 @@ interface UseAgentRunsParams {
   page_size?: number;
 }
 
-/** 执行记录列表（/agent/runs）。 */
+/** 执行记录列表，支持按空间、状态与分页筛选。 */
 export function useAgentRuns(params?: UseAgentRunsParams) {
   return useQuery<AgentRunListResponse>({
     queryKey: queryKeys.agentRuns.list(params),
@@ -32,8 +32,7 @@ export function useAgentRuns(params?: UseAgentRunsParams) {
 /**
  * 执行记录详情。
  *
- * 只有 `running` 才轮询——改造后没有 `pending` 态（记录插入即为 running），
- * 终态是单条件的 `status !== "running"`。
+ * 仅 `running` 状态按 3 秒间隔轮询，其余状态视为终态不再刷新。
  */
 export function useAgentRunDetail(id: string | number) {
   return useQuery<AgentRunDetail>({
@@ -51,7 +50,7 @@ export function useAgentRunDetail(id: string | number) {
 }
 
 interface UseAgentToolCallsOptions {
-  /** 是否拉取请求/响应正文（单条上限 2MB，默认不拉） */
+  /** 是否拉取请求与响应正文，单条上限 2MB */
   includeBody?: boolean;
   pageSize?: number;
   enabled?: boolean;
@@ -60,8 +59,8 @@ interface UseAgentToolCallsOptions {
 /**
  * 某次执行的工具调用留痕。
  *
- * `includeBody=false` 时后端走 `defer(response_body)`，返回体里连字段都没有；
- * 展开某一行时才用 `includeBody=true` 再拉一次（带缓存，不会每次展开都请求）。
+ * `includeBody=false` 时后端不返回正文字段，展开单行时才以 `includeBody=true` 重新请求，
+ * 两种形态使用不同的查询键，各自独立缓存。
  */
 export function useAgentToolCalls(
   runId: string | number,
@@ -79,7 +78,7 @@ export function useAgentToolCalls(
   });
 }
 
-/** 清理 N 天前的终态执行记录（手动触发，无调度器）。 */
+/** 清理指定天数之前的终态执行记录，需手动触发。 */
 export async function cleanupAgentRuns(params: {
   days?: number;
   space_id?: string | number;

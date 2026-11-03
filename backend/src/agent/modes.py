@@ -1,17 +1,7 @@
 """工作模式策略：默认 / 问答 / 计划。
 
-**模式不是 prompt 里的一句话，是工具白名单。**
-
-这是整个设计里最容易做错的地方。如果 ask 模式下工具列表里还有 ``send_request``，
-那么无论 prompt 怎么写"你只应该回答问题"，模型在遇到"帮我测一下"时仍然会调它——
-因为对模型来说，一个可调用的工具就是被允许的动作。
-
-所以模式落到两道物理约束：
-
-1. 工具列表本身不含被禁用的工具（模型看不到，就调不了）
-2. skill 声明的 ``allowed_tools`` 只能在此基础上**再收窄**，不能放大
-
-第二点是安全关键：skill 是用户导入的第三方内容，不能让它成为提权通道。
+模式以工具白名单实现，而非仅靠提示词约束：被禁用的工具不进入模型工具列表，
+skill 声明的 ``allowed_tools`` 只能在当前模式的基础上进一步收窄。
 """
 
 from __future__ import annotations
@@ -106,25 +96,39 @@ class ModePolicy:
 
     @property
     def label(self) -> str:
+        """模式的中文显示名。"""
         return _MODE_LABELS[self.mode]
 
     @property
     def blocked_tool_names(self) -> frozenset[str]:
+        """当前模式下禁用的工具名；允许副作用时为空集合。"""
         return frozenset() if self.allow_side_effects else SIDE_EFFECT_TOOL_NAMES
 
 
 def normalize_mode(raw: str | None) -> Mode:
-    """把外部传入的 mode 归一化。
+    """把外部传入的 mode 归一化为 ``Mode``。
 
-    容忍历史值（``Run``/``Ask``/``Plan``）与大小写差异——数据库里可能还有
-    迁移不彻底的旧数据，不能让它们把一轮对话直接打成 422。
+    兼容历史值（``run`` / ``qa``）与大小写差异，无法识别时回退到 ``Mode.AGENT``。
+
+    Args:
+        raw: 原始模式字符串，可为 None
+
+    Returns:
+        归一化后的模式
     """
     key = (raw or "").strip().lower()
     return _MODE_ALIASES.get(key, Mode.AGENT)
 
 
 def policy_for(raw: str | Mode | None) -> ModePolicy:
-    """取模式策略。"""
+    """按模式构造执行策略。
+
+    Args:
+        raw: 模式字符串或 ``Mode``；None 视为默认模式
+
+    Returns:
+        该模式的执行策略
+    """
     mode = raw if isinstance(raw, Mode) else normalize_mode(raw)
     return ModePolicy(
         mode=mode,
@@ -141,10 +145,8 @@ def filter_tools(
 ) -> list[BaseTool]:
     """按模式与 skill 声明裁剪工具列表。
 
-    规则按顺序叠加：
-    1. 去掉该模式禁用的副作用工具
-    2. 若 skill 声明了 allowed_tools，则只保留其中列出的工具
-       —— 注意这一步**只能收窄**，因为第 1 步已经先执行了
+    先移除当前模式禁用的副作用工具，再按 skill 声明的 ``allowed_tools`` 过滤，
+    因此 skill 只能收窄范围，无法放开模式已禁用的工具。
 
     Args:
         tools: 全量候选工具
@@ -152,7 +154,7 @@ def filter_tools(
         skill_allowed: 选中 skill 声明的工具名并集；None 表示不额外限制
 
     Returns:
-        裁剪后的工具列表（保持原顺序）
+        裁剪后的工具列表，保持原顺序
     """
     blocked = policy.blocked_tool_names
     result = [tool for tool in tools if tool.name not in blocked]

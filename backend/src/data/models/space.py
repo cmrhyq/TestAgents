@@ -18,18 +18,22 @@ if TYPE_CHECKING:
 
 
 class Space(Base):
-    """空间表 - 管理多个被测服务
+    """空间表 - 管理多个被测服务。
 
-    一个空间对应一个工作目录（``workspace_path``），目录同时是 Agent 的沙箱、
-    测试资产的落地处、以及空间级约定（``AGENTS.md``）的载体。
+    一个空间对应一个工作目录 ``workspace_path``，该目录同时是 Agent 的沙箱、
+    测试资产的落地处与空间级约定的载体。
     """
 
     __tablename__ = "space"
 
+    # 主键，由 next_id() 生成，不走数据库自增
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=next_id)
+    # 空间名，全库唯一
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
+    # 1-启用，2-禁用；取值与 DataStatus 一致
     status: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 工作目录，相对 backend 根；为空表示尚未分配目录
     workspace_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)

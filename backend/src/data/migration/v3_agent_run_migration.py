@@ -1,19 +1,7 @@
-"""v3 迁移：test_run -> agent_run，新增 agent_tool_call，删除遗留用例三表。
+"""v3 迁移：``test_run`` 转 ``agent_run``，新增 ``agent_tool_call``，删除遗留用例三表。
 
-要解决五件事：
-
-1. **拆旧视图**：``v_run_overview`` / ``v_api_pass_rate`` / ``v_scenario_distribution``
-   分别引用 ``test_summary`` / ``test_result`` / ``test_case``。SQLite 的视图是惰性的，
-   DROP TABLE 不会报错，但之后每次查询视图都是 ``no such table``。
-2. **建新表**：``agent_run`` / ``agent_tool_call``（由 ``create_all`` 完成）。
-3. **搬迁老数据**：``test_run`` 的行按语义映射写入 ``agent_run``，**主键原样保留**，
-   这样 ``report.run_id`` 一个值都不用改。
-4. **重建 report**：SQLite 不能 ALTER 外键，只能建新表 + 拷数据 + 改名。
-   ⚠️ 这一步必须在 DROP ``test_run`` **之前**完成：外键开启时
-   ``DROP TABLE test_run`` 会隐式 ``DELETE FROM test_run``，把 report 行级联删光。
-5. **补 llm_log.run_id**：让 token 成本能按执行轮次聚合。
-
-全部操作幂等：重复执行不会报错，也不会重复改数据。
+SQLite 视图惰性解析，旧视图须先 DROP；不能 ALTER 外键，``report`` 只能重建表改指向，
+且须在 DROP ``test_run`` 之前完成，否则外键级联会删光 report 行。各步骤幂等。
 """
 
 from __future__ import annotations
@@ -25,14 +13,14 @@ from src.data.models.base import Base
 
 logger = get_logger(__name__)
 
-#: 旧视图名。都要先删掉，否则会一直指向已删除的表。
+#: 旧视图名，须先删除，否则会一直指向已删除的表
 _LEGACY_VIEWS = (
     "v_run_overview",
     "v_api_pass_rate",
     "v_scenario_distribution",
 )
 
-#: 旧表按「子表 -> 父表」顺序删除
+#: 旧表删除顺序：子表先于父表
 _LEGACY_TABLES = (
     "test_result",
     "test_summary",
@@ -57,18 +45,8 @@ CREATE TABLE report__v3 (
 )
 """
 
-#: 老列 -> 新列的语义映射（写进 docstring 备查）
-#:
-#: | 老列                        | 新列              | 说明                                   |
-#: |-----------------------------|-------------------|----------------------------------------|
-#: | total_cases                 | tool_call_count   | 量级指标，历史数据本就为零写入         |
-#: | passed_cases                | ok_count          | 同上                                   |
-#: | error_cases + failed_cases  | error_count       | 老表把「失败」「错误」分开，新表合一   |
-#: | pass_rate                   | success_rate      | 口径一致（0-100）                      |
-#: | total_duration（秒）        | duration_ms       | ×1000                                  |
-#: | status='pending'            | 'cancelled'       | 新表没有 pending，老 pending 必然是废弃 |
-#: | name                        | title             | —                                      |
-#: | （无）                      | conversation_id   | 老表无此列，置 NULL                    |
+#: 老列到新列的映射要点：用例计数写入 ``tool_call_count`` / ``ok_count``，
+#: ``error_cases + failed_cases`` 合并为 ``error_count``，``total_duration`` 秒转毫秒
 _LEGACY_RUN_COPY = """
 INSERT OR IGNORE INTO agent_run (
     id, space_id, environment_id, conversation_id, title, mode, trigger_type,
@@ -116,47 +94,70 @@ FROM test_run
 
 
 def migrate_v3(engine: Engine) -> None:
-    """执行 v3 迁移（幂等）。"""
+    """执行 v3 迁移，幂等，可重复调用。
+
+    仅实现 SQLite 路径，其他方言只记录告警后返回。
+
+    副作用：删视图、建表、搬数据、重建 ``report`` 并删除遗留表，各步骤自行提交事务。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     if engine.dialect.name != "sqlite":
         logger.warning("v3 迁移仅实现 SQLite 路径，跳过", dialect=engine.dialect.name)
         return
 
     tables = set(inspect(engine).get_table_names())
 
-    # ① 视图先拆：它们指向即将消失的表
+    # 旧视图必须先删，它们引用的表即将被删除
     _drop_legacy_views(engine)
 
-    # ② 建新表（create_all 只建缺失的表，不动已有表）
+    # create_all 只建缺失的表，不改动已有表
     Base.metadata.create_all(engine)
 
-    # ③ 老库才需要搬迁 + 重建 report + 删老表
+    # 只有老库才需要搬迁数据、重建 report、删旧表
     if "test_run" in tables:
         _copy_legacy_runs(engine)
-        # ⚠️ 必须在 DROP test_run 之前，否则 report 行被级联删光
+        # 必须在 DROP test_run 之前完成，否则 report 行被外键级联删除
         _rebuild_report(engine)
         _drop_legacy_tables(engine)
     else:
         logger.debug("未发现 test_run，跳过遗留数据搬迁")
 
-    # ④ llm_log 补 run_id（与数据搬迁解耦，单独幂等）
+    # 与数据搬迁解耦，单独幂等
     _add_llm_log_run_id(engine)
 
     logger.info("v3 迁移完成")
 
 
-# ---------------------------------------------------------------------------
 # 步骤
-# ---------------------------------------------------------------------------
 
 
 def _drop_legacy_views(engine: Engine) -> None:
+    """删除遗留视图。
+
+    SQLite 视图惰性解析，删除其依赖表不会报错，但后续查询视图才会失败，因此先删视图。
+
+    副作用：写库并提交。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     with engine.begin() as conn:
         for view in _LEGACY_VIEWS:
             conn.execute(text(f"DROP VIEW IF EXISTS {view}"))
 
 
 def _copy_legacy_runs(engine: Engine) -> None:
-    """把 test_run 的历史行搬进 agent_run（主键保留）。"""
+    """把 ``test_run`` 的历史行搬进 ``agent_run``，主键原样保留。
+
+    保留主键可使 ``report.run_id`` 无需改写。
+
+    副作用：写库并提交；``test_run`` 无数据时直接返回。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     columns = {c["name"] for c in inspect(engine).get_columns("test_run")}
     if not columns:
         return
@@ -171,10 +172,18 @@ def _copy_legacy_runs(engine: Engine) -> None:
 
 
 def _rebuild_report(engine: Engine) -> None:
-    """把 report 的外键从 test_run 改指 agent_run。
+    """重建 ``report`` 表，把外键从 ``test_run`` 改为指向 ``agent_run``。
 
-    走 raw connection 手关外键：SQLAlchemy 的 connect 事件会在每次连接时
-    把 ``foreign_keys`` 打开，``engine.connect()`` 关不掉。
+    SQLite 不能 ALTER 外键，只能建新表搬数据；须用 raw connection 关闭外键，
+    因为 SQLAlchemy 的连接事件在每次连接时重新打开 ``foreign_keys``。
+
+    副作用：建临时表、搬数据、删旧表、改名并提交；失败时回滚。
+
+    Args:
+        engine: 目标数据库引擎
+
+    Raises:
+        Exception: 重建过程中的任何失败，回滚后原样抛出
     """
     ddl = _table_sql(engine, "report")
     if not ddl:
@@ -214,7 +223,18 @@ def _rebuild_report(engine: Engine) -> None:
 
 
 def _drop_legacy_tables(engine: Engine) -> None:
-    """删除遗留用例表与触发器（子表先删）。"""
+    """删除遗留用例表与触发器，子表先删。
+
+    关闭外键后执行，避免 ``DROP TABLE`` 触发级联删除。
+
+    副作用：写库并提交；失败时回滚。
+
+    Args:
+        engine: 目标数据库引擎
+
+    Raises:
+        Exception: 删除过程中的任何失败，回滚后原样抛出
+    """
     raw = engine.raw_connection()
     try:
         cursor = raw.cursor()
@@ -235,10 +255,14 @@ def _drop_legacy_tables(engine: Engine) -> None:
 
 
 def _add_llm_log_run_id(engine: Engine) -> None:
-    """给 llm_log 补 run_id 列与索引。
+    """为 ``llm_log`` 增加 ``run_id`` 列与索引。
 
-    **刻意不建外键**：``llm_log`` 是统计表，要能挺过执行记录清理。
-    加 FK 会在清理 90 天前的 run 时把成本历史一起带走。
+    不建外键：``llm_log`` 是统计表，需在执行记录清理后仍保留成本历史。
+
+    副作用：写库并提交。
+
+    Args:
+        engine: 目标数据库引擎
     """
     inspector = inspect(engine)
     if "llm_log" not in set(inspector.get_table_names()):
@@ -254,6 +278,15 @@ def _add_llm_log_run_id(engine: Engine) -> None:
 
 
 def _table_sql(engine: Engine, table: str) -> str:
+    """读取 ``sqlite_master`` 中指定表的建表语句。
+
+    Args:
+        engine: 目标数据库引擎
+        table: 表名
+
+    Returns:
+        建表 SQL；表不存在时返回空串
+    """
     with engine.connect() as conn:
         ddl = conn.execute(
             text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :name"),

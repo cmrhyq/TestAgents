@@ -1,7 +1,6 @@
-"""报告域 LangChain Tool：测试结果渲染。
+"""报告域工具：测试结果渲染为 Markdown。
 
-面向 LLM 的轻量 Markdown 渲染；node 层完整 HTML 报告仍由
-report.renderer.render_report（ORM 版）负责。
+面向模型的轻量渲染；完整 HTML 报告由 ``report.renderer.render_report`` 负责。
 """
 
 from langchain_core.tools import tool
@@ -20,7 +19,7 @@ def render_report(results: str) -> str:
         results: 测试结果列表 JSON 字符串，每条可含 case_name/status/response_time_ms/error 字段
 
     Returns:
-        Markdown 格式的报告文本
+        Markdown 格式的报告文本；输入无法解析时返回错误说明
     """
     try:
         items = safe_json_loads(results, []) or []

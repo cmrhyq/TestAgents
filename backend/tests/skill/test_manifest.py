@@ -1,7 +1,6 @@
-"""SKILL.md frontmatter 解析测试。
+"""`SKILL.md` frontmatter 解析与 prompt 注入形态。
 
-Skill 包格式对齐市面 Agent Skills 规范：
-``---`` 包裹的 YAML frontmatter + Markdown 正文。
+格式对齐 Agent Skills 规范：`---` 包裹的 YAML frontmatter 加 Markdown 正文。
 """
 
 import pytest
@@ -31,6 +30,8 @@ description: 快速检查
 
 
 class TestParseValid:
+    """合法 frontmatter 的字段解析与正文切分。"""
+
     def test_parses_all_fields(self):
         manifest = parse_skill_md(VALID)
 
@@ -68,6 +69,8 @@ body
 
 
 class TestParseInvalid:
+    """非法 frontmatter 均转为 `SkillManifestError`。"""
+
     def test_missing_frontmatter(self):
         with pytest.raises(SkillManifestError, match="frontmatter"):
             parse_skill_md("# 只有正文\n没有元数据")

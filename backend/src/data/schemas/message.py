@@ -2,29 +2,29 @@ from pydantic import BaseModel, Field
 
 
 class MessageBase(BaseModel):
-    """Message 基础字段"""
+    """消息基础字段。"""
 
-    role: str = Field(..., description="角色: user / assistant / system")
-    content: str = Field(default="", description="消息内容")
-    meta: str = Field(default="{}", description="附加信息(JSON字符串): token/附件路径/run_id 等")
+    role: str = Field(..., description="角色：user / assistant / system")
+    content: str = Field(default="", description="消息正文")
+    meta: str = Field(default="{}", description="附加信息，JSON 对象字符串，可含 token 用量、附件路径、run_id")
 
 
 class MessageCreate(MessageBase):
-    """创建 Message 请求体"""
+    """创建消息请求体。"""
 
 
 class MessageResponse(MessageBase):
-    """Message 响应体"""
+    """消息响应体。"""
 
-    id: int = Field(..., description="消息ID")
-    conversation_id: int = Field(..., description="所属会话ID")
+    id: int = Field(..., description="消息 ID")
+    conversation_id: int = Field(..., description="所属会话 ID")
     created_at: str = Field(..., description="创建时间")
 
     model_config = {"from_attributes": True}
 
 
 class MessageListResponse(BaseModel):
-    """Message 列表响应"""
+    """消息列表响应。"""
 
     items: list[MessageResponse] = Field(default=[], description="消息列表")
-    total: int = Field(default=0, description="总数")
+    total: int = Field(default=0, description="记录总数")

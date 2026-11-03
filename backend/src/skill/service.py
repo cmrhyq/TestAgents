@@ -1,12 +1,6 @@
-"""Skill 业务层：导入、装配、启用开关。
+"""Skill 业务层：导入、提示词装配与工具收窄。
 
-三件事，各有各的坑：
-
-1. **导入 zip**：必须防 zip-slip。``ZipFile.extractall`` 不做任何校验，
-   条目名叫 ``../../etc/passwd`` 就会写到目录外。这里逐条校验后自己写盘。
-2. **装配**：把选中 skill 的正文拼成 system prompt 片段；单个超长要截断并标注。
-3. **工具收窄**：skill 声明的 ``allowed_tools`` 与模式白名单**取交集**，
-   skill 只能收窄权限、不能放大——否则一个恶意 skill 就能绕过 Ask 模式的只读约束。
+导入必须防 zip-slip；``allowed_tools`` 与模式白名单取交集，skill 只能收窄权限。
 """
 
 from __future__ import annotations
@@ -48,20 +42,20 @@ class SkillService:
     # ─── 导入 ────────────────────────────────────────────────────────────
 
     def import_zip(self, data: bytes, space_id: int | str | None) -> list[str]:
-        """把 zip 里的 skill 包安装到目标 scope 目录。
+        """把 zip 中的 skill 安装到目标 scope 目录。
 
-        支持一个 zip 里包含多个 skill（每个 skill 一个顶层目录）。
-        安装目录名以 frontmatter 的 ``name`` 为准，保证「一个名字一份内容」。
+        同名目录先删除再写入；安装目录名以 frontmatter 的 ``name`` 为准。
+        副作用：解压落盘，可能覆盖同名 skill 目录。
 
         Args:
             data: zip 字节
-            space_id: 空间 ID；None 表示装进内置库（谨慎使用）
+            space_id: 空间 ID；None 表示装进内置库
 
         Returns:
-            安装成功的 skill 名列表（已排序）
+            安装成功的 skill 名列表，已排序
 
         Raises:
-            SkillImportError: zip 非法、无有效 SKILL.md、或包含越界路径
+            SkillImportError: zip 非法、无有效 SKILL.md，或包含越界路径
         """
         staging = Path(tempfile.mkdtemp(prefix="skill-import-"))
         try:
@@ -92,7 +86,17 @@ class SkillService:
     # ─── 装配 ────────────────────────────────────────────────────────────
 
     def build_prompt_blocks(self, names: list[str], space_id: int | str | None) -> str:
-        """把选中的 skill 正文渲染为可注入 system prompt 的文本。"""
+        """把选中的 skill 正文渲染为可注入 system prompt 的文本。
+
+        单个 skill 正文按配置 ``skill.max_skill_chars`` 截断。
+
+        Args:
+            names: skill 名列表
+            space_id: 空间 ID
+
+        Returns:
+            以空行分隔的文本块；无选中项时返回空字符串
+        """
         if not names:
             return ""
 
@@ -102,11 +106,15 @@ class SkillService:
         return "\n\n".join(blocks)
 
     def resolve_allowed_tools(self, names: list[str], space_id: int | str | None) -> set[str] | None:
-        """返回选中 skill 的工具交集声明。
+        """返回选中 skill 声明工具名的并集。
+
+        Args:
+            names: skill 名列表
+            space_id: 空间 ID
 
         Returns:
-            ``None`` 表示「不额外限制」（任一 skill 未声明即为 None）；
-            否则返回并集——多个 skill 各自声明时，合起来才是它们需要的工具。
+            ``None`` 表示不额外限制（无选中 skill 或任一 skill 未声明）；
+            否则为各 skill 声明工具名的并集
         """
         if not names:
             return None
@@ -117,7 +125,7 @@ class SkillService:
 
         declared = [set(skill.manifest.allowed_tools) for skill in skills]
         if any(not tools for tools in declared):
-            # 有一个没声明就整体放开：不能因为 A 声明了、B 没声明，就把 B 需要的工具砍掉
+            # 有一个未声明就整体放开，避免砍掉该 skill 实际需要的工具
             return None
         merged: set[str] = set()
         for tools in declared:
@@ -125,17 +133,22 @@ class SkillService:
         return merged
 
     def list_skills(self, space_id: int | str | None) -> list[DiscoveredSkill]:
-        """列出两级可见的全部 skill。"""
+        """列出内置与空间两级可见的全部 skill。"""
         return self.repository.discover(space_id)
 
     def find(self, name: str, space_id: int | str | None) -> DiscoveredSkill | None:
+        """按名查找 skill，空间级优先；不存在时返回 None。"""
         return self.repository.find(name, space_id)
 
     # ─── 内部 ────────────────────────────────────────────────────────────
 
     @staticmethod
     def _extract_safely(data: bytes, staging: Path) -> None:
-        """逐条目校验后解压，拒绝任何越界路径。"""
+        """逐条目校验后解压到 ``staging``，拒绝任何越界路径。
+
+        Raises:
+            SkillImportError: 内容不是合法 zip，或任一条目路径越界
+        """
         try:
             archive = zipfile.ZipFile(io.BytesIO(data))
         except zipfile.BadZipFile as exc:
@@ -152,7 +165,11 @@ class SkillService:
 
     @staticmethod
     def _safe_target(staging: Path, member_name: str) -> Path:
-        """校验 zip 条目路径，返回落盘目标。越界即抛异常（整包拒绝）。"""
+        """校验 zip 条目路径并返回落盘目标，任一越界即整包拒绝。
+
+        Raises:
+            SkillImportError: 条目名为空、以 ``/`` 结尾、为绝对路径或含 ``..``
+        """
         if not member_name or member_name.endswith("/"):
             raise SkillImportError(f"zip 条目名非法: {member_name!r}")
 
@@ -167,16 +184,20 @@ class SkillService:
 
     @staticmethod
     def _find_skill_dirs(staging: Path) -> list[Path]:
-        """找出所有含 SKILL.md 的目录（最多两层，兼容「包了一层外层目录」的 zip）。"""
+        """找出所有含 ``SKILL.md`` 的目录，兼容外层多包一层目录的 zip。"""
         candidates: list[Path] = []
         for path in staging.rglob(SKILL_FILE):
             candidates.append(path.parent)
-        # 避免同一 skill 被父子目录重复计入（父目录没有 SKILL.md，天然不会）
+        # 父目录没有 SKILL.md，天然不会被重复计入
         return sorted(set(candidates))
 
     @staticmethod
     def _validate(skill_file: Path) -> str:
-        """校验 SKILL.md 并返回其 name。"""
+        """校验 ``SKILL.md`` 并返回其 name。
+
+        Raises:
+            SkillImportError: 清单格式非法
+        """
         try:
             manifest = parse_skill_md(skill_file.read_text(encoding="utf-8"))
         except SkillManifestError as exc:
@@ -188,7 +209,7 @@ _service: SkillService | None = None
 
 
 def get_skill_service() -> SkillService:
-    """全局 SkillService（无状态，可安全复用）。"""
+    """返回全局 SkillService 实例（无状态，可复用）。"""
     global _service
     if _service is None:
         _service = SkillService()
@@ -196,6 +217,6 @@ def get_skill_service() -> SkillService:
 
 
 def reset_skill_service() -> None:
-    """重置单例（测试用）。"""
+    """重置全局单例，仅供测试使用。"""
     global _service
     _service = None

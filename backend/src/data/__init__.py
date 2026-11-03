@@ -1,3 +1,5 @@
+"""数据层对外出口：ORM 模型与仓储。"""
+
 from src.data.models import (
     AgentRun,
     AgentToolCall,

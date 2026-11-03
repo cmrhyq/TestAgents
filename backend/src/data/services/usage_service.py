@@ -1,14 +1,7 @@
-"""LLM 调用成本统计。
+"""LLM 调用成本统计，数据源为 ``llm_log``。
 
-数据源是 ``llm_log``（由 ``LLMService`` 在每次调用后写入）。
-
-两个刻意的设计：
-
-1. **成本未知 ≠ 成本为 0**。``sum(cost_usd)`` 在 SQL 里会跳过 NULL，
-   所以 ``cost_usd`` 表示「**已知**成本合计」；另给 ``unpriced_calls``
-   告诉调用方有多少次调用没有定价。只看总额会被误读成「全部成本」。
-2. **按空间/会话归因**依赖 ``llm_log.space_id`` / ``conversation_id``。
-   这两列没有外键，空间删除后统计仍保留——成本是要对账的，不该随业务数据消失。
+``cost_usd`` 是已知成本合计（SQL 聚合跳过 NULL），未定价调用次数见 ``unpriced_calls``；
+``llm_log`` 的 ``space_id`` / ``conversation_id`` 无外键，空间删除后统计仍保留。
 """
 
 from __future__ import annotations
@@ -29,6 +22,11 @@ class UsageService:
     """按空间 / 会话 / 时间窗口聚合 LLM 调用成本。"""
 
     def __init__(self, session: Session) -> None:
+        """绑定只读会话。
+
+        Args:
+            session: 调用方持有的会话，本服务只读不写
+        """
         self._session = session
 
     def stats(
@@ -38,7 +36,17 @@ class UsageService:
         conversation_id: int | None = None,
         days: int = DEFAULT_WINDOW_DAYS,
     ) -> dict[str, Any]:
-        """返回聚合结果（结构与 API 响应对应）。"""
+        """按时间窗口聚合调用次数、token 与成本。
+
+        Args:
+            space_id: 限定空间；None 表示全部空间
+            conversation_id: 限定会话；None 表示全部会话
+            days: 时间窗口天数，近期数据按 ``created_at`` 下限过滤
+
+        Returns:
+            聚合结果字典，含总数、按模型与按路由档位的分组；无定价数据时
+            ``cost_usd`` 为 None，对应调用计入 ``unpriced_calls``
+        """
         conditions = [LLMLog.created_at >= _since(days)]
         if space_id is not None:
             conditions.append(LLMLog.space_id == space_id)
@@ -79,7 +87,16 @@ class UsageService:
         *,
         skip_empty: bool = False,
     ) -> list[dict[str, Any]]:
-        """按某一列分组统计（模型 / 路由档位）。"""
+        """按指定列分组统计调用数、token 与成本，按调用数倒序。
+
+        Args:
+            column: 分组列，如 ``LLMLog.model_name``
+            conditions: 过滤条件
+            skip_empty: 是否跳过分组键为空字符串的行
+
+        Returns:
+            分组结果列表；分组键为空时以 ``unknown`` 呈现
+        """
         stmt: Select[Any] = (
             select(
                 column,
@@ -112,5 +129,14 @@ class UsageService:
 
 
 def _since(days: int) -> str:
-    """时间窗口起点（与 ``local_now`` 同格式，保证字符串比较等价于时间比较）。"""
+    """返回时间窗口起点。
+
+    格式与 ``local_now`` 一致（毫秒精度 ISO 字符串），字符串比较才等价于时间比较。
+
+    Args:
+        days: 回溯天数
+
+    Returns:
+        时间窗口下界字符串
+    """
     return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]

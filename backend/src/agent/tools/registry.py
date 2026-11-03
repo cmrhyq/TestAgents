@@ -1,7 +1,6 @@
 """工具装配。
 
-一次对话需要哪些工具，由三个输入决定：模式、选中的 skill、当前会话上下文。
-装配逻辑集中在这里，``runner`` 只管「跑循环」，不用关心工具从哪来。
+一次对话的工具集合由模式、选中的 skill 与会话上下文决定；``runner`` 只负责跑循环。
 """
 
 from __future__ import annotations
@@ -34,6 +33,7 @@ class ToolBundle:
 
     @property
     def names(self) -> list[str]:
+        """工具名列表，保持装配顺序。"""
         return [tool.name for tool in self.tools]
 
 
@@ -54,7 +54,7 @@ def build_tools(
         environment_id: 指定测试环境
 
     Returns:
-        ToolBundle
+        ``ToolBundle``，含已过滤的工具、策略与被裁掉的工具名
     """
     policy = policy_for(mode)
     selected = skill_names or []

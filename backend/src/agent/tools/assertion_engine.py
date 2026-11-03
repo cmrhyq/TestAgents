@@ -1,13 +1,8 @@
-"""断言引擎模块。
+"""断言规则解析与评估。
 
-解析断言规则字符串，从 HTTP 响应中提取实际值，执行比较运算。
-
-支持的断言语法:
-- $.code == 200          JSONPath 等值比较
-- $.data.token exists    字段存在性检查
-- $.message contains "x" 包含子串
-- status_code == 200     HTTP 状态码
-- response_time < 3000   响应时间(ms)
+规则形如 ``$.code == 200``、``$.data.token exists``、``$.message contains "x"``、
+``status_code == 200``、``response_time < 3000``；实际值取自响应体 JSONPath、
+HTTP 状态码或响应耗时（毫秒）。
 """
 
 import re
@@ -52,7 +47,7 @@ class AssertionEngine:
             response_time: 响应时间（毫秒）
 
         Returns:
-            (all_passed, details) 其中 details 是每条规则的评估结果
+            ``(all_passed, details)``；details 为每条规则的评估结果
         """
         details: list[dict[str, Any]] = []
         all_passed = True
@@ -80,7 +75,7 @@ class AssertionEngine:
         status_code: int,
         response_time: float,
     ) -> dict[str, Any]:
-        """评估单条断言规则。"""
+        """评估单条断言规则；解析异常被吞掉并记为未通过。"""
         try:
             path, operator, expected = self._parse_rule(rule_str)
             actual = self._resolve_value(path, response_body, status_code, response_time)
@@ -104,13 +99,16 @@ class AssertionEngine:
             }
 
     def _parse_rule(self, rule_str: str) -> tuple[str, str, Any]:
-        """解析断言规则字符串为 (path, operator, expected)。
+        """解析断言规则字符串为 ``(path, operator, expected)``。
 
         Args:
             rule_str: 如 "$.code == 200" 或 "$.data.token exists"
 
         Returns:
-            (path, operator, expected_value)
+            ``(path, operator, expected_value)``
+
+        Raises:
+            ValueError: 规则中找不到任何受支持的运算符
         """
         rule_str = rule_str.strip()
 
@@ -139,10 +137,8 @@ class AssertionEngine:
     ) -> Any:
         """根据 path 从响应数据中提取实际值。
 
-        支持:
-        - $.xxx.yyy — JSONPath 风格，从 response_body 中取
-        - status_code — HTTP 状态码
-        - response_time — 响应时间(ms)
+        支持 ``$.xxx.yyy`` 与 ``$[0].xxx`` 形式的 JSONPath，以及 ``status_code``、
+        ``response_time`` 两个保留路径。
         """
         if path == "status_code":
             return status_code
@@ -158,7 +154,7 @@ class AssertionEngine:
         return extract_jsonpath(response_body, f"$.{path}")
 
     def _compare(self, actual: Any, operator: str, expected: Any) -> bool:
-        """执行比较运算。"""
+        """执行比较运算；未知运算符返回 False。"""
         if operator == "exists":
             return actual is not None
         if operator == "not_exists":

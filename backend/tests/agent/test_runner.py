@@ -1,12 +1,7 @@
-"""Agent 运行时（手写 ReAct 循环）测试。
+"""Agent 运行时的 ReAct 循环：事件序列、工具执行与失败兜底。
 
-用假模型驱动，不碰网络。锁定五件事：
-
-1. 事件顺序：``start`` 必须是第一帧，``final``/``error`` 必须是最后一帧
-2. 纯文本场景不产生任何工具事件
-3. 工具调用要真的被执行，且结果以 ``ToolMessage`` 回灌给模型（否则模型看不到结果）
-4. 工具抛异常不能打断整条流——错误要变成 ``ok=False`` 的工具结果，让模型自己纠偏
-5. 超过最大轮次要显式报错，而不是无限循环或静默结束
+约束：`start` 为首帧，`final` / `error` 为末帧；工具异常转为 `ok=False` 结果而非中断流；
+超出步数上限必须显式报错。用例全部由假模型驱动，不发起网络请求。
 """
 
 from __future__ import annotations
@@ -38,8 +33,7 @@ from src.agent.tools.registry import ToolBundle
 class FakeModel:
     """按剧本回放的假模型。
 
-    ``script`` 是「轮次」列表，每轮是一组 chunk。剧本跑完后重复最后一轮
-    （这样超步数测试不需要写 12 轮剧本）。
+    `script` 为轮次列表，跑完后重复最后一轮，超步数用例无需写出完整剧本。
     """
 
     def __init__(self, script: list[list[AIMessageChunk]]) -> None:
@@ -71,9 +65,9 @@ def text_turn(*parts: str) -> list[AIMessageChunk]:
 def tool_turn(
     calls: list[tuple[str, dict]], *, text: str = "", prefix: str = "call"
 ) -> list[AIMessageChunk]:
-    """一轮带工具调用的输出。``calls`` 是 ``(工具名, 参数)`` 列表。
+    """一轮带工具调用的输出，`calls` 为 `(工具名, 参数)` 列表。
 
-    参数刻意拆成两段发，模拟真实流式分片——分片合并是最容易写错的地方。
+    参数拆成两段发送，用于覆盖流式分片合并。
     """
     chunks: list[AIMessageChunk] = []
     if text:
@@ -125,7 +119,7 @@ def accumulate(value: str) -> str:
 
 @tool
 def write_file(path: str) -> str:
-    """写文件（副作用工具，模式裁剪的靶子）。"""
+    """写文件，用于验证模式裁剪。"""
     return f"wrote:{path}"
 
 
@@ -133,11 +127,13 @@ _CALLS: list[str] = []
 
 
 def make_bundle(mode: str = "agent") -> ToolBundle:
+    """构造含回显、异常与累加三个假工具的 bundle。"""
     policy = policy_for(mode)
     return ToolBundle(tools=[echo, boom, accumulate], policy=policy)
 
 
 def make_request(**overrides: Any) -> RunRequest:
+    """构造带默认空间上下文的请求。"""
     base: dict[str, Any] = {
         "instruction": "帮我看看登录接口",
         "space_id": 9001,
@@ -149,6 +145,7 @@ def make_request(**overrides: Any) -> RunRequest:
 
 
 async def collect(model: FakeModel, request: RunRequest | None = None, **kwargs: Any):
+    """收集 `run` 产出的全部事件。"""
     events = []
     async for event in run(request or make_request(), model=model, **kwargs):
         events.append(event)
@@ -160,6 +157,8 @@ async def collect(model: FakeModel, request: RunRequest | None = None, **kwargs:
 # ---------------------------------------------------------------------------
 
 class TestPlainText:
+    """纯文本回复：事件序列与首轮消息组装。"""
+
     async def test_emits_start_then_deltas_then_final(self):
         model = FakeModel([text_turn("你好", "，世界")])
 
@@ -206,6 +205,8 @@ class TestPlainText:
 
 
 class TestSingleTool:
+    """单轮工具调用：事件配对与结果回灌。"""
+
     async def test_emits_call_and_result(self):
         model = FakeModel([tool_turn([("echo", {"value": "hi"})]), text_turn("好了")])
 
@@ -234,7 +235,7 @@ class TestSingleTool:
         assert tool_messages[0].tool_call_id == "call-0"
 
     async def test_assistant_tool_call_is_recorded(self):
-        """模型这一轮的工具调用必须回写进 messages，否则下一轮上下文缺一环。"""
+        """模型本轮的 tool_calls 必须回写进 messages，否则下一轮上下文缺环。"""
         model = FakeModel([tool_turn([("echo", {"value": "hi"})]), text_turn("好了")])
 
         await collect(model, bundle=make_bundle())
@@ -243,7 +244,7 @@ class TestSingleTool:
         assert ai and ai[-1].tool_calls[0]["name"] == "echo"
 
     async def test_partial_json_args_are_merged(self):
-        """分片传参必须能拼成完整 dict，否则工具会收到空参数。"""
+        """分片传参需拼成完整 dict，否则工具会收到空参数。"""
         model = FakeModel(
             [tool_turn([("echo", {"value": "一段比较长的值用来触发分片"})]), text_turn("ok")]
         )
@@ -271,6 +272,8 @@ class TestSingleTool:
 
 
 class TestMultiRound:
+    """多轮与单轮并行工具调用。"""
+
     async def test_two_rounds_of_tools(self):
         _CALLS.clear()
         model = FakeModel(
@@ -313,6 +316,8 @@ class TestMultiRound:
 
 
 class TestFailure:
+    """失败路径：工具异常、未知工具、模型异常与步数熔断。"""
+
     async def test_tool_exception_becomes_failed_result(self):
         model = FakeModel([tool_turn([("boom", {"value": "x"})]), text_turn("我换个方式")])
 
@@ -321,7 +326,7 @@ class TestFailure:
         result = next(e for e in events if isinstance(e, ToolResultEvent))
         assert result.ok is False
         assert "工具内部炸了" in result.content
-        # 关键：异常不能终止流程，模型要能拿到错误信息继续
+        # 异常不得终止流程，模型需要拿到错误信息继续
         assert isinstance(events[-1], FinalEvent)
 
     async def test_unknown_tool_name_is_reported(self):
@@ -343,7 +348,7 @@ class TestFailure:
         assert "网关超时" in events[-1].message
 
     async def test_exceeding_max_steps_yields_error(self):
-        """模型一直要工具、从不肯给答案时必须熔断。"""
+        """模型持续请求工具时必须触发步数熔断。"""
         model = FakeModel([tool_turn([("echo", {"value": "loop"})])])
         bundle = ToolBundle(tools=[echo], policy=policy_for("plan"))  # plan: 8 轮上限
 
@@ -354,7 +359,7 @@ class TestFailure:
         assert model.round == bundle.policy.max_steps
 
     async def test_cancel_does_not_emit_final(self):
-        """消费者提前退出时不应继续调用模型。"""
+        """消费者提前退出后不应继续调用模型。"""
         model = FakeModel([tool_turn([("echo", {"value": "1"})]), text_turn("ok")])
         stream = run(make_request(), model=model, bundle=make_bundle())
 
@@ -366,6 +371,8 @@ class TestFailure:
 
 
 class TestEventSequence:
+    """全局事件顺序不变式。"""
+
     async def test_start_is_first_and_single(self):
         model = FakeModel([tool_turn([("echo", {"value": "1"})]), text_turn("ok")])
 
@@ -393,6 +400,8 @@ class TestEventSequence:
 
 
 class TestToolBinding:
+    """工具绑定与模式裁剪。"""
+
     async def test_tools_are_bound_to_model(self):
         model = FakeModel([text_turn("x")])
 
@@ -401,7 +410,7 @@ class TestToolBinding:
         assert {t.name for t in model.bound_tools} == {"echo", "boom", "accumulate"}
 
     async def test_ask_mode_never_sees_side_effect_tools(self):
-        """ask 模式下模型拿不到写工具——硬保证在执行路径上，不在调用方约定里。"""
+        """ask 模式下写工具不进入绑定列表，约束落在执行路径而非调用方约定。"""
         bundle = ToolBundle(tools=[echo, write_file], policy=policy_for("ask"))
         model = FakeModel([text_turn("x")])
 

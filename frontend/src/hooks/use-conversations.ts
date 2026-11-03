@@ -28,6 +28,7 @@ interface UpdateConversationPayload {
   status?: number;
 }
 
+// 创建成功不弹 toast，由调用方决定提示方式
 const {
   useList: useConversations,
   useUpdate: useUpdateConversation,
@@ -52,6 +53,7 @@ const {
   toastOnCreate: false,
 });
 
+/** 某会话的消息列表；`id` 为空时不发起请求。 */
 export function useConversationMessages(id: string | number | null | undefined) {
   return useQuery<MessageListResponse>({
     queryKey: queryKeys.conversations.messages(id),
@@ -64,10 +66,9 @@ export function useConversationMessages(id: string | number | null | undefined) 
 }
 
 /**
- * 空间下的会话列表（「空间会话」需求的入口）。
+ * 空间下的会话列表，按 `last_message_at` 倒序取前 N 条。
  *
- * 单独一个 hook 而非复用 ``useConversations``：这里要按 ``last_message_at`` 倒序、
- * 且只要前 N 条做侧栏列表，不需要分页 UI。
+ * 供侧栏展示，不支持分页；查询键与 `useConversations` 相互独立。
  */
 export function useSpaceConversations(
   spaceId: string | number | null | undefined,
@@ -85,4 +86,5 @@ export function useSpaceConversations(
   });
 }
 
+/** 会话的增删改查 hook，由 `createCrudHooks` 按 `/conversations` 生成。 */
 export { useConversations, useUpdateConversation, useDeleteConversation };

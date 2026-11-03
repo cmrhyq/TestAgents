@@ -12,8 +12,9 @@ interface MarkdownRendererProps {
 }
 
 /**
- * LLM Markdown 渲染唯一入口。
- * 安全策略与插件配置见 markdown-plugins.ts / sanitize-schema.ts。
+ * Markdown 渲染入口。
+ *
+ * 安全策略与插件配置见 `markdown-plugins.ts` 与 `sanitize-schema.ts`。
  */
 export function MarkdownRenderer({ content, isStreaming = false }: MarkdownRendererProps) {
   const components = useMemo(() => createMarkdownComponents(isStreaming), [isStreaming]);

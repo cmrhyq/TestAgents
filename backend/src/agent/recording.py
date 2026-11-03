@@ -1,13 +1,7 @@
 """执行记录协议。
 
-**为什么协议放在 agent 层、实现在 data 层**：``runner`` 的 docstring 立了规矩
-——不依赖 ORM、没有数据库也能单测。记录器如果直接 import Model，这条规矩就废了。
-这里只定义「什么叫记录」，由 ``src.data.recording`` 提供真正写库的实现。
-
-**为什么三个方法全是同步的**：``stream_answer`` 的 ``finally`` 会在客户端断流
-（``GeneratorExit``）时执行，那个状态下 ``await`` 会立刻被 ``CancelledError``
-打断，收尾写库就石沉大海，记录永远停在 ``running``。同步调用不让出控制权，
-一定能写完。
+只定义记录契约与数据结构，写库实现位于 ``src.data.recording``。
+三个方法均为同步：断流收尾时 ``await`` 会被取消，写库无法完成。
 """
 
 from __future__ import annotations
@@ -20,20 +14,19 @@ from typing import Any, Protocol, runtime_checkable
 class ToolOutcome:
     """一次工具执行的结果。
 
-    为什么不用 ``(bool, str)`` 元组：``runner._execute`` 会把异常吃掉、转成
-    一句给模型看的话术，异常类型与原文就此丢失。留痕层必须拿到 ``error_type``
-    才能回答「这个工具到底为什么常年失败」。
+    ``error_type`` / ``error_message`` 保留原始异常信息，供留痕层归因，
+    避免被 ``runner`` 转成给模型的话术后无法追溯。
     """
 
     ok: bool
-    text: str = ""  # 全量结果文本，**不截断**
+    text: str = ""  # 全量结果文本，不截断
     error_type: str = ""  # 异常类名 / 'validation' / 'not_found'
     error_message: str = ""  # 异常原文，不截断
 
 
 @runtime_checkable
 class RunRecorder(Protocol):
-    """执行记录器契约。全部同步方法。"""
+    """执行记录器契约，全部为同步方法。"""
 
     run_id: int | None
 
@@ -46,7 +39,15 @@ class RunRecorder(Protocol):
         mode: str = "agent",
         title: str = "",
         trigger_type: str = "chat",
-    ) -> int | None: ...
+    ) -> int | None:
+        """开启一条执行记录。
+
+        副作用：写入记录存储。
+
+        Returns:
+            新记录的 ID；无法落库时返回 None
+        """
+        ...
 
     def tool_call(
         self,
@@ -58,9 +59,23 @@ class RunRecorder(Protocol):
         args: dict[str, Any],
         outcome: ToolOutcome,
         duration_ms: int,
-    ) -> None: ...
+    ) -> None:
+        """记录一次工具调用结果。
 
-    def finish(self, *, status: str, error_message: str = "") -> None: ...
+        副作用：写入记录存储。
+        """
+        ...
+
+    def finish(self, *, status: str, error_message: str = "") -> None:
+        """收尾记录并写入最终状态。
+
+        副作用：写入记录存储。
+
+        Args:
+            status: 终态标识，取值由调用方约定
+            error_message: 失败原因，成功时为空
+        """
+        ...
 
 
 class NullRecorder:
@@ -69,10 +84,13 @@ class NullRecorder:
     run_id: int | None = None
 
     def start(self, **_: Any) -> int | None:
+        """不落库，固定返回 None。"""
         return None
 
     def tool_call(self, **_: Any) -> None:
+        """空实现。"""
         return
 
     def finish(self, **_: Any) -> None:
+        """空实现。"""
         return

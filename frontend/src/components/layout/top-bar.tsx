@@ -13,7 +13,7 @@ const TITLES: Array<{ pattern: RegExp; title: string }> = [
   { pattern: /^\/spaces\/[^/]+$/, title: "空间详情" },
 ];
 
-/** 全站顶部工具条：图纸标注式面包屑 + 主题切换 + 版本号。 */
+/** 顶栏：按路由匹配显示当前页面标题，附主题切换与版本号。 */
 export function TopBar() {
   const { pathname } = useLocation();
   const title = TITLES.find((t) => t.pattern.test(pathname))?.title ?? "";

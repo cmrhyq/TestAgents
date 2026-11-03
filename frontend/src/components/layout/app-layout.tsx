@@ -6,13 +6,14 @@ import { TopBar } from "./top-bar";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { cn } from "@/lib/utils";
 
+/** 应用骨架：侧边栏、顶栏、内容区与错误边界。 */
 export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* 跳过导航直达内容区（键盘用户，UX #45 Skip Links） */}
+      {/* 跳过导航直达内容区，供键盘与读屏用户使用 */}
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-[2px] focus:border focus:border-border focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-elevated"

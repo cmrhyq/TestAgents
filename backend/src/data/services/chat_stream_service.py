@@ -1,22 +1,7 @@
-"""chat 流式编排服务。
+"""chat 流式编排服务：组装输入并落库输出，决策逻辑在 ``src/agent/runner.py``。
 
-职责边界很清楚：**组装输入 + 落库输出**，不含任何决策逻辑。
-具体「模型怎么想、工具怎么调」全在 ``src/agent/runner.py``。
-
-一轮对话的完整时序::
-
-    ensure_conversation  会话落库 + user 消息落库（流开始前，同步）
-        ↓
-    prepare              从 DB / 文件系统 / 记忆库收集 RunRequest（同步，线程池）
-        ↓
-    runner.run           产出 AgentEvent（异步生成器）
-        ↓
-    render               事件 → SSE 帧
-        ↓
-    save_answer          回答落库（流结束后）
-
-``prepare`` 是同步的、在读取前一次性把上下文备齐：**异步生成器里不要持着 DB
-session**——生成器可能被客户端随时中断，session 的生命周期会变得不可预测。
+时序为 ``ensure_conversation``、``prepare``、``runner.run``、``render``、``save_answer``。
+``prepare`` 同步一次性备齐上下文，异步生成器内不持有 DB session，因为客户端可能随时中断。
 """
 
 from __future__ import annotations
@@ -41,11 +26,10 @@ from src.data.services.environment_service import EnvironmentService
 
 logger = get_logger(__name__)
 
-# 注入 LLM 的历史消息条数上限：问答场景不需要无穷长的上下文，
-# 截断同时控制了 token 成本与超长上下文带来的指令漂移。
+# 注入 LLM 的历史消息条数上限，同时控制 token 成本与超长上下文带来的指令漂移
 MAX_HISTORY_MESSAGES = 20
 
-# 空间约定文件与记忆镜像的路径（相对空间根目录）
+# 空间约定文件与记忆镜像的路径，相对空间根目录
 AGENTS_FILE = "AGENTS.md"
 MEMORY_FILE = "memory/MEMORY.md"
 
@@ -53,15 +37,21 @@ MEMORY_FILE = "memory/MEMORY.md"
 class ChatStreamService:
     """chat 会话编排：会话落库、上下文装配、事件下发、回答落库。"""
 
-    # ─── 落库 ────────────────────────────────────────────────────────────
+    # 落库
 
     def ensure_conversation(self, body) -> int:
-        """确保存在会话并返回 conversation_id；同时把 user 消息落库。
+        """确保会话存在并返回 ``conversation_id``，同时把 user 消息落库。
 
-        若 ``body.conversation_id`` 为空则新建会话。整个操作在独立 DB 事务中完成。
+        在独立的数据库事务中完成，事务随上下文退出提交。``body.conversation_id``
+        为空时新建会话。落库失败只记日志并返回原 ID（或 0），不阻断对话。
 
-        落库失败（DB 未初始化等）不阻断对话——宁可丢历史，也不要让用户
-        连一句回答都拿不到。
+        副作用：写库并提交。
+
+        Args:
+            body: ``ChatStreamRequest``，需含 ``space_id``、``instruction``、``mode``
+
+        Returns:
+            会话主键；持久化失败时返回入参已有的 ID，没有则返回 0
         """
         try:
             with get_db_manager().get_session() as session:
@@ -90,10 +80,13 @@ class ChatStreamService:
     def save_answer(self, conversation_id: int, answer: str) -> None:
         """把最终回答落库为 assistant 消息。
 
-        落库失败只记日志，不影响已经下发给用户的流式内容。
+        落库失败只记日志，不影响已下发给客户端的内容。会话 ID 为 0 或回答为空白时
+        直接跳过。
+
+        副作用：写库并提交。
 
         Args:
-            conversation_id: 会话 ID
+            conversation_id: 会话主键
             answer: 回答文本
         """
         if not conversation_id or not answer.strip():
@@ -104,19 +97,19 @@ class ChatStreamService:
         except Exception as exc:
             logger.error("回答落库失败", error=str(exc), conversation_id=conversation_id)
 
-    # ─── 上下文装配 ──────────────────────────────────────────────────────
+    # 上下文装配
 
     def load_history(self, conversation_id: int, *, exclude_trailing_user: bool = False) -> list[BaseMessage]:
         """读取会话历史并转换为 LangChain 消息。
 
         Args:
-            conversation_id: 会话 ID
-            exclude_trailing_user: 是否剔除末尾的 user 消息。
-                ``ensure_conversation`` 已把本轮提问落库，若不剔除，
-                本轮问题会在上下文中出现两次（一次在历史、一次作为本轮输入）。
+            conversation_id: 会话主键
+            exclude_trailing_user: 是否剔除末尾的 user 消息。``ensure_conversation``
+                已把本轮提问落库，不剔除会让同一问题在上下文中出现两次
 
         Returns:
-            HumanMessage / AIMessage 列表（按时间升序）；读取失败时返回空列表按单轮处理
+            按时间升序的 ``HumanMessage`` / ``AIMessage`` 列表，最多
+            ``MAX_HISTORY_MESSAGES`` 条；读取失败时返回空列表，本轮按单轮处理
         """
         if not conversation_id:
             return []
@@ -144,18 +137,17 @@ class ChatStreamService:
         return history
 
     def prepare(self, body, conversation_id: int) -> RunRequest:
-        """收集一轮对话需要的全部上下文，构造 ``RunRequest``。
+        """收集一轮对话所需上下文并构造 ``RunRequest``。
 
-        这里的每一次外部读取都做了降级：空间查不到就只给个占位名，
-        记忆读失败就当没有记忆，AGENTS.md 缺失就跳过。
-        **上下文缺一块不该导致整轮对话失败**。
+        所有外部读取均降级：空间查不到给占位名，记忆读失败视为无记忆，
+        ``AGENTS.md`` 缺失则跳过。单块上下文缺失不影响整轮对话。
 
         Args:
             body: ``ChatStreamRequest``
-            conversation_id: 已落库的会话 ID
+            conversation_id: 已落库的会话主键
 
         Returns:
-            RunRequest
+            可直接交给 ``runner.run`` 的请求对象
         """
         space_id = int(body.space_id) if body.space_id is not None else 0
         mode = normalize_mode(body.mode).value
@@ -183,7 +175,14 @@ class ChatStreamService:
         )
 
     def _load_space(self, space_id: int) -> tuple[str, int, list[dict[str, Any]]]:
-        """读空间名、接口数、环境清单。"""
+        """读取空间名、接口数与环境清单。
+
+        Args:
+            space_id: 空间主键，0 或空表示未指定空间
+
+        Returns:
+            ``(空间名, 接口数, 环境字典列表)``；空间不存在或读取失败时返回空值
+        """
         if not space_id:
             return "", 0, []
 
@@ -209,7 +208,15 @@ class ChatStreamService:
             return "", 0, []
 
     def _read_space_file(self, space_id: int, relative: str) -> str:
-        """读空间目录里的文本文件；不存在或读失败返回空串。"""
+        """读取空间目录下的文本文件。
+
+        Args:
+            space_id: 空间主键
+            relative: 相对空间根目录的路径
+
+        Returns:
+            文件内容；文件不存在、空间未指定或读取失败时返回空串
+        """
         if not space_id:
             return ""
         try:
@@ -224,7 +231,15 @@ class ChatStreamService:
             return ""
 
     def _load_memories(self, space_id: int, instruction: str) -> list[dict[str, Any]]:
-        """召回跨会话记忆，转成 prompt 需要的 dict 形态。"""
+        """召回跨会话记忆并转为 prompt 使用的字典结构。
+
+        Args:
+            space_id: 空间主键
+            instruction: 本轮用户输入，作为召回查询
+
+        Returns:
+            记忆条目字典列表；空间未指定或召回失败时返回空列表
+        """
         if not space_id:
             return []
         try:
@@ -246,7 +261,15 @@ class ChatStreamService:
         ]
 
     def _load_skill_blocks(self, names: list[str], space_id: int) -> str:
-        """渲染选中 skill 的正文块。"""
+        """渲染选中 skill 的正文块。
+
+        Args:
+            names: skill 名列表
+            space_id: 空间主键，0 时按无空间处理
+
+        Returns:
+            拼接后的 skill 正文；名称为空或读取失败时返回空串
+        """
         if not names:
             return ""
         try:
@@ -257,22 +280,20 @@ class ChatStreamService:
             logger.warning("skill 正文读取失败，本轮不注入技能", skills=names, error=str(exc))
             return ""
 
-    # ─── 流式执行 ────────────────────────────────────────────────────────
+    # 流式执行
 
     async def stream_answer(self, body, conversation_id: int) -> AsyncIterator[str]:
-        """跑一轮 Agent 并产出 SSE 帧。
+        """执行一轮 Agent 并产出 SSE 帧。
 
-        事件序列::
+        事件顺序为 ``start``、若干 ``text_delta`` 或 ``tool_call`` + ``tool_result``、
+        最后 ``final`` 或 ``error``。每帧为 ``id:`` / ``event:`` / ``data:`` 三行加空行，
+        ``id`` 为递增序号，供 ``Last-Event-ID`` 续传使用。
 
-            start → (text_delta | tool_call → tool_result)* → final
-                                                            ↘ error
-
-        帧格式为标准的 ``id:`` / ``event:`` / ``data:`` 三行 + 空行，
-        其中 ``id`` 是递增的事件序号，为后续断线续传（``Last-Event-ID``）预留。
+        副作用：创建并收尾执行记录（写库并提交）、成功后落库回答（写库并提交）。
 
         Args:
             body: ``ChatStreamRequest``
-            conversation_id: 已落库的会话 ID
+            conversation_id: 已落库的会话主键
 
         Yields:
             可直接写入 ``StreamingResponse`` 的 SSE 文本帧
@@ -281,7 +302,7 @@ class ChatStreamService:
         seq = 0
         answer = ""
         failed = False
-        settled = False  # 是否走到了明确终态（final / error / 未捕获异常）
+        settled = False  # 是否走到明确终态（final / error / 未捕获异常）
         error_message = ""
 
         try:
@@ -291,8 +312,8 @@ class ChatStreamService:
             yield render(ErrorEvent(message=f"上下文准备失败：{exc}"), 0)
             return
 
-        # 记录必须在 prepare 成功之后创建：放前面会在上下文装配失败时留下
-        # 一条永远 running 的僵尸记录，而那时 finally 还没建立。
+        # 必须在 prepare 成功之后创建记录：否则装配失败会留下永久 running 的记录，
+        # 那时 finally 尚未建立
         recorder = AgentRunRecorder()
         request.run_id = recorder.start(
             space_id=int(body.space_id),
@@ -313,19 +334,15 @@ class ChatStreamService:
                     error_message = event.message
                 yield render(event, seq)
                 seq += 1
-        except Exception as exc:  # runner 内部已兜住绝大多数异常，这里兜最后一道
+        except Exception as exc:  # runner 内部已处理大多数异常，这里兜底
             logger.error("流式执行失败", error=str(exc), conversation_id=conversation_id)
             error_message = str(exc)
             failed = True
             settled = True
             yield render(ErrorEvent(message=str(exc)), seq)
         finally:
-            # ⚠️ 这个 finally 会在客户端断流时执行（Starlette 对生成器调 aclose()，
-            #    在挂起点抛 GeneratorExit）。铁律三条：
-            #      1) 不能 await —— 取消态下 await 立刻抛 CancelledError，收尾被吞
-            #      2) 不能 yield —— GeneratorExit 期间 yield 会抛 RuntimeError
-            #      3) 不能外抛 —— 会覆盖正在传播的 GeneratorExit
-            #    「settled=False」即代表断流，落库记 cancelled。
+            # 客户端断流时本块在 GeneratorExit 状态下执行：不能 await（抛 CancelledError）、
+            # 不能 yield（抛 RuntimeError）、不能外抛（覆盖 GeneratorExit）；settled=False 记为 cancelled
             try:
                 recorder.finish(
                     status=("cancelled" if not settled else ("failed" if failed else "completed")),

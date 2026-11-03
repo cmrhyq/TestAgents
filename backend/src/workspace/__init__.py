@@ -1,7 +1,6 @@
 """空间工作目录子系统。
 
-对外只暴露两个东西：``WorkspaceManager``（目录生命周期与沙箱）和
-``get_workspace_manager()``（无状态单例）。
+对外暴露 ``WorkspaceManager``（目录生命周期与沙箱）与 ``get_workspace_manager()`` 单例。
 """
 
 from src.workspace.manager import (

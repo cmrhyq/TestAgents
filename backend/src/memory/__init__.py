@@ -1,7 +1,6 @@
-"""记忆与知识库子系统对外接口，以及按配置装配的工厂。
+"""记忆与知识库子系统对外接口。
 
-工厂的职责只有一个：**根据配置决定「有没有向量能力」**。
-配置关着就返回纯词法实现，上层代码不需要感知差异。
+工厂按配置决定是否装配向量能力：配置关闭时返回纯词法实现，调用方无需感知差异。
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ _knowledge: KnowledgeBase | None = None
 
 
 def get_long_term_memory() -> LongTermMemory:
-    """全局跨会话记忆（无状态，可复用）。"""
+    """返回全局跨会话记忆实例（无状态，可复用）。"""
     global _long_term
     if _long_term is None:
         _long_term = LongTermMemory()
@@ -37,10 +36,16 @@ def get_long_term_memory() -> LongTermMemory:
 
 
 def get_knowledge_base(space_id: int | str | None = None) -> KnowledgeBase:
-    """知识库实例。
+    """返回知识库实例。
 
-    向量集合是按空间分的，带 space_id 时每次新建轻量壳（集合与 embedder 复用全局资源）；
-    不带空间上下文时复用单例，走词法降级。
+    向量集合按空间划分：传入 space_id 时新建轻量壳并复用全局集合与 embedder；
+    不传时复用单例，只能走词法检索。
+
+    Args:
+        space_id: 空间 ID；None 表示无空间上下文
+
+    Returns:
+        已按配置装配的知识库实例
     """
     global _knowledge
 
@@ -53,14 +58,14 @@ def get_knowledge_base(space_id: int | str | None = None) -> KnowledgeBase:
 
 
 def reset_memory_singletons() -> None:
-    """重置单例（测试用）。"""
+    """重置全局单例，仅供测试使用。"""
     global _long_term, _knowledge
     _long_term = None
     _knowledge = None
 
 
 def _build(space_id: int | str | None) -> KnowledgeBase:
-    """按配置装配知识库实例。"""
+    """按配置装配知识库；向量能力装配失败时降级为词法检索并记录警告。"""
     from src.core.config import get_config
 
     config = get_config()

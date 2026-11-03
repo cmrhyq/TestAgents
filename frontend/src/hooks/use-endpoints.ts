@@ -29,4 +29,5 @@ const {
   },
 });
 
+/** 接口的增删改查 hook，由 `createCrudHooks` 按 `/endpoints` 生成。 */
 export { useEndpoints, useEndpoint, useCreateEndpoint, useUpdateEndpoint, useDeleteEndpoint };

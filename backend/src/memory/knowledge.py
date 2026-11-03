@@ -1,16 +1,7 @@
-"""领域知识库（KnowledgeBase）。
+"""按空间隔离的领域知识库：文档摄取、切片、检索与管理。
 
-需求文档、接口文档这类「长文本、模糊检索」的资料放这里：上传 → 落盘 → 切片 →
-向量索引；对话中通过 ``knowledge_search`` 工具语义检索。
-
-**降级是硬要求**。向量库可能没部署、embedding 模型可能没配、网络可能断——
-任何一种情况下知识库都必须「差但可用」：
-
-    有向量库 + 有 embedding → 向量检索（语义）
-    否则                    → 切片表 LIKE（词法）
-
-降级不是「静默失败」，而是把 ``index_mode`` 明确记在文档行上，前端能看到
-「这份文档只做了词法索引」，避免用户以为语义检索在生效。
+检索能力必须可降级：向量库与 embedding 均可用时走向量检索，否则回退到切片表
+``LIKE`` 词法检索；实际方式记录在文档行的 ``index_mode`` 上。
 """
 
 from __future__ import annotations
@@ -35,8 +26,7 @@ from src.workspace.manager import WorkspaceManager
 
 logger = get_logger(__name__)
 
-# 切片参数：800 字符约等于 400-600 个中文词，与主流 RAG 默认值接近；
-# 100 字符重叠用于避免「答案正好被切断在两片之间」
+# 切片参数：800 字符约对应 400-600 个中文词；100 字符重叠避免答案被切断在边界
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
@@ -48,7 +38,7 @@ SessionScope = Callable[[], AbstractContextManager[Session]]
 
 
 class VectorStore(Protocol):
-    """向量库抽象：只依赖这三个动作，便于替换与 mock。"""
+    """向量库抽象：仅依赖 add / query / delete 三个动作，便于替换与 mock。"""
 
     def add(self, ids: list[str], documents: list[str], metadatas: list[dict[str, Any]]) -> None: ...
 
@@ -71,6 +61,7 @@ class SearchHit:
     score: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为工具与接口返回用的字典，``score`` 保留 4 位小数。"""
         return {
             "document": self.document_name,
             "seq": self.seq,
@@ -81,6 +72,9 @@ class SearchHit:
 
 class KnowledgeBase:
     """按空间隔离的领域知识库。
+
+    ``vector_store`` 与 ``embedder`` 任一为 None 即视为词法模式，
+    此时上传与检索只写读切片表。
 
     Args:
         workspace: 工作目录管理器；None 时取全局单例
@@ -107,6 +101,7 @@ class KnowledgeBase:
 
     @property
     def vector_enabled(self) -> bool:
+        """是否同时具备向量库与 embedder。"""
         return self._vector_store is not None and self._embedder is not None
 
     @property
@@ -119,9 +114,12 @@ class KnowledgeBase:
     def ingest(self, space_id: int | str, filename: str, data: bytes, mime: str = "") -> KnowledgeDocument:
         """上传并索引一份文档。
 
+        副作用：文件写入空间 ``docs/`` 目录，文档行与切片落库；
+        启用向量能力时会调用 embedder 并写入向量库。
+
         Args:
             space_id: 空间 ID
-            filename: 原始文件名（路径部分会被丢弃，防目录穿越）
+            filename: 原始文件名，仅保留文件名部分，路径会被丢弃以防目录穿越
             data: 文件字节
             mime: MIME 类型，缺省按扩展名推断
 
@@ -129,7 +127,7 @@ class KnowledgeBase:
             已入库的文档行（``status='indexed'``）
 
         Raises:
-            ValueError: 后缀不支持、文件为空或过大
+            ValueError: 后缀不支持、内容为空、解码后为空或文件超过 20MB
         """
         safe_name = Path(filename).name
         suffix = Path(safe_name).suffix.lower()
@@ -175,7 +173,15 @@ class KnowledgeBase:
         return self.get_document(doc_id)  # type: ignore[return-value]
 
     def reindex(self, document_id: int) -> KnowledgeDocument | None:
-        """重建单个文档的切片索引（磁盘文件为准）。"""
+        """以磁盘源文件为准重建切片索引，覆盖原有切片与向量。
+
+        Args:
+            document_id: 文档 ID
+
+        Returns:
+            重建后的文档行；文档不存在时返回 None；源文件缺失时返回状态为
+            ``failed`` 的文档行
+        """
         document = self.get_document(document_id)
         if document is None:
             return None
@@ -193,7 +199,16 @@ class KnowledgeBase:
     # ─── 检索 ────────────────────────────────────────────────────────────
 
     def search(self, space_id: int | str, query: str, top_k: int = 5) -> list[SearchHit]:
-        """检索相关切片。有向量库走向量，否则降级词法。"""
+        """检索相关切片，优先向量检索，失败或未启用时降级为词法检索。
+
+        Args:
+            space_id: 空间 ID
+            query: 检索词；空白查询直接返回空列表
+            top_k: 返回条数上限
+
+        Returns:
+            按相关度降序的命中列表，无命中时为空列表
+        """
         keyword = (query or "").strip()
         if not keyword:
             return []
@@ -201,12 +216,13 @@ class KnowledgeBase:
         if self.vector_enabled:
             try:
                 return self._vector_search(space_id, keyword, top_k)
-            except Exception as exc:  # 向量库抖动不应让检索整体报错
+            except Exception as exc:  # 向量库异常不应导致检索整体失败
                 logger.warning("向量检索失败，降级为词法检索", error=str(exc), space_id=str(space_id))
 
         return self._lexical_search(space_id, keyword, top_k)
 
     def _vector_search(self, space_id: int | str, query: str, top_k: int) -> list[SearchHit]:
+        """向量检索，返回结果前用 ``chroma_id`` 回查切片与文档名。"""
         raw_hits = self._vector_store.query(query, top_k)  # type: ignore[union-attr]
         if not raw_hits:
             return []
@@ -242,7 +258,7 @@ class KnowledgeBase:
         return hits
 
     def _lexical_search(self, space_id: int | str, query: str, top_k: int) -> list[SearchHit]:
-        """词法降级：按整句命中优先、再按分词命中率排序。"""
+        """词法降级检索：整句命中优先，其次按分词命中率排序。"""
         with self._session_scope() as session:
             candidates = session.scalars(
                 select(KnowledgeChunk).where(
@@ -282,7 +298,7 @@ class KnowledgeBase:
 
     @staticmethod
     def _loose_candidates(session: Session, space_id: int | str, query: str) -> list[KnowledgeChunk]:
-        """整句没命中时退一步：任一分词命中即可作为候选。"""
+        """整句未命中时退一步：任一分词命中即可作为候选。"""
         tokens = _tokenize(query)
         if not tokens:
             return []
@@ -303,6 +319,7 @@ class KnowledgeBase:
     # ─── 管理 ────────────────────────────────────────────────────────────
 
     def list_documents(self, space_id: int | str) -> list[KnowledgeDocument]:
+        """列出空间下的文档，按创建时间倒序。"""
         with self._session_scope() as session:
             return list(
                 session.scalars(
@@ -313,10 +330,12 @@ class KnowledgeBase:
             )
 
     def get_document(self, document_id: int) -> KnowledgeDocument | None:
+        """按 ID 取文档行，不存在时返回 None。"""
         with self._session_scope() as session:
             return session.get(KnowledgeDocument, document_id)
 
     def list_chunks(self, document_id: int) -> list[KnowledgeChunk]:
+        """列出文档的切片，按 ``seq`` 升序。"""
         with self._session_scope() as session:
             return list(
                 session.scalars(
@@ -327,7 +346,11 @@ class KnowledgeBase:
             )
 
     def delete_document(self, document_id: int) -> None:
-        """删除文档（含切片、向量、磁盘文件）。"""
+        """删除文档及其切片、向量与磁盘源文件。
+
+        副作用：删除向量库条目、数据库行与磁盘文件。向量或文件删除失败只记录
+        日志，数据库记录仍会被清理。
+        """
         document = self.get_document(document_id)
         if document is None:
             return
@@ -354,7 +377,7 @@ class KnowledgeBase:
     # ─── 内部 ────────────────────────────────────────────────────────────
 
     def _index(self, space_id: int | str, document_id: int, text: str) -> None:
-        """切片 → 入库 → 尝试向量化。向量化失败自动降级。"""
+        """切片、写入切片表并尝试向量化；向量化失败时该文档降级为词法索引。"""
         pieces = chunk_text(text, CHUNK_SIZE, CHUNK_OVERLAP)
         if not pieces:
             self._mark_failed(document_id, "切片结果为空")
@@ -397,7 +420,11 @@ class KnowledgeBase:
             session.flush()
 
     def _upsert_vectors(self, space_id: int | str, document_id: int, pieces: list[str]) -> list[str]:
-        """写入向量库，返回每片的 chrOMA id。"""
+        """写入向量库，返回每个切片对应的向量 ID。
+
+        Raises:
+            ValueError: embedding 返回的向量数与切片数不一致
+        """
         ids = [f"{document_id}-{seq}" for seq in range(len(pieces))]
         vectors = self._embedder(pieces)  # type: ignore[misc]
         if len(vectors) != len(pieces):
@@ -413,6 +440,7 @@ class KnowledgeBase:
         return ids
 
     def _clear_chunks(self, document_id: int) -> None:
+        """删除文档的全部切片及其向量，用于重建索引前清理。"""
         chunk_ids = [c.chroma_id for c in self.list_chunks(document_id) if c.chroma_id]
         if chunk_ids and self._vector_store is not None:
             try:
@@ -424,6 +452,7 @@ class KnowledgeBase:
             session.flush()
 
     def _mark_failed(self, document_id: int, error: str) -> None:
+        """把文档标记为 ``failed`` 并记录错误摘要（最多 500 字符）。"""
         with self._session_scope() as session:
             document = session.get(KnowledgeDocument, document_id)
             if document is not None:
@@ -441,8 +470,7 @@ class KnowledgeBase:
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """把长文本切成带重叠的片段。
 
-    策略：优先在段落边界（``\\n\\n``）断开，其次句子边界，最后硬切。
-    这样切出来的片段是「语义完整的块」，而不是从句子中间开始的碎片。
+    断点优先取段落边界，其次句子边界，最后硬切，避免片段从句子中间开始。
 
     Args:
         text: 原文
@@ -450,7 +478,10 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
         overlap: 相邻片段重叠字符数
 
     Returns:
-        片段列表（去除了纯空白片段）
+        片段列表，已去除纯空白片段
+
+    Raises:
+        ValueError: ``size`` 非正，或 ``overlap`` 不满足 ``0 <= overlap < size``
     """
     if size <= 0:
         raise ValueError("size 必须为正数")
@@ -481,7 +512,7 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
 
 
 def _find_break(text: str, start: int, end: int, size: int) -> int:
-    """在 [start, end] 区间内寻找合适的断点，找不到就返回原 end。"""
+    """在 ``[start, end]`` 内向前查找断点，找不到时返回原 ``end``。"""
     window_start = max(start + int(size * 0.5), start)
 
     for separator in ("\n\n", "\n", "。", "！", "？", ". ", "; ", "；"):
@@ -499,7 +530,7 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]{2,}")
 
 
 def _tokenize(text: str) -> list[str]:
-    """粗粒度分词：英文按词、中文按连续片段（不引入分词依赖）。"""
+    """粗粒度分词：英文按词、中文按连续片段，不引入分词依赖。"""
     tokens: list[str] = []
     for match in _TOKEN_PATTERN.finditer(text or ""):
         token = match.group(0)
@@ -526,7 +557,7 @@ def _lexical_score(content: str, query: str, tokens: list[str]) -> float:
 
 
 def _decode(data: bytes) -> str:
-    """按 utf-8 → gbk → latin-1 依次尝试解码。"""
+    """按 utf-8、utf-8-sig、gbk、latin-1 依次尝试解码，全部失败时替换非法字节。"""
     for encoding in ("utf-8", "utf-8-sig", "gbk", "latin-1"):
         try:
             return data.decode(encoding)
@@ -536,6 +567,7 @@ def _decode(data: bytes) -> str:
 
 
 def _guess_mime(suffix: str) -> str:
+    """按扩展名推断 MIME 类型，未知时返回 ``text/plain``。"""
     return {
         ".md": "text/markdown",
         ".markdown": "text/markdown",
@@ -547,6 +579,7 @@ def _guess_mime(suffix: str) -> str:
 
 
 def _default_session_scope() -> SessionScope:
+    """返回默认 Session 上下文工厂，每次调用新开一个会话。"""
     def _scope() -> AbstractContextManager[Session]:
         from src.core.database.database_manager import get_db_manager
 
@@ -556,5 +589,5 @@ def _default_session_scope() -> SessionScope:
 
 
 def format_hits(hits: list[SearchHit]) -> str:
-    """把检索结果渲染为工具返回的 JSON 字符串。"""
+    """把检索结果渲染为 JSON 字符串，供工具返回。"""
     return json.dumps([hit.to_dict() for hit in hits], ensure_ascii=False)

@@ -1,14 +1,7 @@
-"""``AgentRunRecorder`` 落库行为测试。
+"""`AgentRunRecorder` 的落库契约。
 
-这个类是「执行记录」功能的核心写入端，几条必须锁死的契约：
-
-1. **绝不抛异常**：DB 挂了、表不存在、数据畸形，都只能 warning，不能带崩对话。
-2. **敏感头打码**：``Authorization`` / ``Cookie`` 之类入库前必须替换成 ``***``，
-   否则等于把凭证写进备份与日志。
-3. **三级长度台阶**：落库 2MB（超限置 ``response_body_truncated=1``），
-   与 SSE 的 4000 字符、模型的 8000 字符互不污染。
-4. **计数在内存累加、``finish`` 一次写出**，且 ``finish`` 幂等。
-5. **成本从 ``llm_log`` 聚合**（``llm_call_count`` / ``total_tokens`` / ``cost_usd``）。
+写入端不得因 DB 异常抛出，异常只记 warning；敏感头入库前脱敏；计数在内存累加，
+由 `finish` 一次写出且幂等；成本从 `llm_log` 聚合。
 """
 
 from __future__ import annotations
@@ -33,7 +26,7 @@ SPACE_ID = 7701
 
 @pytest.fixture()
 def scope(tmp_path):
-    """返回 (session_scope, maker)：scope 供 recorder 用，maker 供断言用。"""
+    """返回 `(session_scope, maker)`：前者供记录器，后者供断言。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'recorder.db'}")
     Base.metadata.create_all(engine)
     maker = sessionmaker(bind=engine, expire_on_commit=False)
@@ -61,10 +54,12 @@ def scope(tmp_path):
 
 
 def _recorder(scope) -> AgentRunRecorder:
+    """基于给定 session 作用域构造记录器。"""
     return AgentRunRecorder(session_scope=scope)
 
 
 def _run(maker, run_id: int):
+    """读取指定执行记录行。"""
     from src.data.models.agent_run import AgentRun
 
     with maker() as session:
@@ -72,6 +67,7 @@ def _run(maker, run_id: int):
 
 
 def _calls(maker, run_id: int):
+    """读取指定执行记录的全部工具调用行。"""
     from src.data.models.agent_tool_call import AgentToolCall
 
     with maker() as session:
@@ -79,6 +75,8 @@ def _calls(maker, run_id: int):
 
 
 class TestStart:
+    """`start` 建行、字段归一与 DB 不可用时的降级。"""
+
     def test_creates_running_row(self, scope):
         scope_fn, maker = scope
         recorder = _recorder(scope_fn)
@@ -95,7 +93,7 @@ class TestStart:
         assert row.started_at is not None
 
     def test_conversation_id_zero_becomes_none(self, scope):
-        """``ensure_conversation`` 降级返回 0，落库时要归一为 None 而不是 0。"""
+        """`ensure_conversation` 降级返回 0，落库需归一为 None。"""
         scope_fn, maker = scope
         recorder = _recorder(scope_fn)
 
@@ -112,7 +110,7 @@ class TestStart:
         assert len(_run(maker, run_id).title) == 200
 
     def test_db_failure_returns_none_without_raising(self):
-        """DB 不可用时 start 返回 None，后续 tool_call/finish 全部静默跳过。"""
+        """DB 不可用时 `start` 返回 None，后续调用静默跳过。"""
 
         @contextmanager
         def broken():
@@ -123,7 +121,7 @@ class TestStart:
 
         assert recorder.start(space_id=SPACE_ID) is None
         assert recorder.run_id is None
-        # 这两句不能抛
+        # 以下调用不得抛出
         recorder.tool_call(
             step=1, seq=1, call_id="c", name="x", args={}, outcome=ToolOutcome(ok=True), duration_ms=1
         )
@@ -131,7 +129,10 @@ class TestStart:
 
 
 class TestToolCall:
+    """工具调用落库：通用列、类型判定与预览截断。"""
+
     def _start(self, scope) -> tuple[AgentRunRecorder, int, sessionmaker]:
+        """启动记录器，返回 `(recorder, run_id, maker)`。"""
         scope_fn, maker = scope
         recorder = _recorder(scope_fn)
         run_id = recorder.start(space_id=SPACE_ID)
@@ -186,8 +187,7 @@ class TestToolCall:
 
     def test_tool_type_classification(self, scope):
         recorder, run_id, maker = self._start(scope)
-        # 这些都是 src/agent/tools/ 里真实存在的工具名；
-        # 名字与 _TOOL_TYPES 对不上就会全部落到 "other"，让按类型聚合失去意义。
+        # 名称取自 `src/agent/tools/` 的真实工具，与 `_TOOL_TYPES` 不一致会全部落到 other
         cases = {
             "send_request": "http",
             "list_environments": "http",
@@ -213,7 +213,7 @@ class TestToolCall:
         assert got == cases
 
     def test_preview_is_clipped_but_result_chars_is_full(self, scope):
-        """预览截断到 4000 字，``result_chars`` 记全量长度——否则「被截了」看不出来。"""
+        """预览截断到 4000 字，`result_chars` 保留全量长度。"""
         recorder, run_id, maker = self._start(scope)
         text = "x" * 9000
 
@@ -243,13 +243,17 @@ class TestToolCall:
 
 
 class TestHttpExtraction:
+    """HTTP 工具调用的列提取与请求头脱敏。"""
+
     def _start(self, scope) -> tuple[AgentRunRecorder, int, sessionmaker]:
+        """启动记录器，返回 `(recorder, run_id, maker)`。"""
         scope_fn, maker = scope
         recorder = _recorder(scope_fn)
         run_id = recorder.start(space_id=SPACE_ID)
         return recorder, run_id, maker
 
     def _http_outcome(self, **overrides) -> ToolOutcome:
+        """构造 HTTP 工具成功返回的 JSON 文本。"""
         payload = {
             "status_code": 200,
             "url": "https://api.example.com/v1/orders",
@@ -300,7 +304,7 @@ class TestHttpExtraction:
         assert req["Accept"] == "*/*"
         assert resp["Set-Cookie"] == "***"
         assert resp["Content-Type"] == "application/json"
-        # 明文绝不能出现在库里的任何一列
+        # 明文不得出现在任何列
         assert "super-secret" not in (row.request_headers or "")
 
     def test_oversized_body_is_truncated_and_flagged(self, scope):
@@ -315,11 +319,11 @@ class TestHttpExtraction:
         row = _calls(maker, run_id)[0]
         assert row.response_body_truncated == 1
         assert len(row.response_body.encode()) <= MAX_RESPONSE_BODY_BYTES + 32  # JSON 引号开销
-        # 原始大小要如实记录，截断后的长度会骗人
+        # 原始大小需如实记录，截断后长度不可作为依据
         assert row.response_size_bytes > MAX_RESPONSE_BODY_BYTES
 
     def test_error_only_payload_still_extracts(self, scope):
-        """``send_request`` 失败时没有 status_code，只有 error —— 也要留痕。"""
+        """`send_request` 失败时无 `status_code`，仍需保留 url 等痕迹。"""
         recorder, run_id, maker = self._start(scope)
 
         recorder.tool_call(
@@ -350,7 +354,10 @@ class TestHttpExtraction:
 
 
 class TestFinish:
+    """`finish` 的统计聚合、幂等与异常安全。"""
+
     def _start(self, scope) -> tuple[AgentRunRecorder, int, sessionmaker]:
+        """启动记录器，返回 `(recorder, run_id, maker)`。"""
         scope_fn, maker = scope
         recorder = _recorder(scope_fn)
         run_id = recorder.start(space_id=SPACE_ID)
@@ -395,7 +402,7 @@ class TestFinish:
         with maker() as session:
             session.add(LLMLog(model_name="m1", run_id=run_id, total_tokens=100, cost_usd=0.01))
             session.add(LLMLog(model_name="m1", run_id=run_id, total_tokens=250, cost_usd=0.02))
-            # 别的 run 的成本不能串进来
+            # 其他 run 与 run_id 为空的成本不得计入
             session.add(LLMLog(model_name="m1", run_id=run_id + 1, total_tokens=999, cost_usd=9.9))
             session.add(LLMLog(model_name="m1", run_id=None, total_tokens=777, cost_usd=7.7))
             session.commit()
@@ -416,7 +423,7 @@ class TestFinish:
         recorder.finish(status="failed", error_message="晚到的失败")
         second = _run(maker, run_id)
 
-        # 第二次必须整条跳过：状态不能被 finally 的兜底覆盖
+        # 第二次整条跳过，状态不得被 finally 兜底覆盖
         assert second.status == "completed"
         assert second.finished_at == first.finished_at
         assert second.error_message == ""
@@ -429,7 +436,7 @@ class TestFinish:
         assert _run(maker, run_id).error_message == "网关超时"
 
     def test_missing_run_row_does_not_raise(self, scope):
-        """迁移或清理把行删掉了，finish 也要安静地失败。"""
+        """行被迁移或清理删除后，`finish` 不得抛出。"""
         recorder, _run_id, _maker = self._start(scope)
         recorder.run_id = 999_999_999
 

@@ -1,6 +1,6 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
-/** 双主题：亮色图纸 github-light / 暗色夜图 github-dark，配合 --shiki-dark 变量切换。 */
+/** 亮色与暗色双主题，配合 CSS 变量切换。 */
 const SHIKI_THEMES = {
   light: "github-light",
   dark: "github-dark",
@@ -23,14 +23,14 @@ const SHIKI_LANGS = [
 
 const HIGHLIGHT_LANGS = new Set<string>(SHIKI_LANGS);
 
-/** 仅对编程语言启用 Shiki；text/ASCII 图等保持纯文本 pre，避免破坏对齐。 */
+/** 判断语言是否启用 Shiki 高亮；`text` 与 ASCII 图保持纯文本以保留对齐。 */
 export function shouldHighlightLanguage(language: string): boolean {
   return HIGHLIGHT_LANGS.has(language) && language !== "text";
 }
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-/** Shiki 高亮器单例，一次加载双主题，避免每个代码块重复加载 wasm / 主题。 */
+/** 返回 Shiki 高亮器单例；首次调用触发 wasm 与主题加载。 */
 export function getShikiHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({

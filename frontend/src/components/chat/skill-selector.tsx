@@ -11,6 +11,7 @@ import {
 import { useSkills } from "@/hooks/use-skills.ts";
 import { cn } from "@/lib/utils";
 
+/** `SkillSelector` 的属性。 */
 export interface SkillSelectorProps {
   spaceId: string | null;
   selected: string[];
@@ -21,8 +22,7 @@ export interface SkillSelectorProps {
 /**
  * 技能多选器。
  *
- * 一个刻意的取舍：**只列 enabled 的 skill**。禁用的 skill 出现在可选列表里会让人
- * 以为选了就生效，而实际后端会跳过它——列表只呈现「当下真的可用」的东西。
+ * 只列出已启用的技能：禁用的技能被后端跳过，出现在可选列表里会造成误解。
  */
 export function SkillSelector({ spaceId, selected, onToggle, disabled }: SkillSelectorProps) {
   const { data, isLoading } = useSkills(spaceId);
@@ -64,7 +64,7 @@ export function SkillSelector({ spaceId, selected, onToggle, disabled }: SkillSe
             return (
               <DropdownMenuItem
                 key={`${skill.scope}:${skill.name}`}
-                // 多选下拉不自动关闭菜单：onSelect 阻止默认关闭
+                // 多选场景下阻止 onSelect 默认关闭菜单
                 onSelect={(event) => {
                   event.preventDefault();
                   onToggle(skill.name);

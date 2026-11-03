@@ -1,8 +1,12 @@
+"""基于 LiteLLM Router 的 LLM 服务。
+
+所有调用经 Router 转发并写入 llm_log 统计；模型路由由 ``config.model_list`` 驱动。
+"""
+
 import os
 
-# 只用随包分发的本地定价表，不向 GitHub 拉远端 cost map。
-# 两个原因：① 离线/内网环境会阻塞到超时；② 远端表与本地表条目不一致时，
-# 同一模型算出的成本会在「异常」「0.0」之间漂移——而 0.0 会被读成「免费」。
+# 只使用随包分发的本地定价表，不拉取远端 cost map：离线环境会阻塞到超时，
+# 且远端表与本地表不一致时同一模型的成本会在「异常」与 0.0 之间漂移，而 0.0 会被读成免费。
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from collections.abc import AsyncIterator, Callable, Iterator  # noqa: E402
@@ -29,7 +33,10 @@ SessionScope = Callable[[], AbstractContextManager[Session]]
 
 
 def _default_session_scope() -> SessionScope:
-    """默认从全局数据库管理器取会话（惰性，构造时不会触发 DB 初始化）。"""
+    """返回默认会话工厂，取自全局数据库管理器。
+
+    惰性构造，创建时不会触发数据库初始化。
+    """
 
     @contextmanager
     def _scope() -> Iterator[Session]:
@@ -44,15 +51,14 @@ def _default_session_scope() -> SessionScope:
 def _run_async(coro) -> Any:
     """在同步上下文中执行协程。
 
-    litellm 的 auto_router/complexity_router（smart-router）只在
-    ``Router.acompletion`` 的 async pre-routing hook 中生效；同步
-    ``Router.completion`` 会把 auto_router/complexity_router 当普通
-    provider 直接抛 Unmapped LLM provider。因此同步入口必须桥接到
-    async 路径：
+    smart-router 只在 ``Router.acompletion`` 的异步 pre-routing 阶段生效；
+    当前线程已有事件循环时改投新线程执行，避免 ``asyncio.run`` 报错。
 
-    - 当前线程无事件循环：直接 ``asyncio.run``
-    - 当前线程已有事件循环（如误在 async 函数中调同步方法）：
-      丢到新线程执行，避免 RuntimeError
+    Args:
+        coro: 待执行的协程对象
+
+    Returns:
+        协程的返回值
     """
     try:
         asyncio.get_running_loop()
@@ -65,18 +71,14 @@ def _run_async(coro) -> Any:
 class LLMService:
     """基于 LiteLLM Router 的统一 LLM 服务。
 
-    内部持有 ``ChatLiteLLMRouter``（LangChain BaseChatModel），
-    由 ``litellm.Router`` + ``config.model_list`` 驱动多模型路由。
-
-    All methods take ``list[BaseMessage]`` and return ``AIMessage`` or ``AIMessageChunk``.
+    内部持有 ``ChatLiteLLMRouter``，每次调用都会写入 llm_log 统计。
 
     Args:
-        config: 应用配置，为 None 时使用全局配置。
-        session_scope: 统计落库用的会话工厂；None 时用全局数据库单例。
-            显式注入是为了单测能跑在临时库上。
+        config: 应用配置；None 时取全局配置
+        session_scope: 统计落库的会话工厂；None 时用全局数据库单例
 
     Raises:
-        ValueError: ``config.model_list`` 为空时。
+        ValueError: ``config.model_list`` 为空
     """
 
     def __init__(self, config: AppConfig | None = None, *, session_scope: SessionScope | None = None) -> None:
@@ -87,13 +89,11 @@ class LLMService:
         self._model: ChatLiteLLMRouter | None = None
         self._session_scope = session_scope or _default_session_scope()
 
-    # ------------------------------------------------------------------
     # 属性（懒加载）
-    # ------------------------------------------------------------------
 
     @property
     def router(self) -> Router:
-        """原始 litellm.Router 实例。"""
+        """返回 ``litellm.Router``，首次访问时按 ``model_list`` 构建。"""
         if self._router is None:
             logger.info(
                 "构建 LiteLLM Router",
@@ -105,7 +105,7 @@ class LLMService:
 
     @property
     def model(self) -> ChatLiteLLMRouter:
-        """LangChain BaseChatModel 实例（ChatLiteLLMRouter）。"""
+        """返回 LangChain 模型实例，首次访问时构建。"""
         if self._model is None:
             self._model = ChatLiteLLMRouter(
                 router=self.router,
@@ -115,23 +115,37 @@ class LLMService:
 
     @property
     def default_model(self) -> str:
-        """当前默认模型名。"""
+        """返回当前默认模型名。"""
         return self._config.llm.default_model
 
-    # ------------------------------------------------------------------
     # 核心接口
-    # ------------------------------------------------------------------
 
     def invoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
-        """同步调用，返回完整 AIMessage（含 usage_metadata / response_metadata / tool_calls）。
+        """同步调用，返回完整响应。
 
-        内部桥接到 ainvoke（asyncio.run）：保证 litellm smart-router
-        （auto_router/complexity_router）的 pre-routing 生效。
+        内部桥接到 ``ainvoke``：smart-router 的 pre-routing 只在异步路径生效。
+
+        Args:
+            messages: LangChain 消息列表
+            **kwargs: 透传给底层 ``ainvoke``
+
+        Returns:
+            含 usage、response_metadata 与 tool_calls 的响应
         """
         return _run_async(self.ainvoke(messages, **kwargs))
 
     async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
-        """异步调用，返回完整 AIMessage。"""
+        """异步调用，返回完整响应。
+
+        副作用：向 llm_log 写入一条统计记录，失败同样记录。
+
+        Args:
+            messages: LangChain 消息列表
+            **kwargs: 透传给底层 ``ainvoke``
+
+        Returns:
+            模型响应
+        """
         start = perf_counter()
         try:
             response = await self.model.ainvoke(messages, **kwargs)
@@ -142,10 +156,16 @@ class LLMService:
             raise
 
     def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[BaseMessage]:
-        """同步流式，逐 chunk 产出 AIMessageChunk（含 content / tool_call_chunks / usage_metadata）。
+        """同步流式调用，逐块产出响应。
 
-        内部桥接到 astream（同步生成器包装异步生成器）：保证
-        smart-router pre-routing 生效。
+        内部把异步生成器包装为同步生成器，逐次桥接事件循环。
+
+        Args:
+            messages: LangChain 消息列表
+            **kwargs: 透传给底层 ``astream``
+
+        Yields:
+            响应块，含 content、tool_call_chunks 与 usage_metadata
         """
         agenerator = self.astream(messages, **kwargs)
 
@@ -160,7 +180,11 @@ class LLMService:
         yield from _consume()
 
     async def astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[BaseMessage]:
-        """异步流式，逐 chunk 产出 AIMessageChunk。"""
+        """异步流式调用，逐块产出响应并记录统计。
+
+        Yields:
+            响应块
+        """
         async for chunk in self._astream_tracked(messages, None, **kwargs):
             yield chunk
 
@@ -174,22 +198,20 @@ class LLMService:
         run_id: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[BaseMessage]:
-        """绑定工具后异步流式，并**记录每次调用的 token 与成本**。
+        """绑定工具后异步流式调用，并记录 token 与成本。
 
-        这是 Agent 运行时唯一该走的入口：``bind_tools`` + ``astream`` + 埋点
-        必须在同一处完成。调用方自行 ``model.bind_tools(t).astream(...)``
-        会绕过统计——这正是重构前对话链路零 ``llm_log`` 的原因。
+        ``bind_tools``、``astream`` 与埋点必须同处完成，调用方自行绑定会绕过统计。
 
         Args:
-            messages: 消息列表
-            tools: 工具列表；为空时**不**调用 bind_tools（部分 provider 拒绝空数组）
-            space_id: 归因到的空间
-            conversation_id: 归因到的会话
-            run_id: 归因到的执行记录（agent_run.id），让成本能按轮次聚合
-            **kwargs: 透传给底层 astream
+            messages: LangChain 消息列表
+            tools: 工具列表；为空时不调用 ``bind_tools``（部分 provider 拒绝空数组）
+            space_id: 归因空间
+            conversation_id: 归因会话
+            run_id: 归因执行记录 ``agent_run.id``
+            **kwargs: 透传给底层 ``astream``
 
         Yields:
-            AIMessageChunk
+            响应块
         """
         bound = self.model.bind_tools(tools) if tools else self.model
         async for chunk in self._astream_tracked(
@@ -214,9 +236,22 @@ class LLMService:
         request_type: str = "astream",
         **kwargs: Any,
     ) -> AsyncIterator[BaseMessage]:
-        """流式调用 + 统计落库的公共实现。
+        """流式调用并落统计的公共实现。
 
-        ``bound`` 为 None 时直接用底层 model（不绑工具）。
+        Args:
+            messages: LangChain 消息列表
+            bound: 已绑定工具的模型；None 时直接使用底层模型
+            space_id: 归因空间
+            conversation_id: 归因会话
+            run_id: 归因执行记录
+            request_type: 写入统计的调用类型
+            **kwargs: 透传给底层 ``astream``
+
+        Yields:
+            响应块
+
+        Raises:
+            异常原样上抛：先记录失败统计再抛出。
         """
         chat = bound if bound is not None else self.model
         start = perf_counter()
@@ -250,9 +285,7 @@ class LLMService:
             )
             raise
 
-    # ------------------------------------------------------------------
     # 工具调用
-    # ------------------------------------------------------------------
 
     def invoke_with_tools(
         self,
@@ -260,9 +293,17 @@ class LLMService:
         tools: list[Any],
         **kwargs: Any,
     ) -> AIMessage:
-        """同步调用并绑定工具，返回 AIMessage（含 .tool_calls）。
+        """同步调用并绑定工具。
 
-        内部桥接到 ainvoke_with_tools：保证 smart-router pre-routing 生效。
+        内部桥接到 ``ainvoke_with_tools``：smart-router 的 pre-routing 只在异步路径生效。
+
+        Args:
+            messages: LangChain 消息列表
+            tools: 工具列表
+            **kwargs: 透传给底层 ``ainvoke``
+
+        Returns:
+            含 tool_calls 的响应
         """
         return _run_async(self.ainvoke_with_tools(messages, tools, **kwargs))
 
@@ -272,7 +313,18 @@ class LLMService:
         tools: list[Any],
         **kwargs: Any,
     ) -> AIMessage:
-        """异步调用并绑定工具，返回 AIMessage（含 .tool_calls）。"""
+        """异步调用并绑定工具。
+
+        副作用：向 llm_log 写入一条统计记录。
+
+        Args:
+            messages: LangChain 消息列表
+            tools: 工具列表
+            **kwargs: 透传给底层 ``ainvoke``
+
+        Returns:
+            含 tool_calls 的响应
+        """
         start = perf_counter()
         try:
             model_with_tools = self.model.bind_tools(tools)
@@ -283,25 +335,28 @@ class LLMService:
             self._record_usage(self.default_model, "tools", None, success=False, error_message=str(e))
             raise
 
-    # ------------------------------------------------------------------
     # 观测
-    # ------------------------------------------------------------------
 
     def get_model_names(self) -> list[str]:
         """返回 Router 中配置的全部模型名。"""
         return self.router.get_model_names()
 
     def count_tokens(self, messages: list[BaseMessage]) -> int:
-        """预估给定消息的 token 数（不调用 API）。"""
+        """预估消息的 token 数，不发起 API 调用。
+
+        Args:
+            messages: LangChain 消息列表
+
+        Returns:
+            预估 token 数
+        """
         from litellm import token_counter
 
-        # token_counter 接受 OpenAI 格式，转换一下
+        # litellm.token_counter 只接受 OpenAI 消息格式
         openai_messages = [{"role": _get_role(m), "content": m.content} for m in messages]
         return token_counter(model=self.default_model, messages=openai_messages)
 
-    # ------------------------------------------------------------------
     # LLM 调用统计落库
-    # ------------------------------------------------------------------
 
     def _record_usage(
         self,
@@ -317,19 +372,21 @@ class LLMService:
         run_id: int | None = None,
         routing_tier: str = "",
     ) -> None:
-        """将一次 LLM 调用的 token / 模型 / 成本写入 ``llm_log`` 表。
+        """将一次调用的 token、模型与成本写入 ``llm_log`` 表。
+
+        副作用：写库并提交；落库失败只记告警，不影响主流程。
 
         Args:
-            model_name: 实际命中的模型（如 zai/glm-4-flash）。
-                注意**不是** Router 的 model_group（smart-router）——后者无法算成本。
-            request_type: 调用类型（invoke/ainvoke/stream/astream/tools）
-            usage: litellm usage_metadata dict，可为 None
-            success: 是否成功
-            error_message: 失败原因
+            model_name: 实际命中的模型，如 ``zai/glm-4-flash``；不能传 Router 的路由名，
+                后者无法计价
+            request_type: 调用类型，取值 ``invoke`` / ``ainvoke`` / ``stream`` / ``astream`` / ``tools``
+            usage: litellm 的 usage dict，可为 None
+            success: 调用是否成功
+            error_message: 失败原因，入库前截断到 500 字符
             duration_ms: 耗时毫秒
             space_id: 归因空间
             conversation_id: 归因会话
-            run_id: 归因执行记录（agent_run.id）
+            run_id: 归因执行记录
             routing_tier: smart-router 决策档位
         """
         usage = usage or {}
@@ -369,11 +426,10 @@ class LLMService:
 
 @dataclass
 class _UsageTracker:
-    """流式过程中累积「最后一次非空的」usage / 模型名 / 路由档位。
+    """流式过程中累积最近一次非空的 usage、模型名与路由档位。
 
-    为什么是「最后一次非空」而不是「只看最后一块」：usage 通常挂在末尾的
-    独立 chunk 上，但部分 provider 会提前返回，末尾反而是空 chunk。
-    末块判定会静默漏记，累积判定更稳。
+    usage 通常挂在末尾的独立块上，但部分 provider 会提前返回、末尾反而是空块，
+    因此按「最后一次非空」累积，避免漏记。
     """
 
     usage: dict = field(default_factory=dict)
@@ -395,17 +451,17 @@ class _UsageTracker:
 
 
 def _model_of(message: BaseMessage | None) -> str:
-    """提取**实际命中的模型**（而非 Router 的 model_group）。
+    """提取实际命中的模型名。
 
-    litellm Router 的 ``response_metadata`` 形如::
+    Router 的 ``response_metadata.model_group`` 是逻辑路由名、无法计价，
+    故按 ``deployment`` → ``routing_decision.routed_model`` →
+    ``deployment_model_name`` → ``model_name`` / ``model`` 的顺序取。
 
-        {"model_group": "smart-router",          # ← 逻辑路由名，算不出成本
-         "deployment": "zai/glm-4-flash",        # ← 真正花钱的模型
-         "deployment_model_name": "glm-4-flash",
-         "routing_decision": {"routed_model": "glm-4-flash", "tier": "SIMPLE"}}
+    Args:
+        message: 模型响应，可为 None
 
-    优先级：``deployment`` → ``routing_decision.routed_model`` →
-    ``deployment_model_name`` → ``model_name`` / ``model``。
+    Returns:
+        模型名；取不到时返回空串
     """
     if message is None:
         return ""
@@ -429,7 +485,11 @@ def _model_of(message: BaseMessage | None) -> str:
 
 
 def _routing_tier_of(message: BaseMessage | None) -> str:
-    """提取 smart-router 的决策档位（SIMPLE / MEDIUM / COMPLEX / REASONING）。"""
+    """提取 smart-router 的决策档位，如 ``SIMPLE`` / ``COMPLEX``。
+
+    Returns:
+        档位名；缺失时返回空串
+    """
     if message is None:
         return ""
     meta = getattr(message, "response_metadata", None) or {}
@@ -441,10 +501,17 @@ def _routing_tier_of(message: BaseMessage | None) -> str:
 
 
 def _lookup_pricing(model_name: str, pricing: list[Any] | None = None) -> dict | None:
-    """查模型费率：先看 ``config.pricing`` 自定义表，再查 litellm 内置定价表。
+    """查模型费率，先看 ``config.pricing``，再查 litellm 内置定价表。
 
-    自定义表优先，因为 litellm 不收录的厂商（``zai/*``）只能靠用户补。
-    返回的 dict 至少含 ``input_cost_per_token`` / ``output_cost_per_token``。
+    自定义表优先：litellm 未收录的厂商模型只能在此补充。
+
+    Args:
+        model_name: 模型名，可带 provider 前缀
+        pricing: 自定义费率列表，元素为 dict 或 ``ModelPricing``
+
+    Returns:
+        含 ``input_cost_per_token`` / ``output_cost_per_token`` 的费率 dict；
+        未收录时返回 None
     """
     # 1) 自定义费率（config.pricing）
     for entry in pricing or []:
@@ -455,7 +522,7 @@ def _lookup_pricing(model_name: str, pricing: list[Any] | None = None) -> dict |
             return entry
         return entry.model_dump() if hasattr(entry, "model_dump") else None
 
-    # 2) litellm 内置定价表（两级：带 provider 前缀 / 裸名）
+    # 2) litellm 内置定价表：先按带前缀的完整名，再按裸模型名
     try:
         import litellm
 
@@ -482,13 +549,17 @@ def _estimate_cost(
 ) -> float | None:
     """按定价表估算本次调用成本（美元）。
 
-    **算不出时返回 None，不返回 0**：0 会被下游当成「免费」，
-    而 NULL 表示「未知」，两者在成本报表里含义完全不同。
+    无法计价时返回 None 而非 0.0：NULL 表示未知，0.0 会被下游当成免费。
+    直接查定价表而不调 ``cost_per_token``，后者对未收录模型的行为随远端表状态变化。
 
-    实现上**直接查定价表而不调 ``cost_per_token``**：后者会先做 provider
-    解析，同一模型在「远端表加载成功 / 失败」两种状态下行为不一致
-    （实测 ``zai/glm-4-flash`` 会从抛异常变成返回 ``0.0``），
-    无法作为「有没有定价」的可靠判据。
+    Args:
+        model_name: 模型名
+        prompt_tokens: 输入 token 数
+        completion_tokens: 输出 token 数
+        pricing: 自定义费率列表
+
+    Returns:
+        成本（美元，保留 8 位小数）；无法计价时返回 None
     """
     if not model_name or (prompt_tokens <= 0 and completion_tokens <= 0):
         return None
@@ -507,7 +578,10 @@ def _estimate_cost(
 
 
 def _as_int(value: int | str | None) -> int | None:
-    """归因 ID 归一化为 int；非数字（如测试用的占位串）返回 None，避免入库炸列类型。"""
+    """把归因 ID 归一化为 int。
+
+    非数字值（如测试占位串）返回 None，避免写入列时类型冲突。
+    """
     if value is None:
         return None
     try:
@@ -517,7 +591,11 @@ def _as_int(value: int | str | None) -> int | None:
 
 
 def _usage_of(message: BaseMessage | None) -> dict:
-    """从 AIMessage 提取 usage_metadata dict。"""
+    """提取消息的 ``usage_metadata``。
+
+    Returns:
+        usage dict；缺失时返回空 dict
+    """
     if message is None:
         return {}
     usage = getattr(message, "usage_metadata", None)
@@ -530,19 +608,24 @@ def _elapsed_ms(start: float) -> int:
 
 
 def _get_role(msg: BaseMessage) -> str:
-    """从 BaseMessage 提取 role 字符串。"""
+    """返回 OpenAI 消息角色名，无法识别时按 ``user`` 处理。"""
     return msg.type if msg.type in ("human", "ai", "system") else "user"
 
 
-# ---------------------------------------------------------------------------
 # 全局单例
-# ---------------------------------------------------------------------------
 
 _service: LLMService | None = None
 
 
 def get_llm_service(config: AppConfig | None = None) -> LLMService:
-    """获取全局 LLMService 单例。"""
+    """返回全局服务单例，首次调用时创建。
+
+    Args:
+        config: 应用配置；仅首次创建时生效
+
+    Returns:
+        全局唯一的 ``LLMService``
+    """
     global _service
     if _service is None:
         _service = LLMService(config)
@@ -550,6 +633,6 @@ def get_llm_service(config: AppConfig | None = None) -> LLMService:
 
 
 def reset_llm_service() -> None:
-    """重置全局单例（测试/热重载用）。"""
+    """清除全局服务单例，供测试与热重载使用。"""
     global _service
     _service = None

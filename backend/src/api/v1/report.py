@@ -1,4 +1,4 @@
-"""报告路由。"""
+"""执行报告路由：报告列表、详情与文件下载。"""
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
@@ -24,7 +24,17 @@ def list_reports(
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
 ):
-    """查询报告列表（分页）。"""
+    """分页查询报告列表。
+
+    Args:
+        run_id: 按执行记录 ID 过滤
+        page: 页码，从 1 开始
+        page_size: 每页条数，取值 1-100
+        db: 请求级数据库会话
+
+    Returns:
+        当页报告与总数，每条附带所属执行记录的标题
+    """
     page_items, total = ReportService(db).list_reports(run_id, page, page_size)
 
     items = [
@@ -45,7 +55,18 @@ def list_reports(
 
 @router.get("/{report_id}", response_model=ReportDetailResponse)
 def get_report_detail(report_id: int, db: Session = Depends(get_db)):
-    """获取报告详情（含执行记录统计与工具调用留痕）。"""
+    """查询报告详情，含所属执行记录与工具调用留痕。
+
+    Args:
+        report_id: 报告 ID
+        db: 请求级数据库会话
+
+    Returns:
+        报告元信息、执行记录摘要与工具调用明细
+
+    Raises:
+        NotFoundError: 报告不存在，返回 HTTP 404
+    """
     report, run, tool_calls = ReportService(db).get_detail(report_id)
 
     return ReportDetailResponse(
@@ -61,7 +82,18 @@ def get_report_detail(report_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{report_id}/download")
 def download_report(report_id: int, db: Session = Depends(get_db)):
-    """下载报告文件。"""
+    """以附件形式下载报告文件。
+
+    Args:
+        report_id: 报告 ID
+        db: 请求级数据库会话
+
+    Returns:
+        报告文件响应，文件名为 ``agent_report_{run_id}.{format}``
+
+    Raises:
+        NotFoundError: 报告或磁盘文件不存在，返回 HTTP 404
+    """
     report, file_path = ReportService(db).get_download_file(report_id)
 
     filename = f"agent_report_{report.run_id}.{report.format}"

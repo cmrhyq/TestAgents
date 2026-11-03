@@ -28,6 +28,7 @@ SessionScope = Callable[[], AbstractContextManager[Session]]
 #: 请求体的编码方式，见 ``send_request`` 的 ``body_type`` 说明
 BODY_TYPES = ("auto", "json", "form", "raw")
 
+#: 形如 ``k=v&k2=v2`` 的表单原文，用于 auto 模式识别
 _FORM_BODY_RE = re.compile(r"^[^=&\s]+=[^&]*(?:&[^=&\s]+=[^&]*)*$")
 
 
@@ -271,6 +272,11 @@ def _prepare_body(body: Any, body_type: str, headers: dict[str, Any]) -> tuple[d
 
     不使用 ``safe_json_loads``：它的修复兜底会把表单原文转成空串，改变实际发出的
     字节。请求体只做严格解析或原样发送。
+
+    Args:
+        body: 请求体，字符串原文或 JSON 对象/数组
+        body_type: ``auto`` / ``json`` / ``form`` / ``raw``
+        headers: 请求头，函数内按需要写入 ``Content-Type``
 
     Returns:
         ``(kwargs 片段, 错误文案)``；错误文案非空时不应发请求。

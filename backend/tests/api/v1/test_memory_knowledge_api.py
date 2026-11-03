@@ -1,7 +1,7 @@
-"""记忆与知识库 API 测试。
+"""记忆与知识库 API。
 
-覆盖：记忆 CRUD + 镜像同步、文档上传 + 列表 + 切片 + 检索 + 删除。
-记忆/知识库实例绑定到临时库与临时工作目录。
+记忆与知识库实例绑定临时库与临时工作目录，覆盖记忆增删改查、镜像同步，
+以及文档上传、切片、检索与删除。
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ SPACE_ID = 8080
 
 @pytest.fixture()
 def client(tmp_path) -> Generator[TestClient, None, None]:
+    """把数据库依赖与记忆、知识库单例替换为临时实现。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'api.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -82,6 +83,8 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
 
 
 class TestMemoryApi:
+    """记忆增删改查与 `MEMORY.md` 镜像同步。"""
+
     def test_create_and_list(self, client):
         created = client.post(
             f"/api/v1/spaces/{SPACE_ID}/memories",
@@ -137,6 +140,8 @@ class TestMemoryApi:
 
 
 class TestKnowledgeApi:
+    """文档上传、切片、检索、删除与重建索引。"""
+
     def test_upload_and_list(self, client, tmp_path):
         response = client.post(
             f"/api/v1/spaces/{SPACE_ID}/documents",

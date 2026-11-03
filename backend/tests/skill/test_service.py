@@ -1,7 +1,6 @@
-"""SkillService 导入与装配测试。
+"""`SkillService` 的 zip 导入与 prompt 装配。
 
-重点：zip 导入必须防 zip-slip（``../`` 与绝对路径条目），
-且只接受含合法 SKILL.md 的包。
+zip 条目需防 zip-slip（`../` 与绝对路径），且只接受含合法 `SKILL.md` 的包。
 """
 
 import io
@@ -16,7 +15,7 @@ SPACE_ID = 777
 
 
 def _make_zip(entries: dict[str, str]) -> bytes:
-    """把 {路径: 内容} 打成 zip 字节。"""
+    """把 `{路径: 内容}` 打成 zip 字节。"""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         for name, content in entries.items():
@@ -25,11 +24,13 @@ def _make_zip(entries: dict[str, str]) -> bytes:
 
 
 def _skill_md(name: str, description: str = "desc", body: str = "正文") -> str:
+    """生成最小可解析的 `SKILL.md` 文本。"""
     return f"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n"
 
 
 @pytest.fixture()
 def service(tmp_path) -> SkillService:
+    """用临时目录构造服务，内置根与工作区相互隔离。"""
     builtin = tmp_path / "skills"
     builtin.mkdir()
     return SkillService(
@@ -39,6 +40,8 @@ def service(tmp_path) -> SkillService:
 
 
 class TestImportZip:
+    """zip 导入：单技能与多技能、参考文件复制、各类非法包拒绝。"""
+
     def test_imports_single_skill(self, service, tmp_path):
         data = _make_zip({"my-skill/SKILL.md": _skill_md("my-skill")})
 
@@ -101,7 +104,7 @@ class TestImportZip:
             service.import_zip(b"not a zip", space_id=SPACE_ID)
 
     def test_install_dir_follows_frontmatter_name(self, service, tmp_path):
-        """目录名与 frontmatter name 不一致时，以 name 为准（避免加载到两个名字）。"""
+        """目录名与 frontmatter `name` 不一致时以 `name` 为准，避免同一技能出现两个名字。"""
         data = _make_zip({"weird-dir/SKILL.md": _skill_md("real-name")})
 
         assert service.import_zip(data, space_id=SPACE_ID) == ["real-name"]
@@ -109,6 +112,8 @@ class TestImportZip:
 
 
 class TestAssemble:
+    """prompt 块装配与 `allowed_tools` 合并。"""
+
     def test_build_prompt_blocks_for_selected(self, service):
         data = _make_zip({"s/SKILL.md": _skill_md("s", body="方法论正文")})
         service.import_zip(data, space_id=SPACE_ID)
@@ -140,7 +145,7 @@ class TestAssemble:
         }
 
     def test_no_restriction_returns_none(self, service):
-        """任一选中的 skill 未声明 allowed_tools，则整体不额外限制。"""
+        """任一选中技能未声明 `allowed_tools`，整体不额外限制。"""
         data = _make_zip({"z/SKILL.md": _skill_md("z")})
         service.import_zip(data, space_id=SPACE_ID)
 

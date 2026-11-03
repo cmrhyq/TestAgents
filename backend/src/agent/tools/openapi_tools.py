@@ -1,6 +1,6 @@
-"""文档域 LangChain Tools：OpenAPI/Swagger 文档解析、搜索、详情。
+"""文档域工具：OpenAPI/Swagger 文档解析、搜索与详情。
 
-包装 OpenAPIParser 为 3 个原子 Tool，带进程内解析缓存以保持离线快速特性。
+把 ``OpenAPIParser`` 包装为三个原子工具，解析结果带进程内缓存。
 """
 
 import json
@@ -12,7 +12,7 @@ from src.utils.parser.openapi_parser import OpenAPIParser
 
 logger = get_logger(__name__)
 
-# OpenAPI 解析器缓存：避免同一文档被反复解析（离线快速特性），上限 20 份
+# OpenAPI 解析器缓存：避免同一文档被反复解析，上限 20 份（超出后按插入顺序淘汰）
 _PARSER_CACHE: dict[str, OpenAPIParser] = {}
 _PARSER_CACHE_MAX = 20
 

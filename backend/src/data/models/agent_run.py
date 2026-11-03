@@ -18,52 +18,62 @@ if TYPE_CHECKING:
 class AgentRun(Base):
     """Agent 执行记录 - 一轮 ReAct 对话对应一条。
 
-    为什么需要这张表：``conversation`` / ``message`` 只回答「说了什么」，
-    回答不了「这次回答是怎么得到的、调了几次工具、花了多少 token」。
-    ``llm_log`` 有成本但没有轮次边界，``agent_tool_call`` 有细节但没有汇总，
-    三者靠 ``run_id`` 串成一条完整链路。
-
-    **统计列是刻意冗余的**：列表页与仪表盘每次翻页都去 ``agent_tool_call``
-    做 COUNT/AVG，二十条 run 就是二十次聚合扫描。执行收尾时一次算出即可。
+    ``conversation`` / ``message`` 记录对话内容，本表记录这一轮怎么得出结果；
+    与 ``agent_tool_call``、``llm_log`` 通过 ``run_id`` 关联。
+    统计列在收尾时一次算出并冗余落库，列表页不再聚合明细表。
     """
 
     __tablename__ = "agent_run"
 
+    # 主键，由 next_id() 生成，不走数据库自增
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=next_id)
 
     # ── 归属 ────────────────────────────────────────────────────────────
+    # 所属空间，space.id；空间删除时级联删除
     space_id: Mapped[int] = mapped_column(Integer, ForeignKey("space.id", ondelete="CASCADE"), nullable=False)
+    # 执行所用环境，environment.id；环境删除时置空
     environment_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("environment.id", ondelete="SET NULL"))
-    # 刻意不建外键：ensure_conversation 在 DB 不可用时返回 0，
-    # 建 FK 会让整条执行记录跟着写不进去——记录层不能比业务层更脆弱。
+    # 关联会话，conversation.id；不建外键：会话创建失败时执行记录仍需写入
     conversation_id: Mapped[int | None] = mapped_column(Integer, default=None)
 
     # ── 本轮上下文 ──────────────────────────────────────────────────────
+    # 执行标题，取指令摘要
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 工作模式，取值 agent / ask / plan
     mode: Mapped[str] = mapped_column(Text, nullable=False, default="agent")
+    # 触发来源，取值 chat / manual / scheduled / ci
     trigger_type: Mapped[str] = mapped_column(Text, nullable=False, default="chat")
+    # LLM 提供商名
     llm_provider: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # LLM 模型名
     llm_model: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # ── 生命周期 ────────────────────────────────────────────────────────
-    # 刻意没有 pending：记录在「本轮开始」时才插入，插入即 running。
-    # 这样终态判定是单条件的 status != 'running'，清理任务不会误删进行中的执行。
+    # 取值 running / completed / failed / cancelled；无 pending 态，插入即 running
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
     started_at: Mapped[str | None] = mapped_column(Text, default=None)
     finished_at: Mapped[str | None] = mapped_column(Text, default=None)
+    # 总耗时，毫秒
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # ── 工具维度统计 ────────────────────────────────────────────────────
+    # 工具调用总次数
     tool_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 成功的工具调用次数
     ok_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 失败的工具调用次数
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # 0-100 百分比，与前端进度条口径一致
+    # 工具调用成功率，百分比 0-100
     success_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # 工具调用平均耗时，毫秒
     avg_response_time: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     # ── 成本维度（收尾时从 llm_log 聚合）───────────────────────────────
+    # LLM 调用次数
     llm_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 输入与输出 token 之和
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 预估成本，美元
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     error_message: Mapped[str] = mapped_column(Text, nullable=False, default="")

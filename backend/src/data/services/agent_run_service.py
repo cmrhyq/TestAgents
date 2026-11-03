@@ -10,15 +10,30 @@ from src.data.services.base_service import BaseService
 
 logger = get_logger(__name__)
 
-#: 清理时每批处理多少条执行记录
+#: 清理时每批处理的执行记录条数
 DEFAULT_BATCH_SIZE = 500
 
 
 class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
+    """执行记录业务逻辑，含过期清理与僵死记录收尾。"""
+
     def __init__(self, session: Session):
+        """绑定会话与执行记录仓储。
+
+        Args:
+            session: 调用方持有的会话
+        """
         super().__init__(session, AgentRunRepository(session))
 
     def get_run(self, run_id: int) -> AgentRun | None:
+        """按主键取执行记录。
+
+        Args:
+            run_id: 执行记录主键
+
+        Returns:
+            执行记录；不存在时返回 None
+        """
         return self.repo.get_by_id(run_id)
 
     def list_runs(
@@ -28,16 +43,34 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
         page: int,
         page_size: int,
     ):
+        """按空间与状态分页查询执行记录，按创建时间倒序。
+
+        Args:
+            space_id: 空间主键；None 表示全部空间
+            status: 状态过滤；None 表示不过滤
+            page: 页码，从 1 开始
+            page_size: 每页条数
+
+        Returns:
+            当前页执行记录列表与总数
+        """
         filters = []
         if space_id is not None:
             filters.append(AgentRun.space_id == space_id)
         if status is not None:
             filters.append(AgentRun.status == status)
-        # 老的 list_runs 没排序，列表页顺序随 SQLite 心情；这里显式按创建时间倒序
+        # 不依赖数据库默认顺序，显式按创建时间倒序
         return self.list(page, page_size, *filters, order_by=[AgentRun.created_at.desc()])
 
     def get_runs_by_ids(self, run_ids: list[int]) -> list[AgentRun]:
-        """按 ID 列表批量获取（避免逐条查询）。"""
+        """按主键列表批量取执行记录，避免逐条查询。
+
+        Args:
+            run_ids: 执行记录主键列表
+
+        Returns:
+            匹配的记录；入参为空时返回空列表
+        """
         return self.repo.get_by_ids(run_ids)
 
     def cleanup_runs(
@@ -47,25 +80,22 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
         dry_run: bool = False,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> dict:
-        """删除 N 天前的**终态**执行记录及其工具留痕与报告行。
+        """删除 ``days`` 天前的终态执行记录及其工具留痕与报告行。
 
-        几条硬规则（每条都对应一个真实故障场景）：
+        约束：只删终态，``running`` 一律不动；时间口径用 ``created_at``，
+        因为 ``started_at`` 可空；报告文件不删除，只在结果中返回路径。
 
-        1. **只删终态**：``running`` 一律不动——它可能是异常中断的活会话，
-           删掉会让正在跑的用户看到「记录消失」。
-        2. **时间口径用 created_at**：``started_at`` 可空，不可靠。
-        3. **分批提交**：一次大事务会长时间占住 WAL 写锁，把正在进行的对话
-           全部卡死。
-        4. **不删报告文件**：返回 ``orphan_files`` 让人自己决定，文件删除不可逆。
+        副作用：写库（未提交），最终提交由 ``get_db`` 负责；不触碰磁盘文件。
 
         Args:
-            days: 保留最近多少天
-            space_id: 只清理指定空间；None 表示全部
-            dry_run: 只统计不删除
-            batch_size: 每批处理条数
+            days: 保留最近天数，小于 1 时按 1 处理
+            space_id: 只清理指定空间；None 表示全部空间
+            dry_run: 只统计不删除，此时不产生写操作
+            batch_size: 每批处理的记录条数，用于避免长事务占用写锁
 
         Returns:
-            清理结果字典，可直接喂给 ``AgentCleanupResult``
+            清理结果字典，字段与 ``AgentCleanupResult`` 对应；``orphan_files``
+            为已删除报告行对应的磁盘路径
         """
         days = max(int(days), 1)
         cutoff = cutoff_before(days)
@@ -92,7 +122,7 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
             if not run_ids:
                 break
 
-            # 先收集报告文件路径，再删行——删完就查不到了
+            # 先取报告文件路径再删行，删除后无法回溯
             for report in report_repo.get_by_run_ids(run_ids):
                 if report.file_path and report.file_path not in result["orphan_files"]:
                     result["orphan_files"].append(report.file_path)
@@ -104,7 +134,7 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
                 self.repo.delete_by_id(run_id)
             result["deleted_runs"] += len(run_ids)
 
-        # get_db 负责最终 commit；这里显式 flush 让计数与后续查询一致
+        # 最终提交由 get_db 负责；此处 flush 保证计数与后续查询一致
         self._session.flush()
         logger.info(
             "执行记录清理完成",
@@ -118,9 +148,17 @@ class AgentRunService(BaseService[AgentRun, AgentRunRepository]):
         return result
 
     def mark_stale_running(self, stale_minutes: int = 60) -> int:
-        """把超过 N 分钟仍是 running 的记录标记为 failed。
+        """把超过指定时长仍为 ``running`` 的记录标记为 ``failed``。
 
-        进程被 kill 时 finally 来不及执行，记录会永久停在 running。
+        进程被强制终止时 ``finally`` 不会执行，记录会一直停在 ``running``。
+
+        副作用：写库（未提交），需调用方提交事务。
+
+        Args:
+            stale_minutes: 判定过期的分钟数
+
+        Returns:
+            实际更新的记录数
         """
         from datetime import datetime, timedelta
 

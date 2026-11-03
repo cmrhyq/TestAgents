@@ -1,15 +1,7 @@
-"""跨会话记忆（LongTermMemory）。
+"""按空间隔离的跨会话记忆存储。
 
-设计取舍：**不用向量检索**。
-
-记忆条目是「结论型短文本」（偏好、决策、已知坑、术语），量级几十到几百条，
-需要的是**精确命中**而不是语义相似。SQLite ``LIKE`` 足够，且：
-- 零外部依赖 —— 向量库挂了记忆照样能用
-- 结果可解释 —— 用户问「为什么 Agent 提到这条」，能答出「命中关键词 X」
-- 可排序 —— 按更新时间倒序，最近的结论优先
-
-真源是 ``space_memory`` 表；``memory/MEMORY.md`` 是给 Agent「读文件」用的只读镜像，
-每次写操作后全量重建。镜像不做增量更新——全量重建不会漏、不会和 DB 漂移。
+不引入向量检索：条目为结论型短文本，用 SQLite ``LIKE`` 做精确命中即可。
+真源是 ``space_memory`` 表，``memory/MEMORY.md`` 是只读镜像，每次写操作后全量重建。
 """
 
 from __future__ import annotations
@@ -40,8 +32,7 @@ CATEGORY_TITLES = {
     "fact": "事实",
 }
 
-# 召回时返回的默认条数上限：注入 prompt 的内容不是越多越好，
-# 记忆过多会稀释关键信息，也会挤占工具结果的空间
+# 召回默认条数：记忆过多会稀释提示词中的关键信息并挤占工具结果空间
 DEFAULT_RECALL_LIMIT = 20
 
 SessionScope = Callable[[], AbstractContextManager[Session]]
@@ -52,8 +43,8 @@ class LongTermMemory:
 
     Args:
         workspace: 工作目录管理器；None 时取全局单例
-        session_scope: 返回 Session 上下文管理器的工厂；None 时用全局数据库单例。
-            显式注入是为了单测能跑在临时库上，不必启动整个应用。
+        session_scope: Session 上下文工厂；None 时用全局数据库单例。
+            显式注入用于让用例跑在临时库上。
     """
 
     def __init__(
@@ -79,7 +70,24 @@ class LongTermMemory:
         tags: list[str] | None = None,
         source_conversation_id: int | None = None,
     ) -> SpaceMemory:
-        """新增一条记忆，并刷新 MEMORY.md 镜像。"""
+        """新增一条记忆并重建 ``MEMORY.md`` 镜像。
+
+        副作用：写库并覆盖镜像文件。
+
+        Args:
+            space_id: 空间 ID
+            title: 记忆标题，不能为空
+            content: 记忆正文
+            category: 分类，取值见 ``VALID_CATEGORIES``
+            tags: 标签列表，入库前序列化为 JSON
+            source_conversation_id: 来源会话 ID
+
+        Returns:
+            已入库的记忆行
+
+        Raises:
+            ValueError: 分类非法或标题为空
+        """
         if category not in VALID_CATEGORIES:
             raise ValueError(f"非法的 category: {category}（可选: {', '.join(VALID_CATEGORIES)}）")
         if not (title or "").strip():
@@ -103,7 +111,22 @@ class LongTermMemory:
         return entry
 
     def update(self, memory_id: int, **fields) -> SpaceMemory:
-        """局部更新记忆。"""
+        """局部更新记忆并重建镜像，值为 None 的字段跳过。
+
+        副作用：写库并覆盖镜像文件。
+
+        Args:
+            memory_id: 记忆 ID
+            fields: 可更新字段，仅支持 ``title`` / ``content`` / ``category``
+                / ``tags`` / ``status``
+
+        Returns:
+            更新后的记忆行
+
+        Raises:
+            ValueError: 字段名不支持或分类非法
+            LookupError: 记忆不存在
+        """
         allowed = {"title", "content", "category", "tags", "status"}
         unknown = set(fields) - allowed
         if unknown:
@@ -130,7 +153,14 @@ class LongTermMemory:
         return entry
 
     def delete(self, memory_id: int, hard: bool = False) -> None:
-        """删除记忆。默认软删（``status=0``），``hard=True`` 物理删除。"""
+        """删除记忆并重建镜像。
+
+        副作用：写库并覆盖镜像文件。
+
+        Args:
+            memory_id: 记忆 ID；不存在时静默返回
+            hard: True 物理删除，默认置 ``status=0`` 软删
+        """
         with self._session_scope() as session:
             entry = session.get(SpaceMemory, memory_id)
             if entry is None:
@@ -154,7 +184,17 @@ class LongTermMemory:
         keyword: str | None = None,
         limit: int = 100,
     ) -> list[SpaceMemory]:
-        """列出记忆（不含软删），按更新时间倒序。"""
+        """列出记忆，按更新时间倒序。
+
+        Args:
+            space_id: 空间 ID
+            category: 按分类过滤
+            keyword: 在标题、内容与标签中模糊匹配
+            limit: 返回条数上限
+
+        Returns:
+            未软删的记忆行列表
+        """
         stmt = select(SpaceMemory).where(
             SpaceMemory.space_id == int(space_id),
             SpaceMemory.status == 1,
@@ -176,11 +216,17 @@ class LongTermMemory:
             return list(session.scalars(stmt).all())
 
     def recall(self, space_id: int | str, query: str, limit: int = DEFAULT_RECALL_LIMIT) -> list[SpaceMemory]:
-        """按关键词召回相关记忆；空查询返回最近若干条。
+        """按关键词召回相关记忆；查询无有效关键词时返回最近若干条。
 
-        关键词从查询里**抽取**而不是整句匹配：用户说的是「帮我看看登录接口的鉴权方式」，
-        记忆里存的是「鉴权方式：Bearer JWT」。整句 ``LIKE`` 永远命中不了，
-        抽取后按 2-gram 拆分才能对上。
+        查询先抽关键词再匹配，整句 ``LIKE`` 无法命中标题与正文措辞不同的条目。
+
+        Args:
+            space_id: 空间 ID
+            query: 自然语言查询
+            limit: 返回条数上限
+
+        Returns:
+            命中的记忆行，按更新时间倒序
         """
         keywords = extract_keywords(query)
         if not keywords:
@@ -188,7 +234,16 @@ class LongTermMemory:
         return self.list_any(space_id, keywords, limit=limit)
 
     def list_any(self, space_id: int | str, keywords: list[str], limit: int = 100) -> list[SpaceMemory]:
-        """命中任一关键词即返回（OR 语义），按更新时间倒序。"""
+        """按 OR 语义列出命中任一关键词的记忆，按更新时间倒序。
+
+        Args:
+            space_id: 空间 ID
+            keywords: 关键词列表；为空时返回空列表
+            limit: 返回条数上限
+
+        Returns:
+            命中的记忆行列表
+        """
         if not keywords:
             return []
 
@@ -216,6 +271,7 @@ class LongTermMemory:
 
 
     def count(self, space_id: int | str) -> int:
+        """统计空间下未软删的记忆条数。"""
         return len(self.list(space_id, limit=10_000))
 
     # ─── 镜像 ────────────────────────────────────────────────────────────
@@ -223,8 +279,13 @@ class LongTermMemory:
     def sync_markdown(self, space_id: int | str) -> Path:
         """全量重建 ``memory/MEMORY.md``。
 
+        副作用：覆盖镜像文件；不做增量更新，避免与数据库漂移。
+
+        Args:
+            space_id: 空间 ID
+
         Returns:
-            镜像文件路径
+            镜像文件绝对路径
         """
         entries = self.list(space_id, limit=10_000)
         path = self._workspace.space_dir(space_id) / "memory" / "MEMORY.md"
@@ -234,7 +295,7 @@ class LongTermMemory:
 
     @staticmethod
     def _render(entries: list[SpaceMemory]) -> str:
-        """渲染镜像正文。"""
+        """把记忆条目渲染为镜像正文，按分类分组、组内保持入参顺序。"""
         header = (
             "# 空间记忆\n\n"
             "> 本文件由系统根据记忆库自动生成，**手改会被覆盖**。\n"
@@ -271,32 +332,29 @@ class LongTermMemory:
         return header + "\n" + "\n\n".join(sections) + "\n"
 
 
-# 中文没有空格，无法按分隔符切词；这里用 2-gram 近似。
-# 精度不如分词器，但零依赖、可解释（命中哪个关键词能说清楚），
-# 对「几十到几百条结论型短文本」的规模完全够用。
+# 中文无空格，按分隔符切词不可行，这里用 2-gram 近似；
+# 精度低于分词器但零依赖，且命中哪个关键词可解释。
 _CJK_RUN = re.compile(r"[\u4e00-\u9fff]+")
 _ASCII_WORD = re.compile(r"[A-Za-z0-9_]{2,}")
 
-# 关键词数量上限：每个关键词生成 3 个 LIKE 条件，
-# 抽太多会让 SQL 变长且几乎必然误命中
+# 关键词数量上限：每个关键词生成 3 个 LIKE 条件，过多会显著拉长 SQL 并引入误命中
 MAX_RECALL_KEYWORDS = 12
 
-# 短中文片段整体作为一个关键词更精确（「鉴权」比「鉴」+「权」好用）
+# 短中文片段整体作为关键词更精确
 _SHORT_CJK = 4
 
 
 def extract_keywords(text: str, limit: int = MAX_RECALL_KEYWORDS) -> list[str]:
     """从自然语言查询里抽取检索关键词。
 
-    ASCII 片段整词保留（``auth`` / ``token_v2``），中文按长度二选一：
-    4 字以内整体保留，更长的切 2-gram（保证「登录鉴权方式」能命中「鉴权」）。
+    ASCII 片段整词保留；中文 4 字以内整体保留，更长的切 2-gram。
 
     Args:
         text: 用户查询
         limit: 返回关键词上限
 
     Returns:
-        去重后的关键词列表（保持出现顺序）
+        去重后的关键词列表，保持出现顺序；空查询返回空列表
     """
     if not text or not text.strip():
         return []
@@ -326,7 +384,7 @@ def extract_keywords(text: str, limit: int = MAX_RECALL_KEYWORDS) -> list[str]:
 
 
 def _default_session_scope() -> SessionScope:
-    """默认从全局数据库管理器取会话。"""
+    """返回默认 Session 上下文工厂，每次调用新开一个会话。"""
 
     def _scope() -> AbstractContextManager[Session]:
         from src.core.database.database_manager import get_db_manager
@@ -337,6 +395,7 @@ def _default_session_scope() -> SessionScope:
 
 
 def _dump_tags(tags: list[str] | None) -> str:
+    """把标签列表序列化为 JSON 字符串，空值返回 ``[]``。"""
     import json
 
     cleaned = [str(t).strip() for t in (tags or []) if str(t).strip()]
@@ -344,6 +403,7 @@ def _dump_tags(tags: list[str] | None) -> str:
 
 
 def _load_tags(raw: str | None) -> list[str]:
+    """把 JSON 字符串解析回标签列表，非法内容返回空列表。"""
     import json
 
     if not raw:

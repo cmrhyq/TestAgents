@@ -1,8 +1,6 @@
-"""
-ChromaDB 向量数据库连接管理模块
+"""ChromaDB 向量数据库连接管理。
 
-提供 ChromaDB 客户端创建、集合/文档 CRUD 操作和 LangChain VectorStore 集成。
-使用线程安全的单例模式确保全局唯一的连接实例。
+提供 HttpClient 连接、集合与文档 CRUD，以及与 LangChain ``Chroma`` 的集成入口。
 """
 
 import threading
@@ -22,14 +20,9 @@ logger = get_logger(__name__)
 
 
 class ChromaManager:
-    """
-    ChromaDB 连接管理器
+    """ChromaDB 连接管理器单例。
 
-    线程安全的单例类，负责：
-    - 创建和管理 ChromaDB HttpClient
-    - 通过 TokenAuthClientProvider 进行认证
-    - 提供集合和文档的 CRUD 操作
-    - 提供 LangChain Chroma VectorStore 集成接口
+    ``initialize`` 只生效一次，重复调用直接返回；未初始化时访问客户端会抛 ``RuntimeError``。
     """
 
     _instance: Optional["ChromaManager"] = None
@@ -42,7 +35,11 @@ class ChromaManager:
 
     @classmethod
     def get_instance(cls) -> "ChromaManager":
-        """获取 ChromaManager 单例实例（双重检查锁定）"""
+        """返回单例实例，以双重检查锁创建。
+
+        Returns:
+            全局唯一的管理器实例
+        """
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -50,11 +47,12 @@ class ChromaManager:
         return cls._instance
 
     def initialize(self, config: ChromaConfig | None = None) -> None:
-        """
-        初始化 ChromaDB 客户端连接
+        """建立 ChromaDB HttpClient 连接，重复调用直接返回。
+
+        副作用：创建到 ChromaDB 服务的长连接。
 
         Args:
-            config: ChromaDB 配置，为 None 时从全局配置读取
+            config: ChromaDB 配置；None 时取全局配置
         """
         if self._initialized:
             logger.debug("ChromaDB 已初始化，跳过重复初始化")
@@ -85,7 +83,14 @@ class ChromaManager:
 
     @staticmethod
     def _build_settings(config: ChromaConfig) -> Settings:
-        """根据配置构建 chromadb Settings 对象"""
+        """按配置构建 ``Settings``，仅在填写凭证时启用 Token 认证。
+
+        Args:
+            config: ChromaDB 配置
+
+        Returns:
+            chromadb ``Settings`` 对象
+        """
         if config.auth_credentials:
             return Settings(
                 chroma_client_auth_provider=config.auth_provider,
@@ -95,11 +100,10 @@ class ChromaManager:
         return Settings()
 
     def check_connection(self) -> bool:
-        """
-        验证 ChromaDB 连接是否正常
+        """通过 ``heartbeat`` 探测服务可用性。
 
         Returns:
-            连接正常返回 True，否则返回 False
+            可用为 True；异常或未初始化时返回 False
         """
         try:
             self._check_initialized()
@@ -109,22 +113,23 @@ class ChromaManager:
             logger.error("ChromaDB 连接检查失败", error=str(e))
             return False
 
-    # ─── 集合 CRUD ────────────────────────────────────────────────────────────
+    # 集合 CRUD
 
     def get_or_create_collection(
         self,
         name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Collection:
-        """
-        获取或创建集合
+        """获取集合，不存在时创建。
+
+        副作用：可能在建库侧新建集合。
 
         Args:
-            name: 集合名称，为 None 时使用配置中的默认集合名
+            name: 集合名称；None 时取配置的默认集合
             metadata: 集合元数据
 
         Returns:
-            ChromaDB Collection 对象
+            ChromaDB 集合对象
         """
         self._check_initialized()
         collection_name = name or self._config.default_collection  # type: ignore[union-attr]
@@ -136,36 +141,35 @@ class ChromaManager:
         return collection
 
     def get_collection(self, name: str) -> Collection:
-        """
-        获取已存在的集合
+        """获取已存在的集合。
 
         Args:
             name: 集合名称
 
         Returns:
-            ChromaDB Collection 对象
+            ChromaDB 集合对象
 
         Raises:
-            ValueError: 集合不存在时抛出
+            ValueError: 集合不存在
         """
         self._check_initialized()
         collection = self._client.get_collection(name=name)  # type: ignore[union-attr]
         return collection
 
     def list_collections(self) -> list[str]:
-        """
-        列出所有集合名称
+        """列出所有集合名称。
 
         Returns:
-            集合名称列表
+            集合名称列表；兼容返回字符串或集合对象的客户端版本
         """
         self._check_initialized()
         collections = self._client.list_collections()  # type: ignore[union-attr]
         return [c if isinstance(c, str) else c.name for c in collections]
 
     def delete_collection(self, name: str) -> None:
-        """
-        删除指定集合
+        """删除集合及其全部文档。
+
+        副作用：数据不可恢复。
 
         Args:
             name: 集合名称
@@ -174,7 +178,7 @@ class ChromaManager:
         self._client.delete_collection(name=name)  # type: ignore[union-attr]
         logger.info("集合已删除", collection=name)
 
-    # ─── 文档 CRUD ────────────────────────────────────────────────────────────
+    # 文档 CRUD
 
     def add_documents(
         self,
@@ -184,15 +188,16 @@ class ChromaManager:
         ids: list[str] | None = None,
         embeddings: list[list[float]] | None = None,
     ) -> None:
-        """
-        向集合中添加文档
+        """向集合追加文档，集合不存在时先创建。
+
+        副作用：写入向量库。
 
         Args:
-            collection_name: 集合名称，为 None 时使用默认集合
+            collection_name: 集合名称；None 时取默认集合
             documents: 文档文本列表
-            metadatas: 文档元数据列表
-            ids: 文档 ID 列表
-            embeddings: 预计算的向量列表
+            metadatas: 与 documents 等长的元数据列表
+            ids: 与 documents 等长的文档 ID 列表
+            embeddings: 预计算向量；缺省时由集合的嵌入函数生成
         """
         collection = self.get_or_create_collection(collection_name)
         kwargs: dict[str, Any] = {}
@@ -219,18 +224,19 @@ class ChromaManager:
         where: dict[str, Any] | None = None,
         include: list[str] | None = None,
     ) -> QueryResult:
-        """
-        对集合执行相似度查询
+        """按文本相似度查询集合。
+
+        副作用：集合不存在时会被创建。
 
         Args:
             query_texts: 查询文本列表
-            collection_name: 集合名称，为 None 时使用默认集合
+            collection_name: 集合名称；None 时取默认集合
             n_results: 每个查询返回的结果数
             where: 元数据过滤条件
-            include: 返回字段列表（metadatas, documents, distances, embeddings）
+            include: 返回字段，取值如 ``metadatas`` / ``documents`` / ``distances``
 
         Returns:
-            QueryResult 查询结果对象
+            ChromaDB 查询结果
         """
         collection = self.get_or_create_collection(collection_name)
         kwargs: dict[str, Any] = {
@@ -252,12 +258,13 @@ class ChromaManager:
         metadatas: list[dict[str, Any]] | None = None,
         embeddings: list[list[float]] | None = None,
     ) -> None:
-        """
-        更新集合中的文档
+        """按 ID 覆盖文档内容。
+
+        副作用：写入向量库；集合不存在时会被创建。
 
         Args:
-            ids: 要更新的文档 ID 列表
-            collection_name: 集合名称
+            ids: 待更新的文档 ID 列表
+            collection_name: 集合名称；None 时取默认集合
             documents: 新的文档文本
             metadatas: 新的元数据
             embeddings: 新的向量
@@ -278,33 +285,33 @@ class ChromaManager:
         ids: list[str],
         collection_name: str | None = None,
     ) -> None:
-        """
-        删除集合中的文档
+        """按 ID 删除文档。
+
+        副作用：写入向量库；集合不存在时会被创建。
 
         Args:
-            ids: 要删除的文档 ID 列表
-            collection_name: 集合名称
+            ids: 待删除的文档 ID 列表
+            collection_name: 集合名称；None 时取默认集合
         """
         collection = self.get_or_create_collection(collection_name)
         collection.delete(ids=ids)
         logger.info("文档已删除", collection=collection.name, count=len(ids))
 
-    # ─── LangChain 集成 ───────────────────────────────────────────────────────
+    # LangChain 集成
 
     def get_vector_store(
         self,
         embedding_function: Embeddings,
         collection_name: str | None = None,
     ) -> Chroma:
-        """
-        获取 LangChain Chroma VectorStore 实例
+        """构造复用当前连接的 LangChain ``Chroma`` 实例。
 
         Args:
             embedding_function: LangChain Embeddings 实例
-            collection_name: 集合名称，为 None 时使用默认集合
+            collection_name: 集合名称；None 时取默认集合
 
         Returns:
-            LangChain Chroma VectorStore
+            LangChain VectorStore
         """
         self._check_initialized()
         name = collection_name or self._config.default_collection  # type: ignore[union-attr]
@@ -314,29 +321,40 @@ class ChromaManager:
             embedding_function=embedding_function,
         )
 
-    # ─── 生命周期 ─────────────────────────────────────────────────────────────
+    # 生命周期
 
     @property
     def client(self) -> chromadb.ClientAPI:
-        """获取底层 chromadb HttpClient"""
+        """返回底层 chromadb HttpClient。
+
+        Raises:
+            RuntimeError: 尚未初始化
+        """
         self._check_initialized()
         return self._client  # type: ignore[return-value]
 
     def close(self) -> None:
-        """关闭 ChromaDB 连接并重置状态"""
+        """释放客户端引用并回到未初始化状态。"""
         self._client = None
         self._config = None
         self._initialized = False
         logger.info("ChromaDB 连接已关闭")
 
     def _check_initialized(self) -> None:
-        """检查是否已初始化"""
+        """校验初始化状态，未初始化时抛出 ``RuntimeError``。
+
+        Raises:
+            RuntimeError: 客户端尚未创建
+        """
         if not self._initialized:
             raise RuntimeError("ChromaDB 尚未初始化，请先调用 ChromaManager.get_instance().initialize()")
 
     @classmethod
     def reset_instance(cls) -> None:
-        """重置单例实例（仅用于测试）"""
+        """销毁单例实例，仅供测试使用。
+
+        副作用：先关闭现有客户端。
+        """
         with cls._lock:
             if cls._instance is not None:
                 cls._instance.close()
@@ -344,19 +362,24 @@ class ChromaManager:
 
 
 def get_chroma_manager() -> ChromaManager:
-    """获取 ChromaManager 实例的便捷函数"""
+    """返回 ChromaDB 管理器单例。
+
+    Returns:
+        全局唯一的管理器实例
+    """
     return ChromaManager.get_instance()
 
 
 def init_chroma_from_config(config: ChromaConfig | None = None) -> ChromaManager:
-    """
-    从配置初始化 ChromaDB 并返回管理器实例
+    """按配置初始化 ChromaDB 连接。
+
+    副作用：建立到 ChromaDB 服务的连接。
 
     Args:
-        config: ChromaDB 配置，为 None 时从全局配置读取
+        config: ChromaDB 配置；None 时取全局配置
 
     Returns:
-        已初始化的 ChromaManager 实例
+        已初始化的管理器实例
     """
     manager = get_chroma_manager()
     manager.initialize(config)

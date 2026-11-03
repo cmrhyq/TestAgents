@@ -4,9 +4,11 @@ import { ModeSelector } from "@/components/chat/mode-selector.tsx";
 import { SkillSelector } from "@/components/chat/skill-selector.tsx";
 import type { ConversationMode } from "@/lib/types";
 
+/** `ChatInput` 的受控属性。 */
 export interface ChatInputProps {
   instruction: string;
   onInstructionChange(e: React.ChangeEvent<HTMLTextAreaElement>): void;
+  /** 键盘事件由父组件处理，回车发送由父组件决定。 */
   onKeyDown(e: React.KeyboardEvent): void;
   mode: ConversationMode;
   onModeChange(mode: ConversationMode): void;
@@ -18,10 +20,9 @@ export interface ChatInputProps {
 }
 
 /**
- * 输入区：模式 + 技能 + 提示符输入 + 发送。
+ * 对话输入区：模式与技能选择、多行提示符输入、发送。
  *
- * 工具栏从左到右是「影响本轮行为的三个选择」→「动作」，
- * 顺序固定，用户不用每次找。
+ * 工具栏顺序固定为「影响本轮行为的选项」在前、「动作」在后。
  */
 export function ChatInput({
   instruction,
@@ -38,7 +39,6 @@ export function ChatInput({
   return (
     <div className="mx-auto w-full max-w-3xl">
       <div className="rounded-[4px] border border-border bg-card px-3 py-2.5 shadow-xs transition-all duration-200 ease-out-expo focus-within:border-primary/50 focus-within:shadow-input">
-        {/* 输入框：mono 提示符 + 多行输入 */}
         <div className="flex items-start gap-2">
           <span
             className="select-none pt-2 font-mono text-sm font-semibold text-primary"
@@ -57,7 +57,6 @@ export function ChatInput({
           />
         </div>
 
-        {/* 工具栏 */}
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
             <ModeSelector value={mode} onChange={onModeChange} disabled={isStreaming} />

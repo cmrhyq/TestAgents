@@ -1,12 +1,7 @@
-"""LLM 调用统计（``llm_log``）测试。
+"""LLM 调用统计（`llm_log`）的字段契约。
 
-盯住三件容易退化的事：
-
-1. **归因**：``space_id`` / ``conversation_id`` 必须落库，否则成本无法按空间聚合。
-2. **真实模型名**：``smart-router`` 只是 Router 的 model_group，真正花钱的是
-   ``deployment``（如 ``zai/glm-4-flash``）。记成 ``smart-router`` 等于没记。
-3. **成本算不出 ≠ 报错**：litellm 的定价表不覆盖所有厂商（如 zai），
-   此时 ``cost_usd`` 必须是 NULL 而不是 0——0 会被当成「免费」。
+归因字段需落库；`model_name` 记真实 deployment 而非 Router 的 model_group；
+定价未知时 `cost_usd` 为 NULL，记录为 0 会被当作免费。
 """
 
 from __future__ import annotations
@@ -52,6 +47,7 @@ def session_scope(tmp_path):
 
 
 def _config() -> AppConfig:
+    """构造含一个具体模型与一个 Router 的配置。"""
     return AppConfig(
         model_list=[
             {"model_name": "glm-4-flash", "litellm_params": {"model": "zai/glm-4-flash"}},
@@ -86,6 +82,7 @@ def _chunk(
     deployment: str = "zai/glm-4-flash",
     tier: str = "SIMPLE",
 ) -> AIMessageChunk:
+    """构造带 usage 与路由元数据的分片。"""
     meta: dict = {"model_group": "smart-router", "deployment": deployment}
     if tier:
         meta["routing_decision"] = {"routed_model": deployment.split("/")[-1], "tier": tier}
@@ -97,22 +94,25 @@ def _chunk(
 
 
 def _service(session_scope, model) -> LLMService:
+    """构造注入了假模型的服务实例。"""
     service = LLMService(_config(), session_scope=session_scope)
     service._model = model  # 绕过 litellm Router，直接注入假模型
     return service
 
 
 def _rows(session_scope) -> list[LLMLog]:
+    """按创建时间读取全部统计行。"""
     with session_scope() as session:
         return list(session.query(LLMLog).order_by(LLMLog.created_at).all())
 
 
 async def _drain(agen) -> list:
+    """把异步流收成列表。"""
     return [item async for item in agen]
 
 
 class TestAttribution:
-    """归因字段必须落库。"""
+    """归因字段落库，且允许缺省。"""
 
     async def test_records_space_and_conversation(self, session_scope):
         service = _service(session_scope, FakeStreamModel([_chunk("hi")]))
@@ -132,7 +132,7 @@ class TestAttribution:
         assert rows[0].conversation_id == CONVERSATION_ID
 
     async def test_attribution_is_optional(self, session_scope):
-        """非对话链路（如内部工具）不传归因时不能崩。"""
+        """非对话链路不传归因时不得报错。"""
         service = _service(session_scope, FakeStreamModel([_chunk("hi")]))
 
         await _drain(service.astream_with_tools([HumanMessage(content="q")], []))
@@ -142,7 +142,7 @@ class TestAttribution:
         assert row.conversation_id is None
 
     async def test_multiple_rounds_write_multiple_rows(self, session_scope):
-        """ReAct 每轮都是一次真实计费调用，必须各记一条。"""
+        """ReAct 每轮均为一次真实计费调用，各记一条。"""
         service = _service(session_scope, FakeStreamModel([_chunk("hi")]))
 
         for _ in range(3):
@@ -156,7 +156,7 @@ class TestAttribution:
 
 
 class TestModelName:
-    """记录真实命中的模型，而不是 Router 的 model_group。"""
+    """记录真实命中的 deployment，而非 Router 的 model_group。"""
 
     async def test_uses_deployment_not_model_group(self, session_scope):
         service = _service(session_scope, FakeStreamModel([_chunk("hi")]))
@@ -169,7 +169,7 @@ class TestModelName:
         assert row.provider == "zai"
 
     async def test_falls_back_to_routed_model(self, session_scope):
-        """deployment 缺失时退到 routing_decision.routed_model。"""
+        """`deployment` 缺失时回退到 `routing_decision.routed_model`。"""
         chunk = AIMessageChunk(
             content="hi",
             usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},  # type: ignore[arg-type]
@@ -190,7 +190,7 @@ class TestModelName:
 
 
 class TestUsage:
-    """token 采集。"""
+    """token 与耗时采集。"""
 
     async def test_tokens_recorded(self, session_scope):
         service = _service(
@@ -204,7 +204,7 @@ class TestUsage:
         assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (11, 7, 18)
 
     async def test_usage_on_intermediate_chunk_is_captured(self, session_scope):
-        """有些 provider 把 usage 放在倒数第二块而非最后一块——不能只看最后一块。"""
+        """部分 provider 把 usage 放在中间分片，需扫描全部分片。"""
         service = _service(
             session_scope,
             FakeStreamModel(
@@ -229,7 +229,7 @@ class TestUsage:
 
 
 class TestCost:
-    """成本：能算就算，算不出留 NULL。"""
+    """成本：可算则算，定价未知留 NULL。"""
 
     async def test_cost_computed_for_known_pricing(self, session_scope):
         service = _service(
@@ -251,7 +251,7 @@ class TestCost:
         assert cost is not None and cost > 0
 
     async def test_cost_is_none_when_pricing_unknown(self, session_scope):
-        """zai 不在 litellm 定价表里：必须是 NULL，不能是 0（0 会被当成免费）。"""
+        """zai 不在 litellm 定价表内，须为 NULL 而非 0。"""
         service = _service(session_scope, FakeStreamModel([_chunk("hi")]))
 
         await _drain(service.astream_with_tools([HumanMessage(content="q")], []))
@@ -260,7 +260,7 @@ class TestCost:
 
 
 class TestPricingLookup:
-    """定价查表：不能被 litellm 的 provider 解析行为带偏。"""
+    """定价查表与 provider 前缀处理。"""
 
     def test_unknown_model_returns_none(self):
         from src.core.llm.llm_service import _estimate_cost
@@ -274,7 +274,7 @@ class TestPricingLookup:
         assert cost is not None and cost > 0
 
     def test_lookup_handles_provider_prefix(self, monkeypatch):
-        """``deepseek/deepseek-v4-flash`` 与裸名 ``deepseek-v4-flash`` 都要能命中。"""
+        """带 provider 前缀与裸名都需命中。"""
         from src.core.llm import llm_service
 
         fake_map = {"deepseek-v4-flash": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
@@ -285,7 +285,7 @@ class TestPricingLookup:
         assert llm_service._lookup_pricing("zai/glm-4-flash") is None
 
     def test_explicitly_free_model_reports_zero(self, monkeypatch):
-        """本地模型定价显式为 0 时，成本就该是 0.0 —— 这与「未知」不是一回事。"""
+        """本地模型定价显式为 0 时成本为 0.0，与定价未知区分。"""
         from src.core.llm.llm_service import _estimate_cost
 
         monkeypatch.setattr(
@@ -303,7 +303,7 @@ class TestPricingLookup:
 
 
 class TestCustomPricing:
-    """``config.pricing`` 让 litellm 未收录的模型也能计价。"""
+    """`config.pricing` 让 litellm 未收录的模型也能计价。"""
 
     def test_custom_pricing_prices_unmapped_model(self):
         from src.core.llm.llm_service import _estimate_cost
@@ -329,7 +329,7 @@ class TestCustomPricing:
         assert _estimate_cost("vendor/x-model", 1_000_000, 0, pricing) == pytest.approx(1.0)
 
     def test_pydantic_pricing_entries_supported(self):
-        """配置里是 ``ModelPricing`` 对象（不是 dict）时也要能用。"""
+        """配置为 `ModelPricing` 对象而非 dict 时同样生效。"""
         from src.core.config import ModelPricing
         from src.core.llm.llm_service import _estimate_cost
 
@@ -339,7 +339,7 @@ class TestCustomPricing:
 
 
 class TestFailure:
-    """失败也要留痕，否则成本统计会漏掉「花了钱但报错」的调用。"""
+    """失败调用同样留痕，否则成本统计会漏掉报错调用。"""
 
     async def test_failure_recorded_and_reraised(self, session_scope):
         service = _service(session_scope, FakeStreamModel([], boom=True))
@@ -354,7 +354,7 @@ class TestFailure:
 
 
 class TestToolsBinding:
-    """工具必须真的绑到模型上，不能因为走新入口而丢掉。"""
+    """工具必须绑定到模型上，不能因更换入口而丢失。"""
 
     async def test_tools_are_bound(self, session_scope):
         model = FakeStreamModel([_chunk("hi")])
@@ -368,7 +368,7 @@ class TestToolsBinding:
         assert model.bound_tools == ["read_file"]
 
     async def test_empty_tools_skips_binding(self, session_scope):
-        """部分 provider 明确拒绝空 tools 数组，空列表时不应调用 bind_tools。"""
+        """部分 provider 拒绝空 tools 数组，空列表时不调用 `bind_tools`。"""
         model = FakeStreamModel([_chunk("hi")])
         service = _service(session_scope, model)
 

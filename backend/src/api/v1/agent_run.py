@@ -1,7 +1,6 @@
-"""Agent 执行记录路由。
+"""Agent 执行记录路由：查询执行记录与工具调用留痕、清理历史记录。
 
-包含查询与清理两部分。清理接口刻意支持 ``dry_run``，因为「删数据」这个
-操作在本地单机场景下依然不可逆，先看数量再动手是必要的。
+清理接口支持 ``dry_run``，先统计数量再决定是否删除。
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -34,7 +33,18 @@ def list_agent_runs(
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
 ):
-    """查询执行记录列表（分页，按创建时间倒序）。"""
+    """分页查询执行记录列表，按创建时间倒序。
+
+    Args:
+        space_id: 按空间过滤，不传则全站查询
+        status: 按状态过滤，如 ``completed``
+        page: 页码，从 1 开始
+        page_size: 每页条数，取值 1-100
+        db: 请求级数据库会话
+
+    Returns:
+        当页执行记录与总数
+    """
     items, total = AgentRunService(db).list_runs(space_id, status, page, page_size)
     return AgentRunListResponse(
         items=[AgentRunResponse.model_validate(r) for r in items],
@@ -44,7 +54,7 @@ def list_agent_runs(
     )
 
 
-# ⚠️ 必须定义在 /{run_id} 之前：否则 FastAPI 会把 "cleanup" 当 int 解析并返回 422
+# 必须定义在 /{run_id} 之前：否则 FastAPI 会把 "cleanup" 当 int 解析并返回 422
 @router.delete("/cleanup", response_model=AgentCleanupResult)
 def cleanup_agent_runs(
     days: int = Query(default=90, ge=1, le=3650, description="保留最近 N 天"),
@@ -52,14 +62,35 @@ def cleanup_agent_runs(
     dry_run: bool = Query(default=False, description="只统计不删除"),
     db: Session = Depends(get_db),
 ):
-    """清理 N 天前的终态执行记录（running 一律不动）。"""
+    """清理指定天数之前的终态执行记录，运行中的记录不会被删除。
+
+    Args:
+        days: 保留最近多少天，取值 1-3650
+        space_id: 只清理该空间的记录，不传则全站清理
+        dry_run: 为 True 时只返回统计结果，不实际删除
+        db: 请求级数据库会话
+
+    Returns:
+        清理结果：截止时间、删除的执行记录/工具调用/报告数量，以及磁盘残留的报告文件路径
+    """
     result = AgentRunService(db).cleanup_runs(days=days, space_id=space_id, dry_run=dry_run)
     return AgentCleanupResult(**result)
 
 
 @router.get("/{run_id}", response_model=AgentRunDetail)
 def get_agent_run(run_id: int, db: Session = Depends(get_db)):
-    """获取执行记录详情（含工具调用摘要，不含响应体正文）。"""
+    """查询执行记录详情，附工具调用摘要。
+
+    Args:
+        run_id: 执行记录 ID
+        db: 请求级数据库会话
+
+    Returns:
+        执行记录详情与工具调用摘要列表；摘要不含请求/响应正文
+
+    Raises:
+        NotFoundError: 执行记录不存在，返回 HTTP 404
+    """
     service = AgentRunService(db)
     run = service.get_or_raise(run_id, "执行记录不存在")
     calls = AgentToolCallService(db).list_by_run(run_id)
@@ -87,17 +118,29 @@ def list_agent_tool_calls(
     include_body: bool = Query(default=False, description="是否包含请求/响应正文（可能很大）"),
     db: Session = Depends(get_db),
 ):
-    """查询某次执行的工具调用留痕。
+    """分页查询某次执行的工具调用留痕。
 
-    ⚠️ 这里**必须**手工序列化，不能挂固定 ``response_model``：
-    ``AgentToolCallResponse`` 本身不含 ``request_body``/``response_body``，
-    如果把它当统一响应模型，``include_body=true`` 会被静默吃掉——
-    参数接受了、库里也查了，返回体里却永远没有正文。
+    响应模型按 ``include_body`` 在 ``AgentToolCallListResponse`` 与
+    ``AgentToolCallDetailListResponse`` 之间切换；``AgentToolCallResponse``
+    不含正文字段，不能作为统一响应模型，否则 ``include_body=true`` 时正文会被丢弃。
+
+    Args:
+        run_id: 执行记录 ID
+        page: 页码，从 1 开始
+        page_size: 每页条数，取值 1-200
+        include_body: 是否返回请求/响应正文，正文可能很大
+        db: 请求级数据库会话
+
+    Returns:
+        ``{"items", "total", "page", "page_size"}``
+
+    Raises:
+        NotFoundError: 执行记录不存在，返回 HTTP 404
     """
     AgentRunService(db).get_or_raise(run_id, "执行记录不存在")
     calls = AgentToolCallService(db).list_by_run(run_id, include_body=include_body)
 
-    # service 层不支持分页切片（要保证 include_body 的 defer 生效），这里手工切
+    # service 层不支持分页切片（要保持 include_body 的 defer 生效），这里手工切
     total = len(calls)
     start = (page - 1) * page_size
     page_items = calls[start : start + page_size]

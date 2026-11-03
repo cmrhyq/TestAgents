@@ -13,43 +13,41 @@ if TYPE_CHECKING:
 
 
 class AgentToolCall(Base):
-    """单次工具调用的完整留痕：入参、结果、HTTP 请求/响应。
+    """单次工具调用的留痕：入参、结果与 HTTP 请求/响应。
 
-    设计要点：**通用列必填，HTTP 列全部可空**。这样一张表同时容纳
-    ``send_request`` 与 ``query_db`` / ``read_file`` 这类非 HTTP 工具。
-
-    为什么不用「一个 JSON 万能列」：``v_http_endpoint_stats`` 需要
-    ``GROUP BY http_url, http_method``，JSON 列在 SQLite 里无法走索引，
-    而且详情页还要按 ``http_status_code`` 过滤。
-
-    长度台阶（三级，互不污染）::
-
-        落库 2MB（本表，超限置 response_body_truncated=1）
-            ↑
-        给模型 8000 字符（runner._for_model）
-            ↑
-        SSE 下发 4000 字符（events._truncate）
+    通用列必填、HTTP 列可空，同一张表容纳 ``send_request`` 与非 HTTP 工具。
+    正文长度台阶：落库上限 2MB（超限置 ``response_body_truncated=1``），
+    给模型 8000 字符，SSE 下发 4000 字符。
     """
 
     __tablename__ = "agent_tool_call"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=next_id)
+    # 所属执行记录，agent_run.id；执行记录删除时级联删除
     run_id: Mapped[int] = mapped_column(Integer, ForeignKey("agent_run.id", ondelete="CASCADE"), nullable=False)
 
     # ── 通用列（所有工具都填）───────────────────────────────────────────
+    # ReAct 轮次序号，从 0 开始
     step_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 本轮内的调用序号，同一次执行内递增
     seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 模型给出的 tool_call_id，用于把结果回填到对应调用
     call_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tool_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 工具分类，取值见 __table_args__ 中的检查约束
     tool_type: Mapped[str] = mapped_column(Text, nullable=False, default="other")
+    # 工具入参，JSON 对象字符串
     args_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    # 1-成功，0-失败
     ok: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # 工具异常被 runner 吞掉了，异常类型与原文必须显式带出，否则查不到「为什么老失败」
+    # 异常类型：异常被 runner 捕获后由本列显式带出，用于统计失败原因
     error_type: Mapped[str] = mapped_column(Text, nullable=False, default="")
     error_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    # 前 4000 字，与 SSE 下发口径对齐，便于「库里看到的 = 前端看到的」
+    # 结果前 4000 字，与 SSE 下发口径一致
     result_preview: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 结果总字符数（截断前）
     result_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 调用耗时，毫秒
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
 
@@ -57,12 +55,16 @@ class AgentToolCall(Base):
     http_method: Mapped[str | None] = mapped_column(Text, default=None)
     http_url: Mapped[str | None] = mapped_column(Text, default=None)
     http_status_code: Mapped[int | None] = mapped_column(Integer, default=None)
+    # 请求头，JSON 对象字符串，敏感值已脱敏
     request_headers: Mapped[str | None] = mapped_column(Text, default=None)
+    # 查询参数，JSON 对象字符串
     request_params: Mapped[str | None] = mapped_column(Text, default=None)
     request_body: Mapped[str | None] = mapped_column(Text, default=None)
     response_headers: Mapped[str | None] = mapped_column(Text, default=None)
     response_body: Mapped[str | None] = mapped_column(Text, default=None)
+    # 1-响应体超过 2MB 已截断，0-完整
     response_body_truncated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 响应体原始大小，字节
     response_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     run: Mapped[AgentRun] = relationship(back_populates="tool_calls")

@@ -3,7 +3,7 @@ import { ToolCallList } from "@/components/chat/tool-call-card.tsx";
 import { MarkdownRenderer } from "@/components/markdown";
 import type { ToolCallRecord } from "@/hooks/use-chat.ts";
 
-/** 用户消息：图纸批注式浅蓝底 + 工程蓝描边。 */
+/** 用户消息气泡。 */
 export function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-end">
@@ -14,7 +14,7 @@ export function UserBubble({ content }: { content: string }) {
   );
 }
 
-/** Agent 输出：左侧工程蓝墨线 + AGENT 标注 + 分隔虚线。 */
+/** Agent 输出气泡，正文按 Markdown 渲染。 */
 export function AssistantBubble({
   content,
   isStreaming = false,
@@ -38,6 +38,7 @@ export function AssistantBubble({
   );
 }
 
+/** 流式回答气泡：首包未到达时显示等待指示。 */
 export function StreamingAssistantMessage({
   rawText,
   isStreaming,
@@ -64,10 +65,9 @@ export function StreamingAssistantMessage({
 }
 
 /**
- * 一轮进行中的回答：工具轨迹 + 正文 + 错误。
+ * 一轮进行中的回答：工具轨迹、正文与错误。
  *
- * 顺序刻意是「先工具后正文」：工具轨迹是**论据**，正文是**结论**，
- * 阅读顺序应该跟人写报告一致。工具卡片默认折叠，避免长轨迹淹没答案。
+ * 工具轨迹排在正文之前并默认折叠，避免长轨迹淹没答案。
  */
 export function StreamingTurn({
   answer,

@@ -21,7 +21,7 @@ interface NavItemProps {
   label: string;
 }
 
-/** 蓝图式导航项：mono 编号 + 大写标注，激活态工程蓝指示条。 */
+/** 侧边栏导航项，激活态由路由匹配决定。 */
 function NavItem({ to, index, icon, label }: NavItemProps) {
   return (
     <NavLink
@@ -49,6 +49,7 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+/** 侧边栏：主导航与空间会话列表，宽度可折叠为 0。 */
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   return (
     <aside

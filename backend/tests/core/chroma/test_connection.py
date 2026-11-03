@@ -1,14 +1,6 @@
-"""ChromaManager 单元测试。
+"""`ChromaManager` 的单例、初始化、连接检查与集合/文档操作。
 
-使用 Mock 完全隔离外部 ChromaDB 服务依赖，覆盖：
-- 单例模式
-- 初始化流程（有/无认证）
-- 连接检查
-- 集合 CRUD
-- 文档 CRUD
-- LangChain VectorStore 集成
-- 生命周期管理
-- 便捷函数
+外部 ChromaDB 服务全部由 mock 隔离，不发起真实连接。
 """
 
 from unittest.mock import MagicMock, patch
@@ -25,7 +17,7 @@ from src.core.config import ChromaConfig
 
 @pytest.fixture(autouse=True)
 def _reset_chroma_singleton():
-    """每个测试前后重置 ChromaManager 单例，确保测试隔离。"""
+    """在每个用例前后重置单例，保证用例隔离。"""
     ChromaManager.reset_instance()
     yield
     ChromaManager.reset_instance()
@@ -33,7 +25,7 @@ def _reset_chroma_singleton():
 
 @pytest.fixture()
 def chroma_config() -> ChromaConfig:
-    """测试用 ChromaConfig 实例。"""
+    """带 token 认证的测试配置。"""
     return ChromaConfig(
         host="test-host",
         port=9999,
@@ -48,7 +40,7 @@ def chroma_config() -> ChromaConfig:
 
 @pytest.fixture()
 def chroma_config_no_auth() -> ChromaConfig:
-    """无认证的 ChromaConfig 实例。"""
+    """无认证凭据的测试配置。"""
     return ChromaConfig(
         host="test-host",
         port=9999,
@@ -61,7 +53,7 @@ def chroma_config_no_auth() -> ChromaConfig:
 
 @pytest.fixture()
 def mock_http_client():
-    """Mock chromadb.HttpClient 构造函数，返回 mock client 实例。"""
+    """替换 `chromadb.HttpClient`，返回 mock 客户端。"""
     with patch("src.core.chroma.chroma_manager.chromadb.HttpClient") as mock_cls:
         client = MagicMock()
         mock_cls.return_value = client
@@ -70,7 +62,7 @@ def mock_http_client():
 
 @pytest.fixture()
 def initialized_manager(chroma_config, mock_http_client) -> ChromaManager:
-    """已初始化的 ChromaManager 实例。"""
+    """已完成初始化的管理器实例。"""
     manager = ChromaManager.get_instance()
     manager.initialize(chroma_config)
     return manager
@@ -78,7 +70,7 @@ def initialized_manager(chroma_config, mock_http_client) -> ChromaManager:
 
 @pytest.mark.unit
 class TestChromaManagerSingleton:
-    """单例模式测试。"""
+    """单例获取与重置。"""
 
     def test_get_instance_returns_same_object(self):
         instance_a = ChromaManager.get_instance()
@@ -94,7 +86,7 @@ class TestChromaManagerSingleton:
 
 @pytest.mark.unit
 class TestChromaManagerInitialize:
-    """初始化流程测试。"""
+    """初始化流程，含重复初始化跳过与认证配置。"""
 
     def test_initialize_creates_client(self, chroma_config, mock_http_client):
         manager = ChromaManager.get_instance()
@@ -140,7 +132,7 @@ class TestChromaManagerInitialize:
 
 @pytest.mark.unit
 class TestChromaManagerConnection:
-    """连接检查测试。"""
+    """连接检查的成功、失败与未初始化分支。"""
 
     def test_check_connection_success(self, initialized_manager, mock_http_client):
         mock_http_client.heartbeat.return_value = 1234567890
@@ -158,7 +150,7 @@ class TestChromaManagerConnection:
 
 @pytest.mark.unit
 class TestChromaManagerCollections:
-    """集合 CRUD 测试。"""
+    """集合的获取、列举与删除。"""
 
     def test_get_or_create_collection_with_name(self, initialized_manager, mock_http_client):
         mock_collection = MagicMock()
@@ -222,7 +214,7 @@ class TestChromaManagerCollections:
 
 @pytest.mark.unit
 class TestChromaManagerDocuments:
-    """文档 CRUD 测试。"""
+    """文档的新增、查询、更新与删除。"""
 
     def test_add_documents(self, initialized_manager, mock_http_client):
         mock_collection = MagicMock()
@@ -335,7 +327,7 @@ class TestChromaManagerDocuments:
 
 @pytest.mark.unit
 class TestChromaManagerVectorStore:
-    """LangChain VectorStore 集成测试。"""
+    """LangChain `Chroma` 包装的参数传递。"""
 
     def test_get_vector_store(self, initialized_manager):
         mock_embedding = MagicMock()
@@ -370,7 +362,7 @@ class TestChromaManagerVectorStore:
 
 @pytest.mark.unit
 class TestChromaManagerLifecycle:
-    """生命周期管理测试。"""
+    """关闭后的状态与未初始化时的异常。"""
 
     def test_close_resets_state(self, initialized_manager):
         assert initialized_manager._initialized is True
@@ -408,7 +400,7 @@ class TestChromaManagerLifecycle:
 
 @pytest.mark.unit
 class TestConvenienceFunctions:
-    """便捷函数测试。"""
+    """模块级便捷函数。"""
 
     def test_get_chroma_manager(self):
         manager = get_chroma_manager()

@@ -1,7 +1,6 @@
-"""WorkspaceManager 单元测试。
+"""`WorkspaceManager` 的目录创建、路径沙箱、归档与目录树。
 
-覆盖：目录创建与初始文件、幂等、路径沙箱（逃逸拒绝）、归档、目录树。
-全部使用 tmp_path，不触碰真实 workspaces 目录。
+全部使用 `tmp_path`，不读写真实工作区目录。
 """
 
 from pathlib import Path
@@ -15,12 +14,12 @@ SPACE_ID = 1234567890
 
 @pytest.fixture()
 def manager(tmp_path) -> WorkspaceManager:
-    """指向临时根目录的 WorkspaceManager。"""
+    """指向临时根目录的管理器。"""
     return WorkspaceManager(root=tmp_path / "workspaces")
 
 
 class TestCreate:
-    """目录创建。"""
+    """目录创建与初始文件，重复调用不覆盖已有文件。"""
 
     def test_creates_full_structure(self, manager):
         space_dir = manager.create(SPACE_ID, "用户中心")
@@ -56,7 +55,7 @@ class TestCreate:
 
 
 class TestResolve:
-    """路径沙箱。"""
+    """路径沙箱：绝对路径与 `..` 逃逸均被拒绝。"""
 
     def test_resolves_relative_path_inside_root(self, manager):
         manager.create(SPACE_ID, "s")
@@ -88,7 +87,7 @@ class TestResolve:
 
 
 class TestArchive:
-    """空间删除时归档目录。"""
+    """空间删除时的目录归档。"""
 
     def test_archive_renames_directory(self, manager):
         space_dir = manager.create(SPACE_ID, "s")
@@ -105,7 +104,7 @@ class TestArchive:
 
 
 class TestTree:
-    """工作目录树。"""
+    """目录树：条目元数据、噪声目录过滤与深度限制。"""
 
     def test_tree_lists_entries_with_metadata(self, manager):
         manager.create(SPACE_ID, "s")

@@ -1,7 +1,6 @@
-"""工作模式策略测试。
+"""工作模式策略：归一化、副作用开关、步数上限与工具过滤。
 
-模式的**唯一强制点**是工具白名单——prompt 里写「请不要调用写接口」只是建议，
-模型在工具列表里有 `send_request` 时迟早会调。所以这里的测试是模式的真正验收。
+模式的可执行约束只有工具白名单，prompt 中的劝告不构成限制，故断言落在过滤结果上。
 """
 
 import pytest
@@ -32,6 +31,8 @@ ALL_TOOLS = [
 
 
 class TestModeNormalize:
+    """模式字符串归一化，未知值回落到 agent。"""
+
     def test_lowercase(self):
         assert normalize_mode("agent") is Mode.AGENT
         assert normalize_mode("ask") is Mode.ASK
@@ -52,6 +53,8 @@ class TestModeNormalize:
 
 
 class TestPolicy:
+    """各模式的副作用开关、步数上限与展示文案。"""
+
     def test_ask_has_no_side_effects(self):
         assert policy_for("ask").allow_side_effects is False
 
@@ -80,6 +83,8 @@ class TestPolicy:
 
 
 class TestFilterTools:
+    """工具过滤：技能声明只能收窄，不能放宽模式限制。"""
+
     def test_ask_removes_side_effect_tools(self):
         kept = filter_tools(ALL_TOOLS, policy_for("ask"))
 
@@ -104,7 +109,7 @@ class TestFilterTools:
         assert {t.name for t in kept} == {"read_file", "send_request"}
 
     def test_skill_cannot_reintroduce_blocked_tool(self):
-        """ask 模式下，即使 skill 声明了 send_request 也不能拿到。"""
+        """ask 模式下即使技能声明 `send_request` 也拿不到。"""
         kept = filter_tools(ALL_TOOLS, policy_for("ask"), skill_allowed={"read_file", "send_request"})
 
         assert {t.name for t in kept} == {"read_file"}
@@ -113,12 +118,14 @@ class TestFilterTools:
         assert filter_tools(ALL_TOOLS, policy_for("agent"), skill_allowed=set()) == []
 
     def test_unknown_tool_name_is_kept_by_default(self):
-        """新增工具没登记时不应被静默丢弃（否则调了半天找不到原因）。"""
+        """新增工具未登记时默认保留，避免被静默丢弃。"""
         tools = [FakeTool("brand_new_tool")]
         assert len(filter_tools(tools, policy_for("ask"))) == 1
 
 
 class TestSideEffectRegistry:
+    """副作用与只读工具名注册表。"""
+
     def test_known_side_effect_names(self):
         from src.agent.modes import SIDE_EFFECT_TOOL_NAMES
 

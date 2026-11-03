@@ -1,12 +1,7 @@
-"""/api/v1/chat/stream 流式接口测试。
+"""`/api/v1/chat/stream` 的 SSE 协议与执行记录终态。
 
-关注三件事：
-
-1. **SSE 帧契约**：三行帧、seq 从 0 连续、事件类型顺序
-2. **模式兼容**：agent / ask / plan 及历史值都能出流（模式决定工具集在 runner 层已测）
-3. **降级**：上下文装配失败、模型报错都要变成 ``error`` 帧，而不是 5xx
-
-上下文装配与 runner 全部 mock，测试只验证协议与编排。
+帧固定三行、seq 从 0 连续；上下文装配失败与模型报错转为 `error` 帧而非 5xx。
+上下文装配与 runner 全部 mock，用例只验证协议与编排。
 """
 
 from __future__ import annotations
@@ -91,7 +86,7 @@ class _SpyRecorder:
 
 
 def _spy_factory() -> tuple[_SpyRecorder, type]:
-    """构造「同一个实例」的记录器类，便于测试拿到实例断言。"""
+    """构造返回同一实例的记录器类，便于断言调用过程。"""
     spy = _SpyRecorder()
 
     class _Factory(_SpyRecorder):
@@ -102,6 +97,7 @@ def _spy_factory() -> tuple[_SpyRecorder, type]:
 
 
 def _make_body(**overrides):
+    """构造 `stream_answer` 所需的请求体命名空间。"""
     from types import SimpleNamespace as NS
 
     payload = {
@@ -125,10 +121,9 @@ def client() -> TestClient:
 
 @contextmanager
 def patched(*, runner=_fake_run, prepare=None, conversation_id: int = 7, recorder_cls=NullRecorder):
-    """替换外部依赖：会话落库、上下文装配、回答落库、runner、执行记录器。
+    """替换会话落库、上下文装配、回答落库、runner 与执行记录器。
 
-    执行记录器换成 ``NullRecorder``：这组测试聚焦 SSE 协议，不该因为
-    测试环境没有数据库而反复打印「记录创建失败」并让断言依赖 DB。
+    执行记录器换为 `NullRecorder`：这组用例聚焦 SSE 协议，不依赖数据库。
     """
     prepare = prepare or (lambda body, cid: RunRequest(instruction="问", space_id=1, mode="agent"))
     with (
@@ -148,6 +143,8 @@ def patched(*, runner=_fake_run, prepare=None, conversation_id: int = 7, recorde
 
 @pytest.mark.unit
 class TestStreamProtocol:
+    """响应头、帧形状、事件顺序与回答落库时机。"""
+
     def test_headers(self, client):
         with patched():
             response = client.post(
@@ -158,7 +155,7 @@ class TestStreamProtocol:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         assert response.headers["x-conversation-id"] == "7"
-        # 网关不设这条会把整条流攒完再吐，流式失去意义
+        # 缺此响应头时网关会缓冲整条流，流式失效
         assert response.headers["x-accel-buffering"] == "no"
 
     def test_event_types_and_sequence(self, client):
@@ -212,7 +209,7 @@ class TestStreamProtocol:
         mocks.save.assert_called_once_with(7, "空间 1 共有 0 个接口。")
 
     def test_error_stream_does_not_persist(self, client):
-        """失败的轮次不落库——半截回答会比没有回答更误导。"""
+        """失败轮次不落库，避免半截回答入库。"""
         with patched(runner=_failing_run) as mocks:
             response = client.post("/api/v1/chat/stream", json={"instruction": "问", "space_id": 1})
 
@@ -227,6 +224,8 @@ class TestStreamProtocol:
 
 @pytest.mark.unit
 class TestPreconditions:
+    """入参校验与前置失败降级。"""
+
     def test_missing_space_yields_error_frame(self, client):
         with patch.object(ChatStreamService, "ensure_conversation", return_value=7):
             response = client.post("/api/v1/chat/stream", json={"instruction": "问"})
@@ -297,11 +296,10 @@ class TestPreconditions:
 
 @pytest.mark.unit
 class TestRunRecorderLifecycle:
-    """终态判定是本轮改造的核心：``finally`` 必须把三种收尾都写对。
+    """执行记录终态：`completed` / `failed` / `cancelled`。
 
-    最要紧的是**断流**：客户端关标签页时 Starlette 对生成器调 ``aclose()``，
-    挂起点抛 ``GeneratorExit``。如果 ``finally`` 里 ``await``（写库）就会被
-    ``CancelledError`` 打断，记录永久卡在 ``running``——清理任务还不敢碰它。
+    断流时 Starlette 对生成器调用 `aclose()`，挂起点抛 `GeneratorExit`；
+    `finally` 中若 `await` 写库会被 `CancelledError` 打断，记录会永久停在 `running`。
     """
 
     async def test_start_is_called_with_request_context(self):
@@ -331,7 +329,7 @@ class TestRunRecorderLifecycle:
             async for _ in ChatStreamService().stream_answer(_make_body(), 7):
                 pass
 
-        # run_id 必须回填，否则 runner 里的工具埋点与 llm_log 的 run_id 会全是空
+        # run_id 必须回填，否则工具埋点与 llm_log 的 run_id 全为空
         assert seen["run_id"] == 9001
         assert seen["recorder"] is spy
 
@@ -357,7 +355,7 @@ class TestRunRecorderLifecycle:
         mocks.save.assert_not_called()
 
     async def test_generator_aclose_marks_cancelled(self):
-        """模拟客户端断连：取到第一帧就 aclose，终态必须是 cancelled。"""
+        """模拟客户端断连：取到首帧即 `aclose`，终态为 cancelled。"""
         spy, factory = _spy_factory()
 
         with patched(recorder_cls=factory) as mocks:
@@ -367,11 +365,11 @@ class TestRunRecorderLifecycle:
             await gen.aclose()
 
         assert spy.finished == {"status": "cancelled", "error_message": ""}
-        # 半截回答不能落库：断流时 answer 还没拼完
+        # 断流时 answer 尚未拼完，不得落库
         mocks.save.assert_not_called()
 
     async def test_prepare_failure_creates_no_record(self):
-        """上下文装配就失败时不该留下任何记录——那时 finally 还没建立。"""
+        """装配阶段失败时不留下记录，此时 `finally` 尚未建立。"""
         spy, factory = _spy_factory()
 
         def boom(_body, _cid):

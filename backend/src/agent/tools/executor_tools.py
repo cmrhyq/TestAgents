@@ -1,7 +1,6 @@
-"""执行域工具：断言求值、JSONPath 取值。
+"""执行域工具：断言求值与 JSONPath 取值。
 
-纯逻辑、无副作用、无 IO——这也是为什么它们**在所有模式下都可用**：
-即使 Ask 模式不许发请求，用户问「这条断言为什么会失败」，Agent 也需要能算。
+纯逻辑、无 IO、无副作用，因此在所有模式下都可用。
 """
 
 from __future__ import annotations
@@ -21,7 +20,11 @@ _engine = AssertionEngine()
 
 
 def make_executor_tools() -> list[BaseTool]:
-    """构造断言与 JSONPath 工具（无空间绑定）。"""
+    """构造断言与 JSONPath 工具（无空间绑定）。
+
+    Returns:
+        工具列表：``evaluate_assertions``、``extract_jsonpath``
+    """
 
     @tool
     def evaluate_assertions(
@@ -65,8 +68,6 @@ def make_executor_tools() -> list[BaseTool]:
     @tool
     def extract_jsonpath(data: str, path: str) -> str:
         """按 JSONPath 从 JSON 里取值（支持 $.a.b.c 与 $.a[0].b）。
-
-        典型用途：从登录响应里取 token，供后续请求使用。
 
         Args:
             data: JSON 字符串

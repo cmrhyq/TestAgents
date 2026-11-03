@@ -6,17 +6,18 @@ import { useDeleteConversation, useSpaceConversations } from "@/hooks/use-conver
 import { cn } from "@/lib/utils";
 import { MODE_LABELS, type ConversationMode } from "@/lib/types";
 
-/** 会话标题：后端首条消息自动生成，空标题兜底成「新对话」。 */
+/** 会话标题的展示值：空标题兜底为「新对话」。 */
 function titleOf(title: string): string {
   return title.trim() || "新对话";
 }
 
-/** 时间：后端存本地 ISO 串，取到分钟即可，不引日期库。 */
+/** 把后端返回的 ISO 时间串截取到分钟展示。 */
 function timeOf(value: string | null): string {
   if (!value) return "";
   return value.slice(5, 16).replace("T", " ");
 }
 
+/** `ConversationListPanel` 的属性。 */
 export interface ConversationListPanelProps {
   spaceId: string | null;
   activeId: string | null;
@@ -25,10 +26,9 @@ export interface ConversationListPanelProps {
 }
 
 /**
- * 空间下的会话列表。
+ * 会话列表：展示某空间下的全部会话，支持切换与删除。
  *
- * 删当前正在看的会话时不做额外跳转——URL 里的 conversation_id 失效后
- * 页面会自然回落到「新建对话」状态，逻辑少一条分支就少一个 bug。
+ * 删除当前正在查看的会话时不做跳转，URL 中的会话失效后页面回落到新建对话状态。
  */
 export function ConversationListPanel({
   spaceId,

@@ -1,3 +1,5 @@
+"""Pydantic Schema 集合，按实体分模块定义请求体与响应体。"""
+
 from src.data.schemas.agent_run import (
     AgentCleanupResult,
     AgentRunBrief,

@@ -1,16 +1,7 @@
 """空间沙箱文件工具。
 
-和旧实现的三点区别：
-
-1. **路径基准从「仓库根」改成「空间目录」**。旧实现允许 Agent 读整个仓库，
-   在测试 Agent 场景里等于把后端源码和密钥都暴露给模型。
-2. **工具按空间绑定**。``space_id`` 由运行时注入闭包，不出现在工具参数里——
-   让模型传 space_id 只会增加幻觉空间（它会编一个不存在的 ID）。
-3. **写能力独立成型**。旧实现只有读；测试 Agent 必须能把用例、报告落到
-   ``testcases/`` 与 ``artifacts/``，否则产物只活在对话里。
-
-所有失败都返回**字符串错误**而不是抛异常：工具异常会打断 ReAct 循环，
-而「这个文件不存在」恰恰是模型应该看到并自行调整策略的信息。
+路径基准是空间目录，越界访问被拒绝；所有失败返回错误字符串而不抛异常，
+以便模型自行调整策略。写操作会落盘，必要时自动创建父目录。
 """
 
 from __future__ import annotations
@@ -24,21 +15,29 @@ from src.workspace.manager import PathEscapeError, WorkspaceManager
 
 logger = get_logger(__name__)
 
-# 单次读取上限：再大就会把上下文挤爆，宁可截断并明确告知
+# 单次读取上限，超出部分截断并告知
 MAX_READ_CHARS = 200 * 1024
-# 单次写入上限：防止模型一次吐一个巨型文件把磁盘写满
+# 单次写入上限，防止一次写入巨型文件
 MAX_WRITE_CHARS = 1024 * 1024
 # 列表最多显示的条目数
 MAX_LIST_ENTRIES = 200
 
-# 核心约定文件：Agent 可读可改，但不许删（删了空间就丢了「长期约定」）
+# 核心约定文件：可读可改，不可删除
 PROTECTED_FILES = frozenset({"AGENTS.md", "memory/MEMORY.md"})
 
 _SKIP_DIRS = frozenset({"__pycache__", ".git", ".idea", ".pytest_cache", ".ruff_cache", "node_modules"})
 
 
 def make_fs_tools(space_id: int | str, workspace: WorkspaceManager | None = None) -> list[BaseTool]:
-    """构造绑定到某个空间的读写文件工具集。"""
+    """构造绑定到某个空间的读写文件工具集。
+
+    Args:
+        space_id: 空间 ID，所有路径都相对该空间目录解析
+        workspace: 工作区管理器；None 时使用全局实例
+
+    Returns:
+        工具列表：``read_file``、``write_file``、``list_directory``、``delete_file``
+    """
     manager = workspace or _default_workspace()
 
     def _resolve(path: str) -> tuple[Path | None, str | None]:
@@ -51,6 +50,8 @@ def make_fs_tools(space_id: int | str, workspace: WorkspaceManager | None = None
     @tool
     def read_file(path: str) -> str:
         """读取当前空间目录内的文件内容。
+
+        超过 ``MAX_READ_CHARS`` 时截断，并在开头注明原始大小。
 
         Args:
             path: 相对空间根目录的路径，如 "AGENTS.md"、"artifacts/report.md"
@@ -79,9 +80,9 @@ def make_fs_tools(space_id: int | str, workspace: WorkspaceManager | None = None
 
     @tool
     def write_file(path: str, content: str) -> str:
-        """在当前空间目录内写入文件（父目录会自动创建，已存在则覆盖）。
+        """在当前空间目录内写入文件（父目录自动创建，已存在则覆盖）。
 
-        适合把测试用例、执行结果、报告落盘为可复用的资产。
+        副作用：写入或覆盖磁盘文件。
 
         Args:
             path: 相对空间根目录的路径，建议放在 testcases/ 或 artifacts/ 下
@@ -148,7 +149,9 @@ def make_fs_tools(space_id: int | str, workspace: WorkspaceManager | None = None
 
     @tool
     def delete_file(path: str) -> str:
-        """删除当前空间目录内的单个文件（不可恢复，请谨慎）。
+        """删除当前空间目录内的单个文件，删除后不可恢复。
+
+        副作用：删除磁盘文件。``PROTECTED_FILES`` 中的文件会被拒绝。
 
         Args:
             path: 相对空间根目录的文件路径
@@ -177,6 +180,7 @@ def make_fs_tools(space_id: int | str, workspace: WorkspaceManager | None = None
 
 
 def _human_size(path: Path) -> str:
+    """返回人类可读的文件大小；读取失败返回 ``?``。"""
     try:
         size = path.stat().st_size
     except OSError:
@@ -189,6 +193,7 @@ def _human_size(path: Path) -> str:
 
 
 def _default_workspace() -> WorkspaceManager:
+    """返回全局工作区管理器。"""
     from src.workspace.manager import get_workspace_manager
 
     return get_workspace_manager()

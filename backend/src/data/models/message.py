@@ -13,16 +13,20 @@ if TYPE_CHECKING:
 
 
 class Message(Base):
-    """消息表 - 会话中的单条消息（append-only）"""
+    """消息表 - 会话中的单条消息，只追加不修改。"""
 
     __tablename__ = "message"
 
+    # 主键，由 next_id() 生成，不走数据库自增
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=next_id)
+    # 所属会话，conversation.id；会话删除时级联删除
     conversation_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("conversation.id", ondelete="CASCADE"), nullable=False
     )
+    # 角色，取值 user / assistant / system
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 附加信息，JSON 对象字符串，可含 token 用量、附件路径、关联的 run_id
     meta: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[str] = mapped_column(Text, nullable=False, default=local_now)
 

@@ -1,7 +1,6 @@
-"""
-配置管理模块
+"""配置管理模块。
 
-负责加载和管理应用配置，仅从 YAML 文件读取配置。
+应用配置只从 YAML 文件加载，文件缺失或解析失败时回退到 ``AppConfig`` 的字段默认值。
 """
 
 import logging
@@ -17,10 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_backend_root() -> Path:
-    """backend 根目录（即 ``src/core/config.py`` 往上三级）。
+    """返回 backend 根目录。
 
-    工作目录、内置 skill 目录等相对路径配置都以它为基准解析，
-    避免依赖进程 cwd（uvicorn / pytest / CLI 的 cwd 各不相同）。
+    工作目录、内置 skill 目录等相对路径配置均以此为基准解析，不依赖进程 cwd。
     """
     return Path(__file__).resolve().parent.parent.parent
 
@@ -32,13 +30,13 @@ def resolve_backend_path(raw: str | Path) -> Path:
 
 
 class LLMConfig(BaseModel):
-    """LLM配置"""
+    """LLM 配置。"""
 
     default_model: str = Field(default="smart-router", description="默认模型名（对应 model_list 中的 model_name，smart-router=复杂度自动路由）")
 
 
 class DatabaseConfig(BaseModel):
-    """数据库配置"""
+    """数据库配置。"""
 
     url: str = Field(default="sqlite:///db/TestAgents.db", description="数据库连接URL")
     echo: bool = Field(default=False, description="是否输出SQL语句")
@@ -49,7 +47,7 @@ class DatabaseConfig(BaseModel):
 
 
 class ChromaConfig(BaseModel):
-    """ChromaDB 向量数据库配置"""
+    """ChromaDB 向量数据库配置。"""
 
     enabled: bool = Field(default=False, description="是否启用 ChromaDB（关闭时知识库降级为词法检索）")
     host: str = Field(default="localhost", description="ChromaDB 服务地址")
@@ -71,8 +69,7 @@ class ChromaConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """向量化模型配置。
 
-    未启用或调用失败时，知识库检索自动降级为 SQLite 词法匹配——
-    「向量检索暂时不可用」不应该让整个功能报错。
+    未启用或调用失败时，知识库检索降级为 SQLite 词法匹配，不向上抛错。
     """
 
     enabled: bool = Field(default=False, description="是否启用向量化（关闭时知识库走词法检索）")
@@ -83,7 +80,7 @@ class EmbeddingConfig(BaseModel):
 
 
 class WorkspaceConfig(BaseModel):
-    """空间工作目录配置"""
+    """空间工作目录配置。"""
 
     root: str = Field(default="workspaces", description="工作目录根（相对 backend 或绝对路径）")
     max_file_size_kb: int = Field(default=256, description="Agent 单次读取文件的大小上限（KB）")
@@ -92,7 +89,7 @@ class WorkspaceConfig(BaseModel):
 
 
 class SkillConfig(BaseModel):
-    """Skills 配置"""
+    """Skill 配置。"""
 
     builtin_root: str = Field(default="skills", description="内置 skill 目录（相对 backend 或绝对路径）")
     max_skill_chars: int = Field(default=8000, description="单个 skill 注入 system prompt 的正文上限")
@@ -101,11 +98,8 @@ class SkillConfig(BaseModel):
 class ModelPricing(BaseModel):
     """自定义模型费率（美元 / token）。
 
-    litellm 的定价表并不覆盖所有厂商（``zai/*`` 就没有），这类模型的调用
-    会被记为「成本未知」（NULL）。在此补上费率后即可正常计价。
-
-    注意与 ``model_list`` 分开配置：塞进 ``litellm_params`` 会被当成
-    未知 provider 参数透传，有调用失败的风险。
+    用于 litellm 定价表未收录的厂商模型，未配置时该模型调用成本记为 NULL。
+    必须与 ``model_list`` 分开配置：混入 ``litellm_params`` 会被当作未知 provider 参数透传。
     """
 
     model: str = Field(..., description="模型名，与 model_list 里的 litellm_params.model 一致")
@@ -114,7 +108,7 @@ class ModelPricing(BaseModel):
 
 
 class LoggingConfig(BaseModel):
-    """日志配置"""
+    """日志配置。"""
 
     level: str = Field(default="INFO", description="日志级别")
     format: str = Field(default="console", description="输出格式: console(彩色) / json(生产环境)")
@@ -122,7 +116,7 @@ class LoggingConfig(BaseModel):
 
 
 class LangSmithConfig(BaseModel):
-    """LangSmith 可观测性配置"""
+    """LangSmith 可观测性配置。"""
 
     enabled: bool = Field(default=False, description="是否启用 LangSmith 追踪")
     api_key: str = Field(default="", description="LangSmith API 密钥")
@@ -131,7 +125,7 @@ class LangSmithConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    """应用配置"""
+    """应用配置。"""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -152,14 +146,15 @@ class AppConfig(BaseModel):
 
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
-    """
-    加载应用配置
+    """加载应用配置。
+
+    文件缺失或解析失败时记录告警，回退到字段默认值。
 
     Args:
-        config_path: 配置文件路径，默认为 config/config.yaml
+        config_path: 配置文件路径；None 时取 ``config/config.yaml``
 
     Returns:
-        AppConfig: 应用配置对象
+        应用配置对象
     """
     if config_path is None:
         resolved_path = get_backend_root() / "config" / "config.yaml"
@@ -182,11 +177,9 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
 
 
 def _setup_langsmith(config: AppConfig) -> None:
-    """
-    根据配置启用或禁用 LangSmith 追踪。
+    """按配置写入或清除 LangSmith 追踪相关的环境变量。
 
-    LangChain/LangGraph 通过检测环境变量自动决定是否上报追踪数据，
-    此函数在应用启动时统一设置相关环境变量。
+    LangChain / LangGraph 只依据环境变量决定是否上报追踪数据，故在启动时统一设置。
 
     Args:
         config: 应用配置
@@ -206,16 +199,14 @@ def _setup_langsmith(config: AppConfig) -> None:
         logger.info("LangSmith 追踪未启用")
 
 
-# 全局配置实例
 _config: AppConfig | None = None
 
 
 def get_config() -> AppConfig:
-    """
-    获取全局配置实例
+    """返回全局配置实例；首次调用时从默认路径加载并缓存。
 
     Returns:
-        AppConfig: 应用配置对象
+        应用配置对象
     """
     global _config
     if _config is None:
@@ -224,14 +215,13 @@ def get_config() -> AppConfig:
 
 
 def init_config(config_path: str | None = None) -> AppConfig:
-    """
-    初始化配置
+    """加载配置并覆盖全局实例，同时同步 LangSmith 环境变量。
 
     Args:
-        config_path: 配置文件路径
+        config_path: 配置文件路径；None 时使用默认路径
 
     Returns:
-        AppConfig: 应用配置对象
+        应用配置对象
     """
     global _config
     _config = load_config(config_path)

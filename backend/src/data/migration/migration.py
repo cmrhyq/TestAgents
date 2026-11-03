@@ -1,10 +1,7 @@
-"""
-数据库初始化与迁移模块
+"""数据库初始化与迁移。
 
-提供数据库的首次建表、Schema 迁移和版本管理功能。
-支持两种建表方式：
-1. 通过 ORM 模型自动建表（推荐用于开发/测试）
-2. 通过 SQL 文件执行建表（推荐用于生产，与 schema.sql 保持一致）
+提供首次建表、Schema 迁移与版本管理。建表有两种方式：ORM 模型自动建表（开发与
+测试）与 SQL 文件建表（生产，与 ``schema.sql`` 保持一致）。
 """
 
 from pathlib import Path
@@ -27,7 +24,7 @@ EXPECTED_TABLES = [
     "conversation",
     "message",
     "llm_log",
-    # v2 新增（Agent 平台）
+    # v2 新增表
     "space_memory",
     "knowledge_document",
     "knowledge_chunk",
@@ -36,14 +33,14 @@ EXPECTED_TABLES = [
 
 
 def init_database_from_orm(manager: DatabaseManager | None = None) -> None:
-    """
-    通过 ORM 模型自动创建所有表，并执行 v2 迁移
+    """按 ORM 模型建表，随后执行 v2 / v3 迁移与视图创建。
 
-    适用于开发和测试环境快速初始化。
-    如果表已存在则跳过建表；v2 迁移本身幂等，可重复执行。
+    表已存在时跳过建表；迁移本身幂等，可重复执行。
+
+    副作用：写库并提交（``create_all`` 与迁移各自管理事务）。
 
     Args:
-        manager: 数据库管理器实例，为 None 时使用全局单例
+        manager: 数据库管理器；None 时使用全局单例
     """
     mgr = manager or get_db_manager()
     Base.metadata.create_all(mgr.engine)
@@ -63,14 +60,16 @@ def init_database_from_sql(
     sql_file: str = "sql/schema.sql",
     manager: DatabaseManager | None = None,
 ) -> None:
-    """
-    通过 SQL 文件执行建表
+    """按 SQL 文件逐条执行建表语句，事务在全部语句执行后提交。
 
-    适用于生产环境，确保与 schema.sql 定义完全一致。
+    副作用：写库并提交，部分语句失败时已执行的语句仍可能留下。
 
     Args:
-        sql_file: SQL 脚本文件路径
-        manager: 数据库管理器实例
+        sql_file: SQL 脚本路径，相对当前工作目录
+        manager: 数据库管理器；None 时使用全局单例
+
+    Raises:
+        FileNotFoundError: SQL 文件不存在
     """
     mgr = manager or get_db_manager()
     path = Path(sql_file)
@@ -94,14 +93,13 @@ def init_database_from_sql(
 
 
 def check_tables_exist(manager: DatabaseManager | None = None) -> list[str]:
-    """
-    检查哪些预期的表已存在
+    """返回 ``EXPECTED_TABLES`` 中已存在的表名。
 
     Args:
-        manager: 数据库管理器实例
+        manager: 数据库管理器；None 时使用全局单例
 
     Returns:
-        List[str]: 已存在的表名列表
+        已存在的表名列表，顺序与 ``EXPECTED_TABLES`` 一致
     """
     mgr = manager or get_db_manager()
     inspector = inspect(mgr.engine)
@@ -110,28 +108,26 @@ def check_tables_exist(manager: DatabaseManager | None = None) -> list[str]:
 
 
 def get_missing_tables(manager: DatabaseManager | None = None) -> list[str]:
-    """
-    获取尚未创建的表
+    """返回尚未创建的表名。
 
     Args:
-        manager: 数据库管理器实例
+        manager: 数据库管理器；None 时使用全局单例
 
     Returns:
-        List[str]: 缺失的表名列表
+        缺失的表名列表
     """
     existing = check_tables_exist(manager)
     return [t for t in EXPECTED_TABLES if t not in existing]
 
 
 def is_database_ready(manager: DatabaseManager | None = None) -> bool:
-    """
-    判断数据库是否已完整初始化（所有表均存在）
+    """判断数据库是否已完整初始化。
 
     Args:
-        manager: 数据库管理器实例
+        manager: 数据库管理器；None 时使用全局单例
 
     Returns:
-        bool: 所有预期的表均存在时返回 True
+        所有预期表均存在时返回 True
     """
     return len(get_missing_tables(manager)) == 0
 
@@ -142,19 +138,18 @@ def ensure_database(
     use_sql_file: bool = False,
     sql_file: str = "sql/schema.sql",
 ) -> DatabaseManager:
-    """
-    确保数据库已初始化的一站式便捷函数
+    """确保数据库就绪：缺表时建表，已就绪时跳过。
 
-    如果数据库未初始化则自动建表；如果已存在则跳过。
+    副作用：必要时建表、执行迁移并写库；已就绪时不产生写操作。
 
     Args:
         db_url: 数据库连接 URL
         echo: 是否输出 SQL 语句
-        use_sql_file: 是否使用 SQL 文件建表
-        sql_file: SQL 脚本文件路径
+        use_sql_file: 为 True 时按 SQL 文件建表，否则按 ORM 建表
+        sql_file: SQL 脚本路径，仅在 ``use_sql_file`` 为 True 时使用
 
     Returns:
-        DatabaseManager: 已就绪的数据库管理器
+        就绪的数据库管理器
     """
     mgr = get_db_manager()
     mgr.initialize(db_url=db_url, echo=echo)
@@ -176,11 +171,12 @@ def ensure_database(
 
 
 def _create_views(manager: DatabaseManager) -> None:
-    """创建分析视图（仅 ORM 建表模式下调用）。
+    """创建分析视图，仅 ORM 建表模式下调用。
 
-    ⚠️ 必须先 ``DROP VIEW`` 再 ``CREATE``，不能沿用 ``CREATE VIEW IF NOT EXISTS``：
-    SQLite 不会更新已存在的视图，语义一变（尤其是从 test_* 迁到 agent_*）旧定义
-    会永远留在库里，表现为「查询一个不存在的表」。
+    必须先 ``DROP VIEW`` 再 ``CREATE``：SQLite 不会更新已存在的视图定义，
+    旧定义会一直生效并指向已改名的表。
+
+    副作用：写库并提交。
     """
     views = {
         "v_run_overview": """
@@ -205,7 +201,7 @@ def _create_views(manager: DatabaseManager) -> None:
             LEFT JOIN space       s ON r.space_id       = s.id
             LEFT JOIN environment e ON r.environment_id = e.id
         """,
-        # 工具维度：哪个工具最常失败、哪个最慢
+        # 工具维度统计
         "v_tool_call_stats": """
             SELECT
                 tool_name,
@@ -221,7 +217,7 @@ def _create_views(manager: DatabaseManager) -> None:
             FROM agent_tool_call
             GROUP BY tool_name, tool_type
         """,
-        # 接口维度：替代旧的 v_api_pass_rate，但口径改成 HTTP 状态码
+        # 接口维度统计，成功口径改为 HTTP 状态码
         "v_http_endpoint_stats": """
             SELECT
                 http_url,
@@ -243,10 +239,15 @@ def _create_views(manager: DatabaseManager) -> None:
 
 
 def _parse_sql_statements(sql_content: str) -> list[str]:
-    """
-    将 SQL 文件内容解析为独立的 SQL 语句列表
+    """把 SQL 文件内容拆成独立语句。
 
-    处理 TRIGGER / VIEW 等包含多个分号的复合语句。
+    ``CREATE TRIGGER`` 体内含分号，需以 ``END;`` 作为语句结束标志；以 ``--`` 开头的行被丢弃。
+
+    Args:
+        sql_content: SQL 文件全文
+
+    Returns:
+        语句列表，已去除末尾分号与空语句
     """
     results: list[str] = []
     current: list[str] = []
