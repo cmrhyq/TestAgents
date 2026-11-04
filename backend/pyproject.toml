@@ -24,7 +24,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "cmrhyq", email = "cmrhyq@gmail.com" },
 ]
-keywords = ["llm", "api-testing", "automation", "langgraph", "langchain", "openapi", "bedrock"]
+keywords = ["llm", "api-testing", "automation", "langchain-core", "litellm", "openapi", "bedrock"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -41,55 +41,30 @@ classifiers = [
 # 运行时依赖（pip install testagents 时自动安装）
 # ----------------------------------------------------------------------------
 dependencies = [
-    # LangChain 生态
-    "langchain>=0.3.0",
-    "langchain-core>=0.3.0",
-    "langchain-community>=0.3.0",
-    "langchain-aws>=0.2.0",
-    "langgraph>=0.3.0",
-    "langchain-chroma>=0.1.2",
-    "langchain-openai>=0.2.0",
-    "langchain-anthropic>=0.2.0",
-    "langchain-deepseek>=1.1.0",
+    # LangChain 生态（仅保留工具/消息抽象、向量库集成、LiteLLM 适配）
+    "langchain-core>=1.2.0",
+    "langchain-chroma>=1.0.0",
     "langchain-litellm>=0.6.6",
-    # LLM 提供商 SDK
+    # LLM 提供商（统一经 LiteLLM 路由，不再按厂商引入 SDK）
     "litellm>=1.98.0",
-    # AWS Bedrock
-    # 智谱 AI
-    # 通义千问
+    # 向量数据库（代码直接使用 chromadb 客户端 API）
+    "chromadb>=1.3.5",
     # 数据校验
     "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
     # HTTP 客户端
     "requests>=2.31.0",
-    "httpx>=0.27.0",
-    "aiohttp>=3.9.0",
-    # JSON 路径断言
-    "jsonpath-ng>=1.6.0",
-    # Excel 报告
-    "openpyxl>=3.1.0",
-    "xlsxwriter>=3.1.0",
-    # 报告与模板
-    "matplotlib>=3.8.0",
-    "jinja2>=3.1.0",
+    # JSON 修复
+    "json-repair>=0.60.1",
     # 配置管理
     "pyyaml>=6.0.0",
-    "python-dotenv>=1.0.0",
     # 日志与可观测性
     "structlog>=24.0.0",
-    "langsmith>=0.1.0",
-    # 异步控制
-    "asyncio-throttle>=1.0.0",
     # 数据库
     "sqlalchemy>=2.0.0",
-    "alembic>=1.13.0",
     # Web 框架
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
-    "python-multipart>=0.0.9",
-    # 工具库
-    "python-dateutil>=2.8.0",
-    "json-repair>=0.60.1",
+    "python-multipart>=0.0.9",       # FastAPI UploadFile/File 运行时依赖
 ]
 
 # ----------------------------------------------------------------------------
@@ -105,6 +80,7 @@ dev = [
 ]
 # 测试工具
 test = [
+    "httpx>=0.27.0",                # FastAPI TestClient 依赖
     "pytest>=8.0.0",                 # 测试框架
     "pytest-cov>=5.0.0",            # 覆盖率插件
     "pytest-asyncio>=0.23.0",       # 异步测试支持

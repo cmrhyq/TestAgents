@@ -425,27 +425,12 @@ npm run type-check && npm run lint && npm run build
 | Agent 编排 | 手写 ReAct 循环（不再使用 LangGraph） |
 | LLM 框架 | LangChain 消息与工具绑定 + LiteLLM Router |
 | 向量库 | ChromaDB（可选） |
-| 可观测性 | LangSmith（可选） |
 | Web 框架 | FastAPI + Uvicorn |
 | 数据库 ORM | SQLAlchemy 2.0 |
 | 数据校验 | Pydantic 2 |
-| HTTP 客户端 | httpx |
+| HTTP 客户端 | requests |
 | 日志 | structlog |
 | 配置 | PyYAML |
-
----
-
-## LangSmith 可观测性（可选）
-
-```yaml
-langsmith:
-  enabled: true
-  api_key: your-langsmith-api-key
-  space: LLMTestAgent
-  endpoint: https://api.smith.langchain.com
-```
-
-`langsmith.enabled` 默认 `false`，关闭时不产生任何网络请求与性能开销。
 
 ---
 

@@ -425,27 +425,12 @@ because SQLite cannot alter CHECK constraints in place.
 | Agent orchestration | Hand-written ReAct loop (no LangGraph) |
 | LLM framework | LangChain messages + tool binding, LiteLLM Router |
 | Vector database | ChromaDB (optional) |
-| Observability | LangSmith (optional) |
 | Web framework | FastAPI + Uvicorn |
 | Database ORM | SQLAlchemy 2.0 |
 | Data validation | Pydantic 2 |
-| HTTP client | httpx |
+| HTTP client | requests |
 | Logging | structlog |
 | Configuration | PyYAML |
-
----
-
-## LangSmith Observability (Optional)
-
-```yaml
-langsmith:
-  enabled: true
-  api_key: your-langsmith-api-key
-  space: LLMTestAgent
-  endpoint: https://api.smith.langchain.com
-```
-
-Set `langsmith.enabled` to `false` (default) to disable — no network calls, no overhead.
 
 ---
 

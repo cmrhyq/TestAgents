@@ -501,9 +501,8 @@ flowchart LR
 | `skill`          | `builtin_root`(skills)、`max_skill_chars`(8000)                           |
 | `pricing`        | 自定义模型费率（`model` / `input_cost_per_token` / `output_cost_per_token`），补齐 litellm 未收录的厂商 |
 | `logging`        | level / format                                                         |
-| `langsmith`      | `enabled` / `api_key` / `space` / `endpoint`                           |
 
-`config.yaml` 与 `config.yaml.example` 现为**同一套 10 个段**，字段与 `AppConfig` 一一对应。
+`config.yaml` 与 `config.yaml.example` 现为**同一套 9 个段**，字段与 `AppConfig` 一一对应。
 
 > [!WARNING]
 > **超时没有配置入口**：`send_request` 的超时是工具自己的形参（默认 30s），配置模型里没有对应字段。
@@ -514,8 +513,8 @@ flowchart LR
 
 > [!CAUTION]
 > **Pydantic 静默丢弃未知键**：`AppConfig` 未设 `extra="forbid"`，段内字段名拼错**不会报错**，
-> 只是安静地走默认值。曾经的真实案例是模板里写 `langsmith.project`（正确字段是 `space`），
-> 导致该配置永远不生效。改完配置建议执行
+> 只是安静地走默认值。历史上出现过段内字段名与实际字段不符、导致配置永远不生效的案例。
+> 改完配置建议执行
 > `python -c "from src.core.config import init_config; print(init_config())"` 核对实际取值。
 
 > 安全提示：`model_list` 中各模型的 `api_key` 以明文写入本地 `config.yaml`，务必确保该文件在 `.gitignore` 中；
