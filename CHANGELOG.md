@@ -3,6 +3,47 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0] - 2026-11-04
+
+### Changed
+
+- 文档体系重整：以当前代码为准重新审计 8 份设计文档，删除 3 份已完成使命的历史文档
+  （重构目标态设计、重构实施计划、模式差距分析）与 `doc/images/` 下的 PlantUML / SVG 图示副本，
+  图改为文档内嵌 Mermaid，避免图与正文脱节。详见[设计变更日志](doc/CHANGELOG.md)
+- 依赖精简：移除 18 个零引用依赖（`langchain` 元包、`langchain-community` / `-aws` / `-openai` /
+  `-anthropic` / `-deepseek`、`langgraph` 全家桶、`alembic`、`openpyxl`、`xlsxwriter`、`matplotlib`、
+  `jinja2`、`jsonpath-ng`、`asyncio-throttle`、`aiohttp`、`python-dateutil`、`pydantic-settings`、
+  `langsmith`）；`httpx` 移入 test extras；补上漏声明的 `chromadb`。`uv.lock` 由 152 个发行版降至 131 个
+- 常量按子系统拆分到 `data/constant/`（`agent` / `memory` / `skills` / `workspace`），不再集中单文件
+
+### Removed
+
+- `langsmith` 配置段：依赖已移除，该段不再被任何代码读取
+
+## [1.2.0] - 2026-10-21
+
+### Added
+
+- 空间工作目录沙箱：每个空间一个真实目录，文件工具被限制在其内
+- 技能子系统：`SKILL.md` 文件夹规范，内置 + 空间级两级发现，zip 导入带 zip-slip 防护
+- 记忆子系统：跨会话记忆（DB 为真源 + `MEMORY.md` 镜像）、知识库（切片 + 可选向量检索）
+- 执行记录：`agent_run` 与 `agent_tool_call` 两张表，一轮对话的完整工具轨迹可回放
+- `GET /api/v1/usage/stats`：按空间 / 会话 / 时间窗口聚合 token 与成本
+
+### Changed
+
+- **Agent 编排由 LangGraph 工作流改为手写 ReAct 循环**（`src/agent/runner.py`），
+  删除 `src/workflow.py`、`src/graph/**` 与 `src/prompts/**`
+- 模式由提示词约束改为工具白名单硬约束：`agent`（执行，17 个工具）/ `ask` / `plan`（各 12 个只读工具）
+- SSE 协议统一为六事件：`start` / `text_delta` / `tool_call` / `tool_result` / `final` / `error`
+- LLM 调用统一走 `LLMGateway.astream_with_tools()`，`get_model()` 标记弃用（不产生埋点）
+- 测试报告改为按 `run_id` 实时聚合 `send_request` 调用，不再产出文件
+
+### Removed
+
+- `test_run` / `test_case` / `test_result` / `test_summary` / `report` 五张表（迁移 `v3` / `v4`）
+- 旧 Prompt 模板体系、意图分类节点、`workflow` 执行接口
+
 ## [1.1.0] - 2026-06-15
 
 ### Added

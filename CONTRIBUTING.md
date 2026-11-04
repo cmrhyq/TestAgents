@@ -64,6 +64,8 @@ LLMTestAgent/
 | 空间沙箱与目录模板 | `backend/src/workspace/` |
 | 技能解析与导入 | `backend/src/skill/`、`backend/skills/` |
 | 记忆与知识库 | `backend/src/memory/` |
+| 执行记录落库（工具轨迹、成本聚合） | `backend/src/data/recording/` |
+| 常量与枚举 | `backend/src/data/constant/`、`backend/src/data/enum/` |
 | 路由 / 服务 / 模型 | `backend/src/api/v1/`、`backend/src/data/` |
 | 前端页面与 hook | `frontend/src/pages/`、`frontend/src/hooks/` |
 

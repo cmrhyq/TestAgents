@@ -1,462 +1,254 @@
-# TestAgents 模式功能（Mode）设计文档
+# 模式系统设计
 
-> 版本：v0.2.0
-> 定位：描述 Agent / Plan / Ask 三种工作模式在前端展示、传输协议、后端处理上的完整实现方式。
-> 状态：✅ **核心已落地**（2026-10-20，v1.0 重构）。§一~§五 描述的分层流转与「强制点在执行路径」已按本文实现；
-> 未落地项集中在人工审批与事件持久化，逐条对照见 [§九](#九设计--实现对照)。
-> 历史差距快照（落地前）见 [模式功能差距分析](Mode-System-Gap-Analysis.md)。
+> 版本：v2.0（对应 `feature/web_ui` 分支当前实现）
+> 定位：解释「工作模式」在前后端如何落地，以及为什么必须落在执行路径上而不是提示词里。
+> 本文描述已实现的行为；未实现的部分集中在[§七](#七未实现的四件事)，
+> 标注为缺口而不是设计意图。
 >
-> 与其他文档关系：[架构设计](Architecture.md)、[数据库设计](DatabaseDesign.md)、[页面设计准则](UI-Design-Guidelines.md)、
-> [系统流程图](SystemFlowchart.md)。
+> 关联文档：[架构设计](Architecture.md) · [系统流程图](SystemFlowchart.md) · [页面设计准则](UI-Design-Guidelines.md)
 
 ---
 
-## 一、核心结论
+## 一、结论先行
 
-**「模式」不是换一套 prompt，而是同一个请求管线上的四个层面同时切换：**
+模式不是换一套提示词，而是同一条请求管线上四个层面同时切换：
 
 ```
 UI 状态  →  请求参数  →  后端策略对象  →  运行时执行闸门
 ```
 
-前三层是**提示（advisory）**，只有第四层是**强制（enforced）**。
+前三层是**提示性**的：前端可能被绕过，请求参数可能被伪造，策略对象本身只是数据。
+只有第四层是**强制**的：工具不进入模型的可调用列表，调用时还要再查一次表。
 
-最常见的错误做法是"给 system prompt 加一句话说明当前模式"。这样做的结果是：模型在 Ask 模式下仍然会调用写文件工具，因为工具列表里有它，而 prompt 里的约束只是建议。**模式必须落到执行路径上的拦截点才有意义。**
+最常见的错误做法是在 system prompt 里加一句「当前为问答模式，请不要发请求」。这样做的结果是：
+模型手里仍然握着 `send_request`，它会调用，因为工具列表里有它，而 prompt 里的约束只是建议。
+**模式必须落到「模型拿不到这个工具」这个事实层面。**
 
 ---
 
-## 二、分层流转
+## 二、四层流转
+
+| 层 | 落点 | 具体表现 |
+|---|---|---|
+| UI 状态 | `components/chat/mode-selector.tsx` | 分段控件，三个模式同时可见；选中值随每次请求上行 |
+| 请求参数 | `ChatStreamRequest.mode` | `agent` / `ask` / `plan`，缺省 `agent` |
+| 策略对象 | `agent/modes.py::policy_for()` | 冻结的 `ModePolicy`：是否允许副作用、模式指令、最大步数 |
+| 执行闸门 | `build_tools` + `runner` 内的二次过滤 | 白名单裁剪工具列表；执行前再查 `tool_map` |
 
 ```mermaid
-flowchart TB
-    subgraph FE["前端 UI 层"]
-        A1["模式选择器<br/>客户端状态"]
-        A2["输入区<br/>mode 随消息上行"]
-        A3["事件时间线<br/>按事件类型渲染"]
-        A4["审批卡片<br/>Plan 与高危操作"]
-    end
-
-    subgraph TP["传输层 · 一条长连接"]
-        B1["上行 POST /messages<br/>content · mode · cwd"]
-        B2["下行 SSE 事件流<br/>status · tool_call · plan · done"]
-    end
-
-    subgraph BE["后端策略引擎"]
-        C1["Mode Resolver<br/>mode → ResolvedPolicy"]
-        C2["上下文装配<br/>注入策略片段"]
-        C3["工具过滤<br/>只下发白名单"]
-        C4["执行闸门<br/>真正拦截动作"]
-        C5["Agent Loop<br/>LLM → 工具 → 回填 → 循环"]
-    end
-
-    subgraph DB["持久层"]
-        D1["事件日志 · 消息 · 工具调用"]
-        D2["检查点 · 计划 · 审批记录"]
-    end
-
-    A1 --> B1
-    A2 --> B1
-    B1 --> C1 --> C2 --> C3 --> C5
-    C5 --> C4
-    C4 -->|事件| B2 --> A3
-    C4 --> A4
-    C5 --> D1
-    C4 --> D2
-    D2 -.断线续跑.-> C5
+flowchart LR
+  ui["ModeSelector<br/>前端状态"] -->|"mode 随每次请求上行"| req["ChatStreamRequest.mode"]
+  req --> norm["normalize_mode()<br/>归一化旧值"]
+  norm --> pol["policy_for()<br/>ModePolicy（冻结）"]
+  pol --> tools["build_tools()<br/>按白名单装配"]
+  tools --> run["runner.run()<br/>filter_tools 再裁一次"]
+  run --> gate["_execute()<br/>查 tool_map，缺失即拒绝"]
 ```
 
 ---
 
-## 三、前端实现
+## 三、后端实现
 
-### 3.1 状态与交互
+### 3.1 策略对象
 
-模式是一个**客户端状态**（zustand / Redux / 组件 state），用分段控件（segmented control）或下拉菜单呈现，并持久化到 `localStorage`。
-
-模式需要影响的 UI 表现点：
-
-| 表现点 | 说明 |
-|---|---|
-| 输入框 placeholder | 不同模式给不同示例（"描述要测的接口" vs "描述要规划的测试范围"） |
-| 发送按钮文案 | `发送` / `生成计划` |
-| 危险操作二次确认弹窗 | 仅 Agent 模式触发 |
-| 消息流中的组件类型 | Agent 渲染工具调用块 + 产物卡片；Plan 渲染计划清单 + 批准按钮；Ask 只渲染纯文本 |
-| 输入框禁用/中断入口 | 流式执行中显示停止按钮 |
-
-### 3.2 mode 必须随每条消息上行
-
-**不要只在建会话时发送一次 mode。** 用户会在会话中途切换模式（先让它规划 → 看完计划 → 切 Agent 执行），所以每轮请求都要带上当前 mode：
-
-```jsonc
-POST /api/v1/spaces/{space_id}/messages
-{
-  "content": "为登录接口设计一组测试用例",
-  "mode": "plan",
-  "conversation_id": 123456789,
-  "cwd": "/abs/path/to/workspace",
-  "attachments": [],
-  "context_refs": ["@doc/api/login.yaml"]
-}
-```
-
-> ⚠️ 前端传上来的 mode 只是**用户体验参数**，后端必须做权限上限校验后再落库，绝不能直接信任。
-
-### 3.3 渲染：事件归约，而非字符串拼接
-
-后端返回的不是一段完整回复，而是一串**带类型的事件**。正确做法是用纯函数 reducer 把事件归约成时间线节点数组：
-
-```typescript
-type TimelineNode =
-  | { kind: "text"; id: string; content: string }
-  | { kind: "tool_call"; id: string; name: string; args: unknown; result?: string; collapsed: boolean }
-  | { kind: "plan"; id: string; steps: PlanStep[]; status: "pending" | "approved" | "rejected" }
-  | { kind: "permission"; id: string; request: PermissionRequest; status: "waiting" | "granted" | "denied" }
-  | { kind: "artifact"; id: string; path: string; mime: string }
-  | { kind: "status"; id: string; label: string }
-  | { kind: "error"; id: string; message: string };
-
-function reduce(prev: TimelineNode[], ev: AgentEvent): TimelineNode[];
-```
-
-**事件类型 → UI 节点对照表：**
-
-| 事件类型 | UI 行为 |
-|---|---|
-| `status` | 在当前气泡外挂阶段说明（"正在分析数据"） |
-| `text_delta` | 追加到当前文本块 |
-| `tool_call` | 新增一个可折叠的调用卡片（含入参） |
-| `tool_result` | 回填到对应折叠卡片 |
-| `plan` | 插入计划清单组件（可勾选、可批准） |
-| `permission_request` | 插入阻塞式审批卡片，等待用户点击 |
-| `artifact` / `file_change` | 右侧结果区新增产物条目 |
-| `error` / `done` | 终止当前气泡的 loading 态 |
-
-**这样做的收益**：断线重连时只要按 `seq` 补发缺失事件，UI 状态自动收敛，无需专门编写"恢复逻辑"。而字符串拼接方案在流式中断后必然出现内容错乱或重复。
-
----
-
-## 四、传输协议：SSE 事件规范
-
-### 4.1 为什么是 SSE 而不是 WebSocket
-
-| 维度 | SSE | WebSocket |
-|---|---|---|
-| 方向 | 单向（服务端推送） | 双向 |
-| 代理/网关 | 标准 HTTP，无需粘性会话 | 需要粘性会话，水平扩容困难 |
-| 断线重连 | 浏览器原生支持 + `Last-Event-ID` | 需自行实现 |
-| 适用性 | ✅ Agent 执行是"提交 → 观察"，天然单向 | 仅当需要运行中双向插话时才需要 |
-
-### 4.2 架构决策：任务生命周期不绑在 HTTP 连接上
-
-**不要让 HTTP 连接承载 Agent 任务的生命周期。** 正确做法：
-
-1. Agent Loop 把事件写入**会话级 event log**（DB 表 或 Redis Stream）
-2. SSE 端点只做「订阅 + 转发」
-3. 客户端断线 / 刷新 / 切走，任务照常执行
-4. 重连时携带 `Last-Event-ID`，按 `seq` 补发缺失事件
-
-### 4.3 事件帧格式
-
-```
-id: 42
-event: tool_call
-data: {"seq":42,"type":"tool_call","name":"send_request","args":{...},"ts":1758900000}
-
-```
-
-三个字段都必须有：
-
-- `id:` — 事件序号，支撑 `Last-Event-ID` 断点续传
-- `event:` — 事件类型，便于前端 `EventSource.addEventListener` 分发（也可统一走 `data.type`）
-- `data:` — JSON payload
-
-**必须设置的响应头**：
-
-```
-Content-Type: text/event-stream; charset=utf-8
-Cache-Control: no-cache
-X-Accel-Buffering: no          # 不加这条，nginx 会把整条流攒完再一次性吐出
-Connection: keep-alive
-```
-
-### 4.4 事件类型清单
-
-| 类型 | 载荷 | 说明 |
-|---|---|---|
-| `start` | `{turn_id}` | 一轮开始 |
-| `status` | `{label}` | 阶段说明 |
-| `text_delta` | `{content}` | 文本增量 |
-| `thinking_delta` | `{content}` | 推理增量（可选，可折叠） |
-| `tool_call` | `{name, args, call_id}` | 工具调用请求 |
-| `tool_result` | `{call_id, ok, content}` | 工具执行结果 |
-| `plan` | `{steps[]}` | 计划产物（Plan 模式） |
-| `permission_request` | `{request_id, action, risk}` | 请求人工确认 |
-| `permission_resolved` | `{request_id, granted}` | 确认结果 |
-| `artifact` | `{path, mime}` | 产物生成 |
-| `file_change` | `{path, op}` | 文件变更 |
-| `error` | `{message}` | 错误 |
-| `done` | `{usage}` | 一轮结束 |
-
----
-
-## 五、后端处理管线
-
-```mermaid
-flowchart TB
-    U["用户消息 + mode"] --> S1["① 策略解析<br/>mode → ResolvedPolicy"]
-    S1 --> S2["② 上下文与工具装配<br/>prompt 片段 + 规则文件 + 工具白名单"]
-    S2 --> LOOP
-
-    subgraph LOOP["Agent Loop（本项目：手写 ReAct 循环）"]
-        S3["③ LLM 决策<br/>输出文本 or 工具调用"] --> S4["④ 执行闸门<br/>放行 · 记录 · 拒绝 · 升级"]
-        S4 --> S5["⑤ 工具执行<br/>或写入待批计划"]
-        S5 -.->|工具结果回填| S3
-    end
-
-    LOOP --> S6["⑥ 事件流式下发 + 落库"]
-```
-
-### 5.1 ① 策略解析（Mode Resolver）
-
-这是整个功能的支点。mode 是一个字符串，必须被翻译成一个**冻结的策略对象**：
+`src/agent/modes.py` 提供四个东西：
 
 ```python
-from dataclasses import dataclass
-from enum import Enum
-from typing import Literal
-
-class Gate(Enum):
-    ALLOW = "allow"        # 直接执行
-    RECORD = "record"      # 只写进计划，不执行
-    DENY = "deny"          # 拒绝，并把原因回填给模型
-    ESCALATE = "escalate"  # 挂起，等用户确认
+Mode(StrEnum)              # AGENT / ASK / PLAN，值分别为 "agent" / "ask" / "plan"
+SIDE_EFFECT_TOOL_NAMES     # 五个有副作用的工具名
+READ_ONLY_TOOL_NAMES       # 十二个只读工具名
 
 @dataclass(frozen=True)
-class ResolvedPolicy:
-    mode: Literal["agent", "plan", "ask"]
-    allowed_tools: frozenset[str]   # 决定发给 LLM 的工具列表
-    mutating_tools: frozenset[str]  # 需要走闸门判定的工具
-    gate: Gate                      # 闸门默认判定
-    require_plan_approval: bool     # 是否输出计划后暂停
-    max_steps: int                  # 步数预算
-    prompt_fragment: str            # 注入 system prompt 的策略说明
+class ModePolicy:
+    mode: Mode
+    allow_side_effects: bool     # 仅 agent 为 True
+    instruction: str             # 注入 system prompt 的模式指令
+    max_steps: int               # 循环上限
 ```
 
-**合并顺序**：`系统默认值 ← 组织/用户配置 ← 会话当前 mode ← 单次请求 override`
+`frozen=True` 不是风格偏好：`policy` 会沿着 `RunRequest → runner → 工具装配` 传递，
+用不可变对象可以保证「整轮的工具权限只由一处决定」，不存在中途被改写的可能。
 
-用 `frozen dataclass` 而不是 dict，是为了让 `policy.allowed_tools` 成为整条链路上**唯一可信的来源**。
+`blocked_tool_names` 是一个派生属性：允许副作用时返回空集合，否则返回
+`SIDE_EFFECT_TOOL_NAMES`。这样调用方不需要写 `if mode == ...` 的分支。
 
-> ⚠️ **mode 必须在每一轮重新解析**，不能缓存在 Session 对象里，否则中途切模式不生效。
-
-### 5.2 ② 上下文与工具装配
-
-`system prompt` 的拼装顺序：
-
-```
-基础人格/角色定义
-  + policy.prompt_fragment          ← 按模式注入的策略说明
-  + 项目规则文件（AGENTS.md / 规范文档）
-  + 长期记忆摘要
-  + 实际允许的工具说明书             ← 注意这一项
-```
-
-最后一项是关键：**Ask 模式下，写文件工具的 schema 根本不进请求**。模型连"这个能力存在"都不知道。这比在 prompt 里写"你不许写文件"有效得多。
-
-### 5.3 ③ Agent Loop
-
-循环体是「LLM → 工具 → 回填」一圈。本项目的实现是一段 `for step in range(max_steps)`（`src/agent/runner.py`），
-没有图、没有条件边——是否需要下一圈由 `AIMessage.tool_calls` 是否为空直接决定。
-
-必须在这一层兜底：
-
-- 最大步数（`max_steps`）
-- 单轮超时（`asyncio.wait_for`）
-- token / 成本预算
-- 循环检测（连续 N 次相同工具+参数 → 中断）
-
-> **超时处理约定**：超时时**不要抛异常**。应当发出 `partial` 事件，携带已完成的部分结果 + `truncated: true` 标记。用户能拿到半成品，远好过一个 504。
-
-### 5.4 ④ 执行闸门（唯一的强制点）
-
-所有工具调用在真正执行前必经的唯一入口。**这是模式功能能不能生效的决定性环节。**
-
-> 🔑 **核心设计约定：权限不足时不要抛异常，要返回一条结构化的「工具结果」。**
->
-> 抛异常会炸掉整个 loop；返回 tool result 则让模型看到"我缺少写权限"，进而主动向用户解释并给出替代方案。**Ask 模式的体验好坏全在这一个细节上。**
-
-四种判定分支：
-
-| 判定 | 触发条件 | 行为 |
-|---|---|---|
-| `ALLOW` | 命中白名单且非高危 | 直接执行 |
-| `RECORD` | Plan 模式遇到 mutating 工具 | 不执行，把 `{tool, args, 意图}` 追加进 plan buffer，继续循环让模型补全计划 |
-| `DENY` | 工具不在 `allowed_tools` | 返回 error tool result，提示模型改用文字说明 |
-| `ESCALATE` | 高危操作（越出 cwd 的写、`rm`、未授权网络） | 发出 `permission_request` 事件并挂起，落库检查点，等确认后用 resume token 恢复 |
-
-### 5.5 ⑤⑥ 流式下发与落库
+### 3.2 归一化
 
 ```python
-# 提交与订阅分离
-@app.post("/spaces/{sid}/messages")
-async def send(sid: str, body: MessageIn, user=Depends(auth)):
-    turn = await store.create_turn(sid, body.content, body.mode, user.id)
-    asyncio.create_task(run_agent_loop(turn))     # 后台执行，连接断了也不停
-    return {"turn_id": turn.id}
-
-# 订阅端点：支持 Last-Event-ID 断点续传
-@app.get("/spaces/{sid}/turns/{tid}/events")
-async def events(sid: str, tid: str, last_event_id: str | None = Header(None)):
-    async def gen():
-        async for ev in store.subscribe(tid, after=last_event_id):
-            yield f"id: {ev.seq}\nevent: {ev.type}\ndata: {json.dumps(ev.payload)}\n\n"
-            if ev.type in ("done", "error"):
-                return
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-        "Connection": "keep-alive",
-    })
+def normalize_mode(raw: str | None) -> Mode:
+    key = (raw or "").strip().lower()
+    return _MODE_ALIASES.get(key, Mode.AGENT)   # 未知值一律退化为 agent
 ```
 
-**落库对象**（缺一不可，否则无法支撑续跑、历史回放与审计）：
+未知值退化为 `agent` 而不是报错，是权衡后的选择：历史前端传过 `Run` / `Ask` / `Plan`，
+若直接 422，旧客户端会全部失败。代价是拼错的模式名（例如 `Agentt`）会静默变成执行模式——
+这一点必须在服务端授权校验补上时一并处理（见 §七）。
 
-- 消息（user / assistant）
-- 事件日志（含 seq）
-- 工具调用记录
-- 计划与审批记录
-- 检查点（可恢复的会话状态；LangGraph 用 checkpointer，本项目尚未实现）
+### 3.3 工具裁剪
+
+```python
+def filter_tools(tools, policy, skill_allowed=None):
+    blocked = policy.blocked_tool_names
+    result = [t for t in tools if t.name not in blocked]
+    if skill_allowed is not None:
+        result = [t for t in result if t.name in skill_allowed]
+    return result
+```
+
+顺序不能反。若先按技能声明取交集、再按模式剔除副作用工具，结果虽相同；
+但若反过来写成「技能声明的工具可以绕过模式限制」，技能就成了提权通道。
+`tests/agent/test_skill_tool_contract.py` 钉住了这个契约。
+
+裁剪发生两次：
+
+1. `build_tools()` 装配时——决定下发给模型的工具 schema 有哪些；
+2. `runner.run()` 开头——`ToolBundle` 可能由调用方手工构造（测试就是如此），
+   模式保证不能只依赖装配处。第二次裁剪是廉价的安全网。
+
+### 3.4 执行前的二次校验
+
+`runner._execute()` 的第一件事是查 `tool_map`：
+
+```python
+tool = tool_map.get(name)
+if tool is None:
+    return ToolOutcome(
+        False,
+        f"工具 {name} 不存在。当前可用工具：{...}。请只调用列表中存在的工具。",
+        "not_found",
+        f"tool {name} not found",
+    )
+```
+
+模型编造工具名在生产里是常态（尤其小参数模型）。这里的处理原则是
+**返回结构化结果而不是抛异常**：异常会炸掉整轮循环，用户只看到一句报错；
+返回工具结果则让模型看到「我调错了」，它通常会自己改用正确工具或直接说明做不到。
+
+同一条原则也适用于生产环境闸门：被拦下的请求返回 `ok=false` 的工具结果，
+模型据此告知用户「该环境不允许写操作」，而不是让整个流失败。
 
 ---
 
-## 六、三种模式差异矩阵
+## 四、前端实现
 
-**三种模式只改四个地方，管线是同一套。**
+### 4.1 模式选择器
 
-| 能力维度 | Agent 模式 | Plan 模式 | Ask 模式 |
-|---|---|---|---|
-| 读取 · 搜索 | 允许 | 允许 | 允许 |
-| 写文件 · 跑命令 | **允许** | **仅记录到计划** | **阻止** |
-| 一轮结束形态 | 交付结果 | 计划待批准 | 只回答不动手 |
-| 人工确认点 | 仅高危操作 | 批准计划后执行 | 无 |
-| 定位 | 落地执行 | 方案评审 | 咨询问答 |
+`components/chat/mode-selector.tsx` 用分段控件而非下拉框——三个模式需要同时可见、可横向比较。
+选中态由 `use-chat.ts` 持有的当前会话状态决定。
 
-> ⚠️ **Plan 模式不能靠"过滤掉写工具"来实现**——那样模型无法规划出写操作。
->
-> 正确做法：**写工具的 schema 照给，闸门判 `RECORD`。** 这是最常做反的一点。
+界面文案必须描述**真实权限边界**，不允许「尽量不执行」这类模糊承诺（见[页面设计准则](UI-Design-Guidelines.md) §7.9）：
 
-对应的策略表：
+| 模式 | 标签 | 说明文案 |
+|---|---|---|
+| `agent` | 执行 | 自动选择工具：查接口、发请求、评估断言并落盘 |
+| `ask` | 问答 | 只回答问题，可用工具全为只读，不会发任何请求 |
+| `plan` | 计划 | 只输出测试计划（接口范围 / 用例矩阵 / 断言策略 / 风险） |
 
-```python
-POLICIES = {
-    # Plan 模式仍然保留写工具 schema（否则模型无法规划）
-    "agent": ResolvedPolicy("agent", READ | WRITE | EXEC, MUTATING,
-                            Gate.ALLOW, approve_plan=False, max_steps=40, prompt_fragment=AGENT_FRAGMENT),
-    "plan":  ResolvedPolicy("plan",  READ | WRITE | EXEC, MUTATING,
-                            Gate.RECORD, approve_plan=True,  max_steps=30, prompt_fragment=PLAN_FRAGMENT),
-    "ask":   ResolvedPolicy("ask",   READ,                MUTATING,
-                            Gate.DENY,   approve_plan=False, max_steps=8,  prompt_fragment=ASK_FRAGMENT),
+### 4.2 mode 随每轮请求上行
+
+`mode` 不是一个「建会话时发送一次」的参数。用户会在会话中途切换模式（先规划、看计划、再执行），
+因此 `use-chat.ts` 在每次提交时都把当前 `mode` 放进请求体：
+
+```jsonc
+POST /api/v1/chat/stream
+{
+  "instruction": "为登录接口设计一组测试用例",
+  "space_id": 238452574070505472,
+  "conversation_id": 238452574070505473,
+  "mode": "plan",
+  "skill_names": ["api-test-design"],
+  "environment_id": 238452574070505474
 }
 ```
 
----
+会话行上的 `mode` 只记录「默认值」，不参与本轮判定。服务端每轮重新解析策略，
+不把 `ModePolicy` 缓存在会话对象上——缓存了就会出现「中途切模式不生效」。
 
-## 七、参考实现：执行闸门
+### 4.3 渲染
 
-```python
-async def run_gate(call: ToolCall, policy: ResolvedPolicy, ctx: TurnContext) -> ToolResult:
-    # 1) 工具不在白名单 → 拒绝，但返回 tool result（不抛异常）
-    if call.name not in policy.allowed_tools:
-        return ToolResult.error(
-            f"当前为 {policy.mode} 模式，{call.name} 未开放。"
-            "请用文字说明打算做什么，由用户决定是否切换模式。"
-        )
-
-    # 2) 变更类工具 + 非 ALLOW 闸门 → RECORD 或 DENY
-    if call.name in policy.mutating_tools and policy.gate is not Gate.ALLOW:
-        if policy.gate is Gate.RECORD:
-            ctx.plan.append(PlanStep(tool=call.name, args=call.args, intent=ctx.current_intent))
-            return ToolResult.ok(f"已记入计划（未执行）：{call.name}")
-        return ToolResult.error("该动作需要写权限，已阻止。")
-
-    # 3) 高危操作 → 挂起等人工确认
-    if is_dangerous(call, ctx.cwd):
-        await ctx.emit("permission_request", redact(call))
-        approval = await ctx.wait_approval()        # ← 挂起点（需检查点支撑）
-        if not approval.granted:
-            return ToolResult.error("用户拒绝了该操作。")
-
-    return ToolResult.ok(await dispatch(call))
-```
-
-**Plan 模式批准后的续跑流程：**
-
-```
-Plan 轮次：LLM 规划 → 闸门 RECORD → plan buffer 累积 → 输出 plan 事件 → 落库检查点 → 结束本轮
-                                          ↓
-用户点击「批准」→ POST /turns/{tid}/approve {resume_token}（幂等）
-                                          ↓
-后端从检查点恢复 → mode 提升为 agent（仅本轮）→ 执行 plan buffer 中的步骤 → 继续 loop
-```
+`use-chat.ts` 用事件归约而非字符串拼接：把 `ChatEvent` 流归约成「已落库消息 + 本轮 overlay」两份状态。
+`tool_call` 与 `tool_result` 按 `id` 配对，落到同一张折叠卡片上；`ok=false` 着错误色，
+展开后保留原始错误文本。
 
 ---
 
-## 八、工程注意事项
+## 五、三模式的行为差异
 
-| # | 陷阱 | 后果 | 正确做法 |
+| 维度 | `agent` | `ask` | `plan` |
 |---|---|---|---|
-| 1 | Plan 模式过滤掉写工具 | 模型无法规划写操作 | schema 照给，闸门判 `RECORD` |
-| 2 | 无状态检查点 | 批准后第二次 HTTP 请求里没有上下文，无法续跑 | 落 `conversation_event` 让事件可重放，再做续跑 |
-| 3 | 审批无幂等 token | 用户连点两次，执行两遍 | `resume_token` + 幂等消费 |
-| 4 | 子代理权限放大 | Ask 模式里起一个子代理即可越权写文件 | 强制 `child.allowed_tools ⊆ parent.allowed_tools` |
-| 5 | 信任前端 mode | 绕过前端即可提权 | 服务端反查用户/组织权限上限 |
-| 6 | 工具列表变化打乱 prompt 缓存 | prompt cache 命中率下降，成本上升 | 把按模式变化的部分放在缓存断点之后 |
-| 7 | 权限拒绝抛异常 | 整个 loop 崩溃，用户只看到报错 | 返回 error tool result |
-| 8 | SSE 未禁缓冲 | 网关攒完整条流再一次性吐出，失去流式意义 | `X-Accel-Buffering: no` |
-| 9 | 在 Agent loop 里用同步阻塞 IO | 阻塞 asyncio 事件循环，拖垮所有并发用户 | 全部改用 `httpx.AsyncClient` / async DB driver |
+| 可用工具数 | 17 | 12（只读） | 12（只读） |
+| `send_request` | 有 | 无 | 无 |
+| `write_file` / `delete_file` | 有 | 无 | 无 |
+| `remember` / `forget` | 有 | 无 | 无 |
+| 最大步数 | 100 | 100 | 80 |
+| 典型产物 | 请求结果、落盘用例、记忆条目 | 分析结论 | 文字计划 |
+
+三种模式的 system prompt 指令不同（`agent/prompt/agent.py::AGENT_MODE_INSTRUCTIONS`），
+但那是**行为风格**的差异，不是权限的差异。权限差异全部由工具集承载。
+
+`ask` 与 `plan` 的区别在于指令措辞：`ask` 要求直接回答，`plan` 要求输出结构化的计划
+（测试目标、接口范围、用例矩阵、执行顺序与数据依赖、需要人工确认的风险点）。
+两者共享同一套只读工具。
 
 ---
 
-## 九、设计 ↔ 实现对照
+## 六、几个设计取舍
 
-本节的原始形态是「落地建议」（当时代码还在 LangGraph 上）。v1.0 重构后逐条核对如下：
+### 6.1 plan 模式也过滤掉写工具
 
-| 设计概念 | 落点（重构后） | 状态 | 说明 |
-|---|---|:--:|---|
-| `ResolvedPolicy` / `resolve_policy()` | `src/agent/modes.py`：`ModePolicy` + `policy_for()` | ✅ | 纯函数，无 IO，可直接单测 |
-| 工具过滤（schema 层不下发） | `filter_tools()` + `ToolBundle` | ✅ | `ask`/`plan` 只绑定 12 个只读工具 |
-| 执行闸门（唯一强制点） | `runner._execute` 查 `tool_map`，缺失即 `unknown tool` | ✅ | 未单独抽 `gate.py`，收敛在 runner 内 30 行 |
-| 统一 SSE（不按 mode 切 media type） | `POST /chat/stream`，固定 `text/event-stream` | ✅ | 六事件协议见 [SystemFlowchart.md](SystemFlowchart.md) §3.4 |
-| SSE 禁缓冲 | `_SSE_HEADERS` 含 `X-Accel-Buffering: no` | ✅ | 同时设 `Cache-Control: no-cache` |
-| 前端事件 reducer | `hooks/use-chat.ts` | ✅ | 维护「已落库消息 + 本轮 overlay」双状态 |
-| `tool-call-card.tsx` | `components/chat/tool-call-card.tsx` | ✅ | 可折叠，含 ARGS / RESULT / 耗时 |
-| `plan-card.tsx`（结构化计划卡） | — | ❌ | `plan` 模式目前输出**文字计划**，未结构化 |
-| `permission-request-card.tsx`（审批卡） | — | ❌ | 无审批流 |
-| Plan buffer / PlanStep + 落库 | — | ❌ | 无 `plan` / `plan_step` 表 |
-| 审批续跑（`interrupt()` + checkpointer） | — | ❌ | 未引入 LangGraph，也无等价的状态检查点 |
-| 事件日志表（`conversation_event`） | — | ❌ | 事件只在流里存在，落库的只有最终答案与 user 输入 |
-| 服务端反查权限上限（不信任前端 mode） | — | ⚠️ | 目前 `mode` 由前端传入，服务端只做 `normalize_mode` 归一化，不校验提权 |
+通用建议是「Plan 模式保留写工具 schema，闸门判 RECORD，这样模型才能规划出写操作」。
+本项目**故意反着做**，原因是产品语义不同：
 
-### 关于「Plan 模式过滤掉写工具」（§八 陷阱 1）
+- 那套建议的前提是「批准计划后由同一套 loop 续跑执行」，模型必须看得见写工具才能规划。
+- 本项目的 `plan` 语义是「输出一份给人看的计划」，计划由人带走到 `agent` 模式重跑，
+  不存在「在 plan 里排队等待执行」的步骤。因此直接砍掉写工具是更彻底的保证——
+  模型连表达「我要写文件」的能力都没有。
 
-原文档建议「Plan 不要过滤写工具，schema 照给，闸门判 `RECORD`」。本项目**故意反着做**，原因是产品定位不同：
+若将来补上审批续跑，这条取舍必须一起改回去，否则计划里的写操作会缺 schema。
 
-- 那套设计的前提是 Plan 执行完毕后要**续跑真实执行**，所以模型必须"看得见"写工具才能规划。
-- 本项目的 `plan` 语义是「只输出测试计划供人看」，计划由人带走到 `agent` 模式重跑，
-  不存在「plan 里排队等待执行」的步骤。因此过滤掉写工具是**更彻底的保证**——
-  模型连表达"我要写文件"的能力都没有。
+### 6.2 步数上限是兜底，不是成本控制
 
-若未来补上审批续跑（§九 的 ❌ 项），这条取舍必须一起改回去，否则计划里的写操作会缺 schema。
+`agent` / `ask` 上限 100 步、`plan` 80 步。早期取 12 / 8，实测在真实回归场景里不够用：
+「读 20 个接口定义 → 逐个发请求 → 逐条断言」必然超过 12 步，触发中止后用户只能重来。
 
-### 未落地项的共同前提
+上限的作用是兜住模型在两个工具之间来回试探的死循环。成本控制靠的是
+token 统计（`llm_log`）与技能收窄工具集，不是靠砍步数。
 
-三个 ❌ 项（审批卡 / 计划结构化 / 事件日志）其实指向同一个缺失：**会话状态缺一个可恢复的检查点**。
-当前一轮请求的生命周期完全绑在 HTTP 连接上，连接断了就没有「这一轮跑到哪」的记录。
-补齐路径：先加 `conversation_event` 表（`seq` / `type` / `payload`）让事件可重放，再谈审批与续跑。
+### 6.3 技能只能收窄
+
+`Skill.allowed_tools` 与模式白名单取交集，永不并集。技能是用户可导入的内容（zip 包），
+如果它能放开模式禁用的工具，导入一个技能就等于提权。
+
+### 6.4 未实现的通用建议：`Gate` 四态
+
+设计上常把闸门抽象成 `ALLOW` / `RECORD` / `DENY` / `ESCALATE` 四态。
+本项目只实现了 `ALLOW` 与 `DENY`（以「工具不在表中」的形式），
+`RECORD` 与 `ESCALATE` 依赖审批流与检查点，当前没有（见 §七）。
 
 ---
 
-## 十、参考资料
+## 七、未实现的四件事
 
-- 差距分析与现有代码对标：[Mode-System-Gap-Analysis.md](Mode-System-Gap-Analysis.md)
-- LangGraph 人机协同：`interrupt()` / checkpointer
-- SSE 规范：W3C EventSource / `Last-Event-ID`
+这四项不是遗漏，是被明确推迟的，且互相依赖：
+
+| # | 缺口 | 现状 | 补齐的前置条件 |
+|---|---|---|---|
+| 1 | 服务端模式授权 | `mode` 由前端传入，服务端只做归一化，不校验调用者是否有权使用该模式 | 需要用户/租户权限模型；当前系统无登录体系 |
+| 2 | 人工审批 | 生产环境是硬拒绝，不是「挂起等确认」 | 需要审批卡组件 + 挂起/恢复机制 |
+| 3 | 结构化计划 | `plan` 输出的是文字计划，没有可勾选、可批准的步骤对象 | 需要 `plan` / `plan_step` 表与计划卡 |
+| 4 | 事件重放 | 事件只在流里存在，落库的只有消息与工具调用明细，断线无法续传 | 需要 `conversation_event` 表（`seq` / `type` / `payload`） |
+
+这四项的共同前提是**会话状态缺一个可恢复的检查点**：当前一轮请求的生命周期完全绑在 HTTP 连接上，
+连接断了就没有「这一轮跑到哪」的记录。`agent_run` + `agent_tool_call` 提供了**事后回放**能力
+（能查、能看轨迹），但没有提供**断点续跑**能力（不能从第 5 步接着跑）。
+
+补齐顺序建议：先做 4（事件落库），再做 3（计划结构化），最后做 2（审批）与 1（授权）。
+
+---
+
+## 八、修订记录
+
+| 日期 | 说明 |
+|---|---|
+| 2026-11-04 | v2.0：改为实现优先的写法，删除与实际端点不符的示例代码；步数上限 12/8 → 100/80；补「三模式行为差异」与四项缺口；删除对已归档差距分析文档的引用 |
+| 2026-10-20 | v0.2：核心落地，§九 增加设计↔实现逐条对照 |

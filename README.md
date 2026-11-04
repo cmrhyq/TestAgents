@@ -17,7 +17,7 @@
 
 Talk to your APIs in natural language. The agent picks its own tools — under a hard permission boundary.
 
-[Quick Start](#quick-start) · [Configuration](#configuration) · [Agent Runtime](#agent-runtime) · [Memory](#memory-system) · [Development](#development)
+[Quick Start](#quick-start) · [Model Setup](#2-configure-the-model) · [Agent Runtime](#agent-runtime) · [Memory](#memory-system) · [Development](#development)
 
 [中文](README_zh.md) | English
 
@@ -36,7 +36,7 @@ Talk to your APIs in natural language. The agent picks its own tools — under a
 - **Assertion engine** — JSONPath-based rules (`==`, `contains`, `matches`, `status_code`, `response_time`, …) exposed to the agent as tools
 - **Production guard** — environments flagged `is_production` reject write methods and out-of-domain URLs
 - **Graceful degradation** — ChromaDB and embeddings are off by default; the knowledge base falls back to lexical search instead of failing
-- Full pipeline persistence in SQLite (execution/report generation is currently read-only — see [Test Reports](#test-reports))
+- **Everything persisted** — messages, per-tool-call traces with HTTP request/response payloads, and per-LLM-call token and cost rows; a run can be replayed offline (see [Test Reports](#test-reports) and [Usage](#usage))
 
 ---
 
@@ -147,7 +147,7 @@ npm run dev
 - API docs: http://localhost:8000/docs
 - UI: http://localhost:5173
 
-> On first run the database (`backend/db/TestAgents.db`), all 15 tables, and the migration are created automatically.
+> On first run the database (`backend/db/TestAgents.db`), all 12 tables, and the migrations are created automatically.
 > Space directories under `backend/workspaces/` are created the first time you create a space.
 
 ---
@@ -192,9 +192,9 @@ LLMTestAgent/
 
 | Mode | Meaning | Tools | Max steps |
 |---|---|:--:|:--:|
-| `agent` (default) | Pick tools and actually test | 17 | 12 |
-| `ask` | Answer questions only | 12 (read-only) | 12 |
-| `plan` | Produce a plan, execute nothing | 12 (read-only) | 8 |
+| `agent` (default) | Pick tools and actually test | 17 | 100 |
+| `ask` | Answer questions only | 12 (read-only) | 100 |
+| `plan` | Produce a plan, execute nothing | 12 (read-only) | 80 |
 
 `ask` / `plan` never receive `send_request`, `write_file`, `delete_file`, `remember`, or `forget`.
 Selecting a skill can only **narrow** this set further, never widen it.
@@ -207,10 +207,12 @@ Selecting a skill can only **narrow** this set further, never widen it.
 | HTTP | `list_environments`, `send_request` | Write methods rejected on production environments; URL must belong to that environment |
 | Data | `get_space_endpoints`, `get_endpoint_detail_by_id`, `search_space` | Always filtered by `space_id` |
 | Memory | `recall`, `remember`, `forget` | Writes are mirrored to `memory/MEMORY.md` |
-| Usage | `/api/v1/usage` | `GET /stats` — token and cost aggregated by space / conversation / window |
 | Knowledge | `knowledge_search` | Falls back to lexical search when vectors are unavailable |
 | Skills | `list_skills`, `read_skill` | Read-only |
 | Assertions | `evaluate_assertions`, `extract_jsonpath` | Pure functions |
+
+Tool calls are recorded in `agent_tool_call` (arguments, result, HTTP request/response with
+sensitive headers masked), so any run can be replayed offline at `/runs/:id`.
 
 ### SSE events
 
@@ -289,6 +291,7 @@ Import a zip via `POST /api/v1/skills/import` (≤20MB, path escape rejected).
 | Skills | `/api/v1/skills` | List / detail / zip import / enable |
 | Memory | `/api/v1/memories` | Update / delete an entry |
 | Knowledge | `/api/v1/documents` | Chunks / reindex / delete |
+| Usage | `/api/v1/usage/stats` | Token and cost aggregated by space / conversation / window |
 | OpenAPI | `/api/v1/spaces/parse/openapi/{space_id}` · `/api/v1/workflows/upload/openapi` | Parse and persist a spec |
 
 ### Example Requests
@@ -340,12 +343,13 @@ SQLite + SQLAlchemy 2.0, snowflake IDs (non-autoincrement), created and migrated
 | `space` | Test space (owns a workspace directory) |
 | `environment` | Environment config (`is_production` gate) |
 | `endpoint` | Parsed API definitions |
-| `test_run` / `test_case` / `test_result` / `test_summary` / `report` | Execution and reporting |
+| `agent_run` | One row per ReAct turn: mode, status, tool counters, token and cost totals |
+| `agent_tool_call` | One row per tool call: arguments, result, HTTP request/response |
 | `conversation` / `message` | Sessions (`mode`, `skill_names`, `environment_id`) |
 | `space_memory` | Cross-session memory |
 | `knowledge_document` / `knowledge_chunk` | Knowledge base |
 | `skill` | Skill discovery cache + enable flag |
-| `llm_log` | LLM call accounting: real model, tokens, routing tier, cost, attributed to space + conversation |
+| `llm_log` | LLM call accounting: real model, tokens, routing tier, cost, attributed to space / conversation / run |
 
 ### Reset Database
 

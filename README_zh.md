@@ -17,7 +17,7 @@
 
 用自然语言指挥测试。Agent 自己挑工具，但工具边界由代码硬性决定。
 
-[快速开始](#快速开始) · [配置说明](#配置说明) · [Agent 运行时](#agent-运行时) · [记忆系统](#记忆系统) · [开发指南](#开发指南)
+[快速开始](#快速开始) · [模型配置](#2-配置模型) · [Agent 运行时](#agent-运行时) · [记忆系统](#记忆系统) · [开发指南](#开发指南)
 
 中文 | [English](README.md)
 
@@ -36,7 +36,7 @@
 - **断言引擎** — 基于 JSONPath 的规则（`==`、`contains`、`matches`、`status_code`、`response_time` 等），以工具形式暴露给 Agent
 - **生产环境闸门** — 标记 `is_production` 的环境拒绝写方法与越界域名
 - **优雅降级** — ChromaDB 与 embedding 默认关闭，知识库自动走词法检索而不是直接报错
-- SQLite 全链路持久化（报告改为按 run 实时聚合，见 [测试报告](#测试报告)）
+- **全链路持久化** —— 消息、每次工具调用（含 HTTP 请求/响应正文）与每次 LLM 调用的 token/成本都落库，一轮执行可离线回放（见 [测试报告](#测试报告) 与 [使用示例](#使用示例)）
 
 ---
 
@@ -148,7 +148,7 @@ npm run dev
 - 接口文档：http://localhost:8000/docs
 - 前端界面：http://localhost:5173
 
-> 首次运行会自动创建数据库（`backend/db/TestAgents.db`）、15 张表并执行迁移。
+> 首次运行会自动创建数据库（`backend/db/TestAgents.db`）、12 张表并执行迁移。
 > `backend/workspaces/` 下的空间目录在首次创建空间时生成。
 
 ---
@@ -193,9 +193,9 @@ LLMTestAgent/
 
 | 模式 | 语义 | 工具数 | 最大步数 |
 |---|---|:--:|:--:|
-| `agent`（默认） | 自动挑工具执行测试 | 17 | 12 |
-| `ask` | 只回答问题 | 12（只读） | 12 |
-| `plan` | 只出计划，不执行 | 12（只读） | 8 |
+| `agent`（默认） | 自动挑工具执行测试 | 17 | 100 |
+| `ask` | 只回答问题 | 12（只读） | 100 |
+| `plan` | 只出计划，不执行 | 12（只读） | 80 |
 
 `ask` / `plan` 永远拿不到 `send_request`、`write_file`、`delete_file`、`remember`、`forget`。
 选择技能只会在该集合上**继续收窄**，绝不放宽。
@@ -211,6 +211,9 @@ LLMTestAgent/
 | 知识库 | `knowledge_search` | 向量不可用时降级词法检索 |
 | 技能 | `list_skills`、`read_skill` | 只读 |
 | 断言 | `evaluate_assertions`、`extract_jsonpath` | 纯函数 |
+
+每次工具调用都会写入 `agent_tool_call`（入参、结果、HTTP 请求/响应，敏感头已脱敏），
+可在 `/runs/:id` 离线回放某一轮的完整轨迹。
 
 ### SSE 事件
 
@@ -340,12 +343,13 @@ SQLite + SQLAlchemy 2.0，雪花 ID（非自增），首次运行自动建表并
 | `space` | 测试空间（持有工作目录） |
 | `environment` | 环境配置（`is_production` 闸门） |
 | `endpoint` | 解析后的接口定义 |
-| `test_run` / `test_case` / `test_result` / `test_summary` / `report` | 执行与报告 |
+| `agent_run` | 一轮 ReAct 对话一行：模式、状态、工具计数、token 与成本合计 |
+| `agent_tool_call` | 单次工具调用一行：入参、结果、HTTP 请求/响应 |
 | `conversation` / `message` | 会话（`mode`、`skill_names`、`environment_id`） |
 | `space_memory` | 跨会话记忆 |
 | `knowledge_document` / `knowledge_chunk` | 知识库 |
 | `skill` | 技能发现缓存 + 启用开关 |
-| `llm_log` | LLM 调用账本：真实模型 / tokens / 路由档位 / 成本，按空间与会话归因 |
+| `llm_log` | LLM 调用账本：真实模型 / tokens / 路由档位 / 成本，按空间、会话、执行记录归因 |
 
 ### 重置数据库
 
