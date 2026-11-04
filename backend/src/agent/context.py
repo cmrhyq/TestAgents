@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
 from src.agent.modes import ModePolicy
 
 # prompt 总长上限：过长会推高成本，并削弱模型对中段内容的注意力
@@ -16,29 +17,6 @@ MAX_PROMPT_CHARS = 12_000
 
 # 单条记忆的上限，避免单条超长记忆占满预算
 MAX_MEMORY_CHARS = 3_000
-
-_BASE_PERSONA = """你是 TestAgents 的测试智能体，工作在一个专门的 API 测试空间里。
-
-你的角色是「懂业务的测试工程师」，不是聊天机器人：
-- 先弄清被测对象（接口清单、请求/响应结构、鉴权方式），再动手
-- 给出结论时说明依据，不要含糊其辞
-- 不确定的事情直接说不确定，不要编造接口字段或接口行为
-- 用户的真实意图是「把测试做好」，不是「聊得开心」，所以简洁、准确、可执行"""
-
-_TOOL_RULES = """## 工作目录与工具约定
-
-- 所有文件路径都是**相对当前空间根目录**的路径（如 `AGENTS.md`、`testcases/login.md`）。
-  不要使用绝对路径，也不要用 `../`，这类路径会被直接拒绝。
-- 目录结构：
-  - `AGENTS.md` —— 本空间的长期测试约定（可读可改，不要删）
-  - `memory/MEMORY.md` —— 记忆镜像，由系统生成，只读
-  - `docs/` —— 领域知识库源文档（需求/接口文档）
-  - `testcases/` —— 生成的用例与测试脚本
-  - `artifacts/` —— 响应体、报告、导出文件
-- 有价值的产物要**落盘**到 `testcases/` 或 `artifacts/`，不要只留在对话里——
-  文件才是可复用的资产。
-- 发送请求前先 `list_environments` 确认打的是哪个环境；生产环境会被拦截，
-  遇到拦截要如实告知用户，不要尝试绕过。"""
 
 
 @dataclass(slots=True)
@@ -72,11 +50,11 @@ def build_system_prompt(
         完整 system prompt
     """
     # [1] 人设 + [2] 模式指令：永不裁剪
-    head = f"{_BASE_PERSONA}\n\n## 当前工作模式\n\n{policy.instruction}"
+    head = f"{AGENT_BASE_PERSONA}\n\n## 当前工作模式\n\n{policy.instruction}"
     # [3] 空间上下文
     space_block = _render_space(space)
     # [6] 工具规则：永不裁剪
-    rules = _TOOL_RULES
+    rules = AGENT_TOOL_RULES
 
     fixed = "\n\n".join([head, space_block, rules])
 

@@ -10,9 +10,9 @@ import json
 from langchain_core.tools import BaseTool, tool
 
 from src.agent.tools.assertion_engine import AssertionEngine
-from src.agent.tools.common import as_object
 from src.agent.tools.jsonpath import extract_jsonpath as _extract_jsonpath
 from src.core.logging import get_logger
+from utils.json_utils import as_object
 
 logger = get_logger(__name__)
 

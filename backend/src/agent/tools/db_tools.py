@@ -15,8 +15,8 @@ from langchain_core.tools import BaseTool, tool
 from sqlalchemy.orm import Session
 
 from src.core.logging import get_logger
-from src.agent.tools.common import as_object
 from src.data.services import EndpointService, SpaceService
+from utils.json_utils import as_object
 
 logger = get_logger(__name__)
 
