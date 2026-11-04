@@ -14,17 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from data.constant.workspace import WORKSPACE_SKIP_DIRS, WORKSPACE_ARCHIVE_PREFIX
 from src.core.config import resolve_backend_path
 from src.core.logging import get_logger
 from src.workspace import templates
 
 logger = get_logger(__name__)
-
-# 目录树与文件遍历时跳过的噪音目录
-_SKIP_DIRS = frozenset({"__pycache__", ".git", ".idea", ".mypy_cache", ".pytest_cache", ".ruff_cache", "node_modules"})
-
-# 归档目录前缀：删除空间时只改名保留现场
-_ARCHIVE_PREFIX = ".deleted-"
 
 
 class PathEscapeError(ValueError):
@@ -149,7 +144,7 @@ class WorkspaceManager:
             return None
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        target = self.root / f"{_ARCHIVE_PREFIX}{space_id}-{timestamp}"
+        target = self.root / f"{WORKSPACE_ARCHIVE_PREFIX}{space_id}-{timestamp}"
         space_dir.rename(target)
         logger.warning("空间目录已归档", space_id=str(space_id), archived=str(target))
         return target
@@ -209,7 +204,7 @@ class WorkspaceManager:
 
         nodes: list[dict[str, Any]] = []
         for entry in entries[:limit]:
-            if entry.name in _SKIP_DIRS:
+            if entry.name in WORKSPACE_SKIP_DIRS:
                 continue
             is_dir = entry.is_dir()
             node: dict[str, Any] = {

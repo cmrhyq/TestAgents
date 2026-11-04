@@ -15,6 +15,7 @@ from pathlib import Path
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from data.constant.memory import VALID_CATEGORIES, DEFAULT_RECALL_LIMIT, CATEGORY_TITLES
 from src.core.logging import get_logger
 from src.data.models.base import local_now
 from src.data.models.space_memory import SpaceMemory
@@ -22,18 +23,6 @@ from src.workspace.manager import WorkspaceManager
 
 logger = get_logger(__name__)
 
-VALID_CATEGORIES = ("fact", "decision", "preference", "issue", "glossary")
-
-CATEGORY_TITLES = {
-    "decision": "决策",
-    "preference": "偏好",
-    "issue": "已知问题",
-    "glossary": "术语",
-    "fact": "事实",
-}
-
-# 召回默认条数：记忆过多会稀释提示词中的关键信息并挤占工具结果空间
-DEFAULT_RECALL_LIMIT = 20
 
 SessionScope = Callable[[], AbstractContextManager[Session]]
 

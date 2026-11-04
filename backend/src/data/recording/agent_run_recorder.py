@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from src.agent.recording import RunRecorder, ToolOutcome
 from src.core.logging import get_logger
-from src.data.constant.tool_names import HTTP_TOOL_NAME
+from src.data.constant.agent import HTTP_TOOL_NAME
 from src.data.models.base import local_now
 from src.utils.id import next_id
 from src.utils.json_utils import safe_json_loads
@@ -38,7 +38,6 @@ MAX_TITLE_CHARS = 200
 MAX_URL_CHARS = 2_000
 MAX_CALL_ID_CHARS = 128
 
-HTTP_TOOL_NAME = "send_request"
 
 #: 需要打码的请求/响应头，大小写不敏感
 _SENSITIVE_HEADERS = (

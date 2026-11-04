@@ -1,7 +1,7 @@
 from sqlalchemy import Row, case, delete, func, select
 from sqlalchemy.orm import Session, defer
 
-from src.data.constant.tool_names import HTTP_TOOL_NAME
+from src.data.constant.agent import HTTP_TOOL_NAME
 from src.data.models.agent_run import AgentRun
 from src.data.models.agent_tool_call import AgentToolCall
 from src.data.repositories.base import BaseRepository, RunScopedRepositoryMixin

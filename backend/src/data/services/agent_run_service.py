@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from data.constant.agent import DEFAULT_BATCH_SIZE
 from src.core.logging import get_logger
 from src.data.models.agent_run import AgentRun
 from src.data.repositories import AgentRunRepository, AgentToolCallRepository
@@ -9,9 +10,6 @@ from src.data.repositories.agent_run_repository import cutoff_before
 from src.data.services.base_service import BaseService
 
 logger = get_logger(__name__)
-
-#: 清理时每批处理的执行记录条数
-DEFAULT_BATCH_SIZE = 500
 
 
 class AgentRunService(BaseService[AgentRun, AgentRunRepository]):

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+from data.constant.agent import MAX_HISTORY_MESSAGES, AGENTS_FILE
 from src.agent.events import FinalEvent, ErrorEvent, render
 from src.agent.modes import normalize_mode
 from src.agent.runner import RunRequest, run as run_agent
@@ -26,19 +27,11 @@ from src.data.services.environment_service import EnvironmentService
 
 logger = get_logger(__name__)
 
-# 注入 LLM 的历史消息条数上限，同时控制 token 成本与超长上下文带来的指令漂移
-MAX_HISTORY_MESSAGES = 20
-
-# 空间约定文件与记忆镜像的路径，相对空间根目录
-AGENTS_FILE = "AGENTS.md"
-MEMORY_FILE = "memory/MEMORY.md"
-
 
 class ChatStreamService:
     """chat 会话编排：会话落库、上下文装配、事件下发、回答落库。"""
 
     # 落库
-
     def ensure_conversation(self, body) -> int:
         """确保会话存在并返回 ``conversation_id``，同时把 user 消息落库。
 

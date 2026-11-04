@@ -6,7 +6,7 @@
 import pytest
 
 from src.agent.context import (
-    MAX_PROMPT_CHARS,
+    AGENT_MAX_PROMPT_CHARS,
     SpaceSnapshot,
     build_system_prompt,
 )
@@ -102,11 +102,11 @@ class TestTruncation:
     """超长输入的裁剪顺序与长度上限。"""
 
     def test_long_skills_trimmed_first(self):
-        huge_skill = "<skill name=\"x\">" + "技" * (MAX_PROMPT_CHARS * 2) + "</skill>"
+        huge_skill = "<skill name=\"x\">" + "技" * (AGENT_MAX_PROMPT_CHARS * 2) + "</skill>"
 
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"), skill_blocks=huge_skill)
 
-        assert len(prompt) <= MAX_PROMPT_CHARS + 500
+        assert len(prompt) <= AGENT_MAX_PROMPT_CHARS + 500
         # 规则块不应被裁剪
         assert "计划模式" not in prompt
         assert "问答模式" not in prompt or True
@@ -117,7 +117,7 @@ class TestTruncation:
 
         prompt = build_system_prompt(SNAPSHOT, policy_for("ask"), memories=huge_memory)
 
-        assert len(prompt) <= MAX_PROMPT_CHARS + 500
+        assert len(prompt) <= AGENT_MAX_PROMPT_CHARS + 500
         assert "问答模式" in prompt
 
     def test_no_truncation_when_short(self):

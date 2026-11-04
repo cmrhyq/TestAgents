@@ -11,10 +11,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-# 名称规范：小写字母/数字/连字符，不允许下划线与大写，长度 1-64
-_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-
-_FRONTMATTER_DELIMITER = "---"
+from data.constant.skills import SKILL_NAME_PATTERN, SKILL_FRONTMATTER_DELIMITER
 
 
 class SkillManifestError(ValueError):
@@ -71,7 +68,7 @@ def parse_skill_md(text: str) -> SkillManifest:
     name = str(meta.get("name") or "").strip()
     if not name:
         raise SkillManifestError("SKILL.md 缺少必填字段 name")
-    if not _NAME_PATTERN.match(name):
+    if not SKILL_NAME_PATTERN.match(name):
         raise SkillManifestError(
             f"name 格式非法: {name}（要求小写字母/数字/连字符，1-64 位，如 api-test-design）"
         )
@@ -93,13 +90,13 @@ def parse_skill_md(text: str) -> SkillManifest:
 def _split_frontmatter(text: str) -> tuple[str, str]:
     """拆出 frontmatter 与正文，开头 BOM 会被忽略。"""
     stripped = (text or "").lstrip("\ufeff")
-    if not stripped.startswith(_FRONTMATTER_DELIMITER):
+    if not stripped.startswith(SKILL_FRONTMATTER_DELIMITER):
         raise SkillManifestError("SKILL.md 必须以 '---' 包裹的 frontmatter 开头")
 
     lines = stripped.splitlines()
     closing = None
     for index in range(1, len(lines)):
-        if lines[index].strip() == _FRONTMATTER_DELIMITER:
+        if lines[index].strip() == SKILL_FRONTMATTER_DELIMITER:
             closing = index
             break
 

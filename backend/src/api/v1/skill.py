@@ -10,15 +10,13 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from data.constant.constants import MAX_ZIP_BYTES
 from src.api.deps import get_db
 from src.core.errors import NotFoundError, ValidationError
 from src.skill.registry import SkillRegistry
 from src.skill.service import SkillImportError, get_skill_service
 
 router = APIRouter(prefix="/skills", tags=["技能管理"])
-
-# 单个 skill 包上限 20MB
-MAX_ZIP_BYTES = 20 * 1024 * 1024
 
 
 class SkillItem(BaseModel):

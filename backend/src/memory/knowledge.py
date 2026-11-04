@@ -18,6 +18,7 @@ from typing import Any, Protocol
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from data.constant.memory import TEXT_SUFFIXES, MAX_DOCUMENT_BYTES, CHUNK_SIZE, CHUNK_OVERLAP
 from src.core.logging import get_logger
 from src.data.models.base import local_now
 from src.data.models.knowledge import KnowledgeChunk, KnowledgeDocument
@@ -25,14 +26,6 @@ from src.utils.id import next_id
 from src.workspace.manager import WorkspaceManager
 
 logger = get_logger(__name__)
-
-# 切片参数：800 字符约对应 400-600 个中文词；100 字符重叠避免答案被切断在边界
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 100
-
-MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
-
-TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".log", ".csv", ".sql", ".py"}
 
 SessionScope = Callable[[], AbstractContextManager[Session]]
 

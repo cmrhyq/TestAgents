@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from data.constant.constants import SSE_MEDIA_TYPE
 from src.agent.events import ErrorEvent, render
 from src.core.logging import get_logger
 from src.data.schemas.conversation import ChatStreamRequest
@@ -19,8 +20,6 @@ from src.data.services.chat_stream_service import ChatStreamService
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["对话"])
-
-SSE_MEDIA_TYPE = "text/event-stream; charset=utf-8"
 
 # X-Accel-Buffering: no 必须设置，否则 nginx 会缓存整条流后一次性下发
 _SSE_HEADERS = {

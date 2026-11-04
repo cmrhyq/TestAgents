@@ -10,13 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
+from data.constant.agent import AGENT_MAX_PROMPT_CHARS, AGENT_MAX_MEMORY_CHARS
 from src.agent.modes import ModePolicy
-
-# prompt 总长上限：过长会推高成本，并削弱模型对中段内容的注意力
-MAX_PROMPT_CHARS = 12_000
-
-# 单条记忆的上限，避免单条超长记忆占满预算
-MAX_MEMORY_CHARS = 3_000
 
 
 @dataclass(slots=True)
@@ -35,7 +30,7 @@ def build_system_prompt(
     policy: ModePolicy,
     memories: list[dict[str, Any]] | None = None,
     skill_blocks: str = "",
-    max_chars: int = MAX_PROMPT_CHARS,
+    max_chars: int = AGENT_MAX_PROMPT_CHARS,
 ) -> str:
     """组装本轮 system prompt。
 
@@ -111,8 +106,8 @@ def _render_memories(memories: list[dict[str, Any]]) -> str:
         lines.append(f"- **[{category}] {title}**：{content}")
 
     block = "\n".join(lines)
-    if len(block) > MAX_MEMORY_CHARS:
-        return block[:MAX_MEMORY_CHARS] + "\n…（记忆过多，已截断）"
+    if len(block) > AGENT_MAX_MEMORY_CHARS:
+        return block[:AGENT_MAX_MEMORY_CHARS] + "\n…（记忆过多，已截断）"
     return block
 
 

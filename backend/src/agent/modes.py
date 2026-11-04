@@ -11,12 +11,8 @@ from dataclasses import dataclass
 from langchain_core.tools import BaseTool
 
 from agent.prompt.agent import AGENT_MODE_INSTRUCTIONS
+from data.constant.agent import AGENT_PLAN_MAX_STEPS, AGENT_DEFAULT_MAX_STEPS
 from data.enum.agent import Mode
-
-# 默认模式的最大工具调用轮次。兜住模型陷入死循环的情况。
-DEFAULT_MAX_STEPS = 100
-# 计划模式只需要读信息 + 输出计划，轮次更少
-PLAN_MAX_STEPS = 80
 
 # 有副作用的工具：改动外部状态或持久化数据
 SIDE_EFFECT_TOOL_NAMES = frozenset(
@@ -103,7 +99,7 @@ def policy_for(raw: str | Mode | None) -> ModePolicy:
         mode=mode,
         allow_side_effects=mode is Mode.AGENT,
         instruction=AGENT_MODE_INSTRUCTIONS[mode],
-        max_steps=PLAN_MAX_STEPS if mode is Mode.PLAN else DEFAULT_MAX_STEPS,
+        max_steps=AGENT_PLAN_MAX_STEPS if mode is Mode.PLAN else AGENT_DEFAULT_MAX_STEPS,
     )
 
 

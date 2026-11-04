@@ -4,7 +4,6 @@
 """
 
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -115,15 +114,6 @@ class LoggingConfig(BaseModel):
     debug: bool = Field(default=False, deprecated="debug参数已废弃，请使用format字段", description="调试模式(已废弃)")
 
 
-class LangSmithConfig(BaseModel):
-    """LangSmith 可观测性配置。"""
-
-    enabled: bool = Field(default=False, description="是否启用 LangSmith 追踪")
-    api_key: str = Field(default="", description="LangSmith API 密钥")
-    space: str = Field(default="TestAgents", description="LangSmith 空间名称")
-    endpoint: str = Field(default="https://api.smith.langchain.com", description="LangSmith 服务端点")
-
-
 class AppConfig(BaseModel):
     """应用配置。"""
 
@@ -134,7 +124,6 @@ class AppConfig(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     skill: SkillConfig = Field(default_factory=SkillConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    langsmith: LangSmithConfig = Field(default_factory=LangSmithConfig)
     pricing: list[ModelPricing] = Field(
         default_factory=list,
         description="自定义模型费率，用于 litellm 定价表未收录的模型（影响 llm_log.cost_usd）",
@@ -176,29 +165,6 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     return AppConfig(**config_data)
 
 
-def _setup_langsmith(config: AppConfig) -> None:
-    """按配置写入或清除 LangSmith 追踪相关的环境变量。
-
-    LangChain / LangGraph 只依据环境变量决定是否上报追踪数据，故在启动时统一设置。
-
-    Args:
-        config: 应用配置
-    """
-    if config.langsmith.enabled and config.langsmith.api_key:
-        os.environ["LANGSMITH_TRACING"] = "true"
-        os.environ["LANGSMITH_API_KEY"] = config.langsmith.api_key
-        os.environ["LANGSMITH_SPACE"] = config.langsmith.space
-        if config.langsmith.endpoint:
-            os.environ["LANGSMITH_ENDPOINT"] = config.langsmith.endpoint
-        logger.info("LangSmith 追踪已启用, space=%s", config.langsmith.space)
-    else:
-        os.environ.pop("LANGSMITH_TRACING", None)
-        os.environ.pop("LANGSMITH_API_KEY", None)
-        os.environ.pop("LANGSMITH_SPACE", None)
-        os.environ.pop("LANGSMITH_ENDPOINT", None)
-        logger.info("LangSmith 追踪未启用")
-
-
 _config: AppConfig | None = None
 
 
@@ -215,7 +181,7 @@ def get_config() -> AppConfig:
 
 
 def init_config(config_path: str | None = None) -> AppConfig:
-    """加载配置并覆盖全局实例，同时同步 LangSmith 环境变量。
+    """加载配置并覆盖全局实例。
 
     Args:
         config_path: 配置文件路径；None 时使用默认路径
@@ -225,5 +191,4 @@ def init_config(config_path: str | None = None) -> AppConfig:
     """
     global _config
     _config = load_config(config_path)
-    _setup_langsmith(_config)
     return _config

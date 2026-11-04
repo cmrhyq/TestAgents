@@ -10,8 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-# 单个工具结果下发的字符上限，避免大响应体拖慢前端渲染
-MAX_TOOL_RESULT_CHARS = 4_000
+from data.constant.agent import AGENT_MAX_TOOL_RESULT_CHARS
 
 
 @dataclass(slots=True)
@@ -132,6 +131,6 @@ def render(event: AgentEvent, seq: int) -> str:
 
 def _truncate(content: str) -> str:
     """截断超长工具结果，并在尾部标注原始长度。"""
-    if len(content) <= MAX_TOOL_RESULT_CHARS:
+    if len(content) <= AGENT_MAX_TOOL_RESULT_CHARS:
         return content
-    return content[:MAX_TOOL_RESULT_CHARS] + f"\n…（已截断，原始长度 {len(content)} 字符）"
+    return content[:AGENT_MAX_TOOL_RESULT_CHARS] + f"\n…（已截断，原始长度 {len(content)} 字符）"
