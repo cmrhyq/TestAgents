@@ -41,13 +41,21 @@ const columns: Column<ReportRow>[] = [
     key: "run_id",
     header: "RUN",
     render: (val) => (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">#{String(val)}</span>
+      <span className="font-mono text-xs tabular-nums text-muted-foreground">{String(val)}</span>
     ),
   },
   {
     key: "title",
     header: "执行标题",
-    render: (val) => <span className="font-medium">{(val as string) || "—"}</span>,
+    // 标题可能很长：截断显示，鼠标移入用 title 给出完整内容
+    render: (val) => {
+      const title = (val as string) || "—";
+      return (
+        <span className="block max-w-[24rem] truncate font-medium" title={title}>
+          {title}
+        </span>
+      );
+    },
   },
   {
     key: "status",
