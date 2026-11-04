@@ -5,7 +5,7 @@ import api from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkspaceTreeResponse } from "@/lib/types";
 
-/** 空间工作目录树。这是 Agent 的沙箱，也是用户查看产物的入口。 */
+/** 空间工作目录树，即 Agent 的沙箱根目录。 */
 export function useWorkspaceTree(spaceId?: string | number | null, maxDepth?: number) {
   return useQuery<WorkspaceTreeResponse>({
     queryKey: [...queryKeys.workspace.tree(spaceId), maxDepth ?? null],
@@ -19,7 +19,7 @@ export function useWorkspaceTree(spaceId?: string | number | null, maxDepth?: nu
   });
 }
 
-/** 读取空间的 AGENTS.md（会被注入 system prompt）。 */
+/** 读取空间的 AGENTS.md，内容会注入 system prompt。 */
 export function useAgentsMd(spaceId?: string | number | null) {
   return useQuery<{ content: string }>({
     queryKey: queryKeys.workspace.agentsMd(spaceId),

@@ -1,4 +1,4 @@
-/** 全角标点 → 半角，避免 ** / ## 无法解析 */
+/** 全角星号与井号转半角，否则强调与标题语法无法解析。 */
 function normalizeTypography(content: string): string {
   return content.replace(/\uFF0A/g, "*").replace(/\uFF03/g, "#");
 }
@@ -7,7 +7,7 @@ function isFenceLine(line: string): boolean {
   return /^(`{3,}|~{3,})(\s*[\w-]*)?\s*$/.test(line.trim());
 }
 
-/** GFM 表格行（含分隔行 |---|） */
+/** 判断是否为 GFM 表格行，含分隔行。 */
 function isMarkdownTableLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed.includes("|")) {
@@ -31,7 +31,7 @@ function isMarkdownTableBlock(lines: string[], start: number): boolean {
   return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator);
 }
 
-/** 检测是否像 ASCII 框线图/流程图（排除 Markdown 表格与纯分隔线） */
+/** 判断是否像 ASCII 框线图或流程图，排除 Markdown 表格与纯分隔线。 */
 function isAsciiArtLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || isFenceLine(trimmed) || isMarkdownTableLine(trimmed)) {
@@ -68,8 +68,9 @@ function containsSubstantialMarkdown(text: string): boolean {
 }
 
 /**
- * LLM 有时用 ```text 包裹整段回复，导致内部 Markdown 全部变成纯文本。
- * 若围栏内主要是 Markdown 而非 ASCII 图，则去掉外层围栏。
+ * 去掉误加在整段回复外的 `text` 围栏。
+ *
+ * 仅当围栏内以 Markdown 为主、而非 ASCII 图时才去壳，否则会破坏图形对齐。
  */
 function unwrapErroneousTextFences(content: string): string {
   const trimmed = content.trim();
@@ -113,7 +114,7 @@ function isMostlyAsciiArt(text: string): boolean {
   return asciiCount / lines.length > 0.5;
 }
 
-/** 流式期间若围栏未闭合，临时补全以便解析围栏外的 Markdown */
+/** 流式期间围栏未闭合时临时补全，以便解析围栏外的 Markdown。 */
 function closeOpenFenceForStreaming(content: string, isStreaming: boolean): string {
   if (!isStreaming) {
     return content;
@@ -181,7 +182,7 @@ function preprocessUnfencedSegment(content: string): string {
   return result.join("\n");
 }
 
-/** 按围栏分段，仅对非围栏区域做 ASCII 图补全；已有围栏块原样保留 */
+/** 按围栏分段，仅对非围栏区域补全 ASCII 图块，已闭合的围栏原样保留。 */
 function preprocessWithFenceAwareness(content: string): string {
   const lines = content.split("\n");
   const output: string[] = [];
@@ -226,7 +227,7 @@ function preprocessWithFenceAwareness(content: string): string {
   return output.join("\n");
 }
 
-/** Markdown 渲染前统一预处理 */
+/** Markdown 渲染前的统一预处理入口。 */
 export function preprocessMarkdown(content: string, isStreaming = false): string {
   if (!content) {
     return content;

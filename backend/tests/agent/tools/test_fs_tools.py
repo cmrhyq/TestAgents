@@ -1,8 +1,6 @@
-"""空间沙箱文件工具测试。
+"""空间沙箱文件工具：读、写、列目录与删除。
 
-核心关注：**任何路径都不能逃出空间目录**。
-工具被 LLM 调用，参数来自模型输出——模型完全可能被诱导去读 ``../../.env``，
-所以沙箱必须在工具层强制，而不是靠 prompt 里写「请不要读工作区外的文件」。
+所有路径必须落在空间目录内。工具参数来自模型输出，沙箱在工具层强制，不依赖 prompt 约束。
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ SPACE_ID = 6001
 
 @pytest.fixture()
 def space(tmp_path) -> WorkspaceManager:
+    """在临时目录下创建空间并返回管理器。"""
     manager = WorkspaceManager(root=tmp_path / "workspaces")
     manager.create(SPACE_ID, "沙箱空间")
     return manager
@@ -24,10 +23,13 @@ def space(tmp_path) -> WorkspaceManager:
 
 @pytest.fixture()
 def tools(space) -> dict:
+    """按工具名索引的文件工具集合。"""
     return {tool.name: tool for tool in make_fs_tools(space_id=SPACE_ID, workspace=space)}
 
 
 class TestReadFile:
+    """读取：相对路径、缺失文件、越权路径与超大文件截断。"""
+
     def test_reads_relative_path(self, tools, space):
         space.resolve(SPACE_ID, "notes.md").write_text("内容", encoding="utf-8")
 
@@ -56,6 +58,8 @@ class TestReadFile:
 
 
 class TestWriteFile:
+    """写入：自动建父目录、拒绝越权路径与超限内容。"""
+
     def test_writes_file(self, tools, space):
         tools["write_file"].invoke({"path": "artifacts/out.md", "content": "结果"})
 
@@ -78,6 +82,8 @@ class TestWriteFile:
 
 
 class TestListDirectory:
+    """列目录：条目可见性与噪声目录过滤。"""
+
     def test_lists_entries(self, tools):
         result = tools["list_directory"].invoke({"path": "."})
 
@@ -94,6 +100,8 @@ class TestListDirectory:
 
 
 class TestDeleteFile:
+    """删除：受保护文件与目录不可删，越权路径被拒。"""
+
     def test_deletes_file(self, tools, space):
         target = space.resolve(SPACE_ID, "tmp.md")
         target.write_text("x", encoding="utf-8")
@@ -103,7 +111,7 @@ class TestDeleteFile:
         assert not target.exists()
 
     def test_refuses_to_delete_protected(self, tools, space):
-        """核心约定文件不允许被 Agent 删掉。"""
+        """核心约定文件不允许被删除。"""
         result = tools["delete_file"].invoke({"path": "AGENTS.md"})
 
         assert "不允许" in result

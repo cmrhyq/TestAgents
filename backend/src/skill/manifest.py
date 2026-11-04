@@ -1,10 +1,7 @@
 """SKILL.md 清单解析。
 
-Skill 包格式刻意对齐市面 Agent Skills 规范（``---`` YAML frontmatter + Markdown 正文），
-这样别人写的 skill 直接拷进目录就能用，不需要转换。
-
-解析器只做「校验 + 拆分」，**不做任何业务判断**——skill 该不该参与本轮对话、
-工具要不要取交集，都由 ``SkillService`` 与 ``agent.modes`` 决定。
+格式对齐通用 Agent Skills 规范：``---`` 包裹的 YAML frontmatter 加 Markdown 正文。
+解析器只做校验与拆分，不参与 skill 选择或工具裁剪决策。
 """
 
 from __future__ import annotations
@@ -14,7 +11,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-# 市面规范：小写字母/数字/连字符，不允许下划线与大写（长度 1-64）
+# 名称规范：小写字母/数字/连字符，不允许下划线与大写，长度 1-64
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 _FRONTMATTER_DELIMITER = "---"
@@ -39,8 +36,11 @@ class SkillManifest:
         """渲染为注入 system prompt 的文本块。
 
         Args:
-            max_chars: 正文上限；超限截断并显式标注，避免悄悄丢掉后半部分
-                （用户排障时必须知道「Agent 只看到了一半」）。
+            max_chars: 正文长度上限；超限截断并在文末标注截断位置，
+                以便排障时知道正文未完整注入
+
+        Returns:
+            ``<skill>`` 标签包裹的文本块
         """
         body = self.body
         if max_chars is not None and len(body) > max_chars:
@@ -91,7 +91,7 @@ def parse_skill_md(text: str) -> SkillManifest:
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
-    """拆出 frontmatter 与正文。"""
+    """拆出 frontmatter 与正文，开头 BOM 会被忽略。"""
     stripped = (text or "").lstrip("\ufeff")
     if not stripped.startswith(_FRONTMATTER_DELIMITER):
         raise SkillManifestError("SKILL.md 必须以 '---' 包裹的 frontmatter 开头")
@@ -112,6 +112,11 @@ def _split_frontmatter(text: str) -> tuple[str, str]:
 
 
 def _load_yaml(frontmatter: str) -> dict:
+    """解析 frontmatter 为字典。
+
+    Raises:
+        SkillManifestError: YAML 非法、为空或不是键值映射
+    """
     try:
         meta = yaml.safe_load(frontmatter)
     except yaml.YAMLError as exc:
@@ -125,7 +130,7 @@ def _load_yaml(frontmatter: str) -> dict:
 
 
 def _parse_allowed_tools(raw: object) -> list[str]:
-    """把 allowed_tools 归一化为字符串列表（容忍字符串/列表/缺失）。"""
+    """把 ``allowed_tools`` 归一化为字符串列表，容忍字符串、序列与缺失值。"""
     if not raw:
         return []
     if isinstance(raw, str):

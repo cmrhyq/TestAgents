@@ -1,11 +1,7 @@
-"""System prompt 组装。
+"""System prompt 组装与裁剪。
 
-顺序不是随意的：[1][2] 是**行为约束**，必须最靠前——模型对开头的指令最敏感，
-把「不许执行」写在 8000 字之后基本等于没写；[4][5] 是**内容注入**，靠后，
-避免稀释规则。
-
-裁剪顺序同理：超长时先砍 skill（可替代性最强，Agent 本来就能用工具自己做），
-再砍记忆，绝不动模式指令与工具规则。
+拼装顺序：行为约束在前，内容注入在后。超过总长上限时按 skill → 记忆的顺序裁剪，
+模式指令与工具规则不参与裁剪。
 """
 
 from __future__ import annotations
@@ -15,10 +11,10 @@ from typing import Any
 
 from src.agent.modes import ModePolicy
 
-# 总长上限：再长会显著推高成本，也会让模型开始忽略中段内容
+# prompt 总长上限：过长会推高成本，并削弱模型对中段内容的注意力
 MAX_PROMPT_CHARS = 12_000
 
-# 记忆条目单独的上限，防止单条巨型记忆吃掉整个预算
+# 单条记忆的上限，避免单条超长记忆占满预算
 MAX_MEMORY_CHARS = 3_000
 
 _BASE_PERSONA = """你是 TestAgents 的测试智能体，工作在一个专门的 API 测试空间里。

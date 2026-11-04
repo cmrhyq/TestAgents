@@ -1,7 +1,6 @@
-"""SnowflakeIdGenerator 单元测试。
+"""`SnowflakeIdGenerator` 的取值、位结构、并发与时钟约束。
 
-覆盖：初始化验证、唯一性、单调递增、位结构、
-      并发安全、时钟回拨、序列溢出、next_id 便捷函数。
+覆盖初始化校验、唯一性与单调递增、并发安全、时钟回拨与同毫秒序列溢出。
 """
 
 import threading
@@ -18,7 +17,7 @@ from src.utils.id.snow_id_utils import SnowflakeIdGenerator, next_id
 
 @pytest.mark.unit
 class TestSnowflakeIdGeneratorInit:
-    """初始化参数验证测试。"""
+    """初始化参数的取值范围校验。"""
 
     def test_valid_params(self):
         gen = SnowflakeIdGenerator(datacenter_id=0, worker_id=0)
@@ -59,7 +58,7 @@ class TestSnowflakeIdGeneratorInit:
 
 @pytest.mark.unit
 class TestSnowflakeIdGeneration:
-    """ID 生成功能测试。"""
+    """生成值范围、唯一性、单调性与位结构。"""
 
     def test_generates_positive_integer(self):
         gen = SnowflakeIdGenerator()
@@ -113,7 +112,7 @@ class TestSnowflakeIdGeneration:
 
 @pytest.mark.unit
 class TestSnowflakeIdConcurrency:
-    """并发安全测试。"""
+    """多线程并发生成不产生重复。"""
 
     def test_thread_safety(self):
         gen = SnowflakeIdGenerator()
@@ -144,7 +143,7 @@ class TestSnowflakeIdConcurrency:
 
 @pytest.mark.unit
 class TestSnowflakeIdClockDrift:
-    """时钟回拨测试。"""
+    """时钟回拨时抛出 `RuntimeError`。"""
 
     def test_clock_backward_raises_runtime_error(self):
         gen = SnowflakeIdGenerator()
@@ -164,7 +163,7 @@ class TestSnowflakeIdClockDrift:
 
 @pytest.mark.unit
 class TestSnowflakeIdSequenceOverflow:
-    """同一毫秒内序列号溢出测试。"""
+    """同毫秒内序列号耗尽后等待下一毫秒。"""
 
     def test_sequence_overflow_waits_next_millis(self):
         gen = SnowflakeIdGenerator(datacenter_id=0, worker_id=0, epoch=0)
@@ -196,7 +195,7 @@ class TestSnowflakeIdSequenceOverflow:
 
 @pytest.mark.unit
 class TestNextIdFunction:
-    """next_id 全局函数测试。"""
+    """模块级 `next_id` 与机器号环境变量。"""
 
     def test_returns_positive_integer(self):
         id_val = next_id()

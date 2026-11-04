@@ -11,9 +11,9 @@ interface ModeOption {
 }
 
 /**
- * 三种模式的说明文案要对齐**真实行为**，不是营销话术：
- * ask / plan 模式下模型手里根本没有写工具（后端工具白名单硬拦截），
- * 所以「不会执行」是可以承诺的，而不是「尽量不要执行」。
+ * 三种对话模式的展示文案与提示。
+ *
+ * 文案须与后端工具白名单一致：`ask` 与 `plan` 模式下写工具不可用。
  */
 const MODES: ModeOption[] = [
   {
@@ -36,13 +36,14 @@ const MODES: ModeOption[] = [
   },
 ];
 
+/** `ModeSelector` 的属性。 */
 export interface ModeSelectorProps {
   value: ConversationMode;
   onChange(mode: ConversationMode): void;
   disabled?: boolean;
 }
 
-/** 模式分段控件：蓝图式标签页，选中态工程蓝底。 */
+/** 对话模式分段控件。 */
 export function ModeSelector({ value, onChange, disabled }: ModeSelectorProps) {
   return (
     <div

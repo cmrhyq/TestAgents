@@ -1,3 +1,5 @@
+"""ORM 模型集合，各表的字段定义见对应模块。"""
+
 from src.data.models.agent_run import AgentRun
 from src.data.models.agent_tool_call import AgentToolCall
 from src.data.models.conversation import Conversation
@@ -20,7 +22,7 @@ __all__ = [
     "Conversation",
     "Message",
     "LLMLog",
-    # 重构新增
+    # 记忆、知识库与 Skill
     "SpaceMemory",
     "KnowledgeDocument",
     "KnowledgeChunk",

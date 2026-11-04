@@ -1,7 +1,6 @@
-"""SSE 事件协议测试。
+"""SSE 事件协议：帧格式与事件名。
 
-协议是前后端的契约，形状一旦定下就不能随意改。这里锁定三件事：
-帧格式（id/event/data 三行）、事件名、以及 tool_result 的截断行为。
+帧固定为 `id` / `event` / `data` 三行并以空行结尾；事件名是前端分发依据，改动即破坏契约。
 """
 
 import json
@@ -18,7 +17,7 @@ from src.agent.events import (
 
 
 def _parse(frame: str) -> tuple[int, str, dict]:
-    """把 SSE 帧拆回 (seq, event_name, payload)。"""
+    """把 SSE 帧拆回 `(seq, event_name, payload)`。"""
     lines = frame.strip().split("\n")
     seq = int(lines[0].removeprefix("id: "))
     name = lines[1].removeprefix("event: ")
@@ -27,6 +26,8 @@ def _parse(frame: str) -> tuple[int, str, dict]:
 
 
 class TestFrameFormat:
+    """帧格式：三行结构与结尾空行。"""
+
     def test_three_line_frame_with_blank_line(self):
         frame = render(TextDeltaEvent(content="hi"), seq=3)
 
@@ -42,6 +43,8 @@ class TestFrameFormat:
 
 
 class TestEvents:
+    """各事件类型的 payload 字段。"""
+
     def test_start_carries_context(self):
         event = StartEvent(conversation_id=1, space_id=2, mode="agent", skills=["a"])
         seq, name, payload = _parse(render(event, 0))
@@ -97,8 +100,12 @@ class TestEvents:
 
 
 class TestEventNames:
+    """事件名字符串的稳定性。
+
+    事件名是前端分发依据，改动即破坏契约。
+    """
+
     def test_names_are_stable(self):
-        """事件名是前端分发依据，改动等于破坏契约。"""
         assert StartEvent(1, 2, "agent", []).EVENT_NAME == "start"
         assert TextDeltaEvent("x").EVENT_NAME == "text_delta"
         assert ToolCallEvent("i", "n", {}).EVENT_NAME == "tool_call"

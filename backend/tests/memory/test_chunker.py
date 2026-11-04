@@ -1,12 +1,14 @@
-"""切片器测试。
+"""`chunk_text` 的分片行为与边界。
 
-要求：不超长、有重叠、优先在段落边界断开、不丢内容。
+覆盖长度上限、相邻重叠、段落边界优先、内容不丢失，以及 overlap >= size 的非法参数。
 """
 
 from src.memory.knowledge import chunk_text
 
 
 class TestChunkText:
+    """分片长度、重叠与边界对齐约束。"""
+
     def test_short_text_single_chunk(self):
         assert chunk_text("很短的一段话", size=800, overlap=100) == ["很短的一段话"]
 
@@ -25,7 +27,6 @@ class TestChunkText:
         text = "".join(str(i % 10) for i in range(300))
         chunks = chunk_text(text, size=100, overlap=20)
 
-        # 相邻两片应有 20 字符重叠
         assert chunks[0][-20:] == chunks[1][:20]
 
     def test_prefers_paragraph_boundary(self):
@@ -35,7 +36,6 @@ class TestChunkText:
 
         chunks = chunk_text(text, size=100, overlap=0)
 
-        # 第一片应在段落边界结束，而不是从 A 中间切断
         assert chunks[0] == paragraph_a
 
     def test_no_content_lost(self):

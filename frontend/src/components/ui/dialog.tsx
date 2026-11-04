@@ -1,3 +1,4 @@
+/** 对话框：Radix Dialog 的样式封装，含遮罩、标题与关闭按钮。 */
 import type { ComponentPropsWithoutRef, HTMLAttributes } from "react";
 import { forwardRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";

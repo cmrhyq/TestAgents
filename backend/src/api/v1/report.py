@@ -1,15 +1,3 @@
-"""测试报告路由。
-
-报告 = 一次执行（``run_id``）里所有 ``send_request`` 的请求/响应汇总。
-数据源是 ``agent_tool_call``，不再有独立的 report 表与报告文件。
-
-三个接口的分工（也是为了不把详情页撑爆）：
-
-1. ``GET /reports/``            一行一个 run，带聚合读数
-2. ``GET /reports/{run_id}``    本次执行的请求清单，**不含正文**
-3. ``GET /reports/{run_id}/requests/{request_id}``  单条正文，展开时才拉
-"""
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 

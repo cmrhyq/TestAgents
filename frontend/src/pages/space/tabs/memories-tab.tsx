@@ -27,8 +27,7 @@ const EMPTY_DRAFT: Draft = { title: "", content: "", category: "fact" };
 /**
  * 记忆 tab：按空间隔离的跨会话记忆。
  *
- * 记忆是**注入 prompt 的**，不是给人看的笔记——所以每条都要能一句话说清、
- * 独立成立。表单强制「标题必填」正是为了逼出这种写法：标题是注入时的要点行。
+ * 记忆会注入 system prompt，因此每条需独立成立；标题必填，作为注入时的要点行。
  */
 export function MemoriesTab({ spaceId }: { spaceId: string }) {
   const [category, setCategory] = useState<string | undefined>(undefined);
@@ -103,7 +102,6 @@ export function MemoriesTab({ spaceId }: { spaceId: string }) {
         </Button>
       </div>
 
-      {/* 新建 / 编辑表单 */}
       <Card className="bg-surface-primary/30">
         <CardContent className="space-y-2 pt-4">
           <div className="flex flex-wrap items-center gap-2">

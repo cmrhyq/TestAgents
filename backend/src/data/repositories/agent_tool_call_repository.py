@@ -15,18 +15,30 @@ _SUCCESS_CONDITION = AgentToolCall.http_status_code.between(200, 299)
 
 
 class AgentToolCallRepository(RunScopedRepositoryMixin[AgentToolCall], BaseRepository[AgentToolCall]):
-    """Agent 工具调用留痕数据访问"""
+    """工具调用留痕表数据访问。
+
+    留痕按执行记录（``run_id``）归属，随执行记录一并清理。
+    """
 
     def __init__(self, session: Session) -> None:
+        """绑定留痕模型。
+
+        Args:
+            session: 调用方持有的会话
+        """
         super().__init__(AgentToolCall, session)
 
     def list_by_run(self, run_id: int, include_body: bool = False) -> list[AgentToolCall]:
-        """按执行记录查询工具调用。
+        """按执行记录查询工具调用，按 ``seq`` 升序。
+
+        单条响应体上限 2MB，默认延迟加载该列，避免详情页一次拉回大量数据。
 
         Args:
-            run_id: 执行记录 ID
-            include_body: 是否包含响应体。默认 **不取**——单条响应体上限 2MB，
-                详情页一次拉回几十条会把内存和带宽都打爆。
+            run_id: 执行记录主键
+            include_body: 是否加载 ``response_body``，默认不加载
+
+        Returns:
+            工具调用列表，未加载的响应体在访问时触发额外查询
         """
         stmt = select(AgentToolCall).where(AgentToolCall.run_id == run_id).order_by(AgentToolCall.seq)
         if not include_body:
@@ -138,13 +150,31 @@ class AgentToolCallRepository(RunScopedRepositoryMixin[AgentToolCall], BaseRepos
         return rows, total
 
     def get_by_call_id(self, run_id: int, call_id: str) -> AgentToolCall | None:
+        """按执行记录与调用标识取单条留痕。
+
+        Args:
+            run_id: 执行记录主键
+            call_id: 模型侧的调用标识
+
+        Returns:
+            留痕实体；不存在时返回 None
+        """
         stmt = select(AgentToolCall).where(
             AgentToolCall.run_id == run_id, AgentToolCall.call_id == call_id
         ).limit(1)
         return self._session.scalars(stmt).first()
 
     def delete_by_run_ids(self, run_ids: list[int]) -> int:
-        """按执行 ID 批量删除留痕，返回删除行数。"""
+        """按执行记录批量删除留痕，走批量 DELETE 而非逐条删除。
+
+        副作用：写库（未提交），需调用方提交事务。
+
+        Args:
+            run_ids: 执行记录主键列表
+
+        Returns:
+            删除行数；入参为空时返回 0
+        """
         if not run_ids:
             return 0
 

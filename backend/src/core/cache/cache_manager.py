@@ -1,8 +1,6 @@
-"""
-数据缓存模块
+"""线程安全的进程内键值缓存，用于测试执行期间共享临时数据。
 
-该模块提供线程安全的单例数据缓存，用于在测试执行期间存储和共享数据。
-使用单例模式确保全局唯一实例，使用线程锁确保并发安全。
+单例实例全局唯一；``create_scoped`` 按 run_id 隔离命名空间，避免并发 run 互相污染。
 """
 
 import threading
@@ -10,25 +8,10 @@ from typing import Any, Optional
 
 
 class CacheManager:
-    """
-    线程安全的数据缓存类
+    """线程安全的数据缓存。
 
-    提供以下功能：
-    - 单例模式：确保全局只有一个缓存实例
-    - 线程安全：使用锁机制保护并发访问
-    - 基本操作：set, get, clear, has 方法
-    - 命名空间隔离：支持 run_id 级别的数据隔离，防止并发 workflow 互污染
-
-    使用示例：
-        cache = DataCache.get_instance()
-        cache.set("user_id", 12345)
-        user_id = cache.get("user_id")
-        cache.clear()
-
-        # 按 run_id 隔离数据
-        scoped = DataCache.create_scoped("run_123")
-        scoped.set("token", "abc")
-        scoped.clear()  # 只清除该命名空间
+    单例由 ``get_instance`` 以双重检查锁创建；``create_scoped`` 返回独立实例，
+    两者数据互不可见。所有读写都在实例锁内完成。
     """
 
     _instance: Optional["CacheManager"] = None
@@ -36,11 +19,10 @@ class CacheManager:
     _initialized = False
 
     def __init__(self, namespace: str = "") -> None:
-        """
-        构造函数
+        """初始化实例的存储容器与锁。
 
         Args:
-            namespace: 命名空间前缀，用于隔离不同 run 的缓存数据
+            namespace: 命名空间标识，用于区分不同 run 的缓存
         """
         if not CacheManager._initialized and namespace == "":
             self._data: dict[str, Any] = {}
@@ -53,13 +35,10 @@ class CacheManager:
 
     @classmethod
     def get_instance(cls) -> "CacheManager":
-        """
-        获取 DataCache 的单例实例
-
-        使用双重检查锁定模式确保线程安全的单例创建
+        """返回全局单例，首次调用时以双重检查锁创建。
 
         Returns:
-            CacheManager: 全局唯一的缓存实例
+            全局唯一的缓存实例
         """
         if cls._instance is None:
             with cls._lock:
@@ -71,16 +50,13 @@ class CacheManager:
 
     @classmethod
     def create_scoped(cls, namespace: str) -> "CacheManager":
-        """
-        创建一个带命名空间的独立缓存实例，用于隔离并发 workflow 数据。
-
-        每个 namespace 对应一个独立的缓存空间，互不影响。
+        """创建一个带独立命名空间与存储的缓存实例。
 
         Args:
-            namespace: 命名空间标识（建议使用 run_id）
+            namespace: 命名空间标识，建议传 run_id
 
         Returns:
-            CacheManager: 带命名空间的缓存实例
+            独立缓存实例，与单例实例不共享数据
         """
         instance = cls.__new__(cls)
         instance._data = {}
@@ -89,80 +65,68 @@ class CacheManager:
         return instance
 
     def set(self, key: str, value: Any) -> None:
-        """
-        在缓存中存储键值对
-
-        如果键已存在，则更新为新值
+        """写入键值对，键已存在时覆盖。
 
         Args:
             key: 缓存键
-            value: 要存储的值，可以是任意类型
+            value: 任意对象，不做序列化或拷贝
         """
         with self._data_lock:
             self._data[key] = value
 
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        从缓存中获取值
+        """读取缓存值。
 
         Args:
             key: 缓存键
-            default: 如果键不存在时返回的默认值
+            default: 键不存在时的返回值
 
         Returns:
-            Any: 存储的值，如果键不存在则返回 default
+            缓存值；键不存在时返回 default
         """
         with self._data_lock:
             return self._data.get(key, default)
 
     def has(self, key: str) -> bool:
-        """
-        检查缓存中是否存在指定的键
+        """判断键是否存在于本命名空间。
 
         Args:
-            key: 要检查的缓存键
+            key: 缓存键
 
         Returns:
-            bool: 如果键存在返回 True，否则返回 False
+            存在为 True，否则为 False
         """
         with self._data_lock:
             return key in self._data
 
     def clear(self) -> None:
-        """
-        清空缓存中的所有数据
-
-        用于测试会话结束时清理数据，防止数据泄漏（Requirements 3.5）
-        """
+        """清空本实例的全部缓存数据。"""
         with self._data_lock:
             self._data.clear()
 
     def get_all_keys(self) -> list[str]:
-        """
-        获取缓存中所有的键
+        """返回当前所有缓存键的快照。
 
         Returns:
-            list[str]: 所有缓存键的列表
+            键名列表，顺序与写入顺序一致
         """
         with self._data_lock:
             return list(self._data.keys())
 
     def size(self) -> int:
-        """
-        获取缓存中存储的键值对数量
+        """返回缓存中的键值对数量。
 
         Returns:
-            int: 缓存中的空间数量
+            键值对个数
         """
         with self._data_lock:
             return len(self._data)
 
     @classmethod
     def reset_instance(cls) -> None:
-        """
-        重置单例实例（主要用于测试）
+        """销毁单例实例，仅供测试使用。
 
-        警告：此方法会清除单例实例，仅应在测试环境中使用
+        副作用：清空单例数据并重置初始化标记。
         """
         with cls._lock:
             if cls._instance is not None:
@@ -171,12 +135,10 @@ class CacheManager:
                 cls._initialized = False
 
 
-# 便捷函数：获取缓存实例
 def get_cache() -> CacheManager:
-    """
-    获取数据缓存实例的便捷函数
+    """返回全局缓存单例。
 
     Returns:
-        CacheManager: 全局唯一的缓存实例
+        全局唯一的缓存实例
     """
     return CacheManager.get_instance()

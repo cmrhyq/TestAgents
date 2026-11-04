@@ -6,10 +6,9 @@ import { queryKeys } from "@/lib/query-keys";
 import type { Skill, SkillDetail, SkillListResponse } from "@/lib/types";
 
 /**
- * 列出可见 skill（内置 + 空间私有）。空间级同名 skill 覆盖内置。
+ * 列出可见 skill，含内置与空间私有，同名时空间级覆盖内置。
  *
- * ``spaceId`` 为空时只返回内置 skill——空间页之外的地方（如全局技能管理）
- * 用默认值即可，不需要挑空间。
+ * `spaceId` 为空时只返回内置 skill。
  */
 export function useSkills(spaceId?: string | number | null) {
   return useQuery<SkillListResponse>({
@@ -23,7 +22,7 @@ export function useSkills(spaceId?: string | number | null) {
   });
 }
 
-/** 取单个 skill 详情（含 SKILL.md 正文）。 */
+/** 读取单个 skill 详情，含 SKILL.md 正文。 */
 export function useSkill(name: string | null | undefined, spaceId?: string | number | null) {
   return useQuery<SkillDetail>({
     queryKey: queryKeys.skills.detail(`${name}:${spaceId ?? ""}`),
@@ -37,7 +36,7 @@ export function useSkill(name: string | null | undefined, spaceId?: string | num
   });
 }
 
-/** 启用 / 禁用 skill。禁用后不再出现在对话页的可选列表里。 */
+/** 启用或禁用 skill；禁用后不再出现在对话页的可选列表。 */
 export function useToggleSkill(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -58,7 +57,7 @@ export function useToggleSkill(spaceId?: string | number | null) {
   });
 }
 
-/** 导入 skill zip 包。 */
+/** 导入 skill zip 包，安装到指定空间。 */
 export function useImportSkill(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -67,7 +66,7 @@ export function useImportSkill(spaceId?: string | number | null) {
       const form = new FormData();
       form.append("file", file);
 
-      // space_id 是 query 参数（决定装到哪个空间），不是表单字段
+      // space_id 作为 query 参数传递，不放进 FormData
       const { data } = await api.post<SkillListResponse>("/skills/import", form, {
         params: spaceId ? { space_id: spaceId } : undefined,
         headers: { "Content-Type": "multipart/form-data" },

@@ -1,4 +1,7 @@
-"""全局业务异常 → HTTP 状态码映射测试。"""
+"""业务异常到 HTTP 状态码的映射。
+
+使用最小 FastAPI 应用，只注册异常 handler，不依赖真实路由。
+"""
 
 import pytest
 from fastapi import FastAPI
@@ -11,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture()
 def client() -> TestClient:
-    """构建带业务异常 handler 的最小应用。"""
+    """构建仅含业务异常 handler 的最小应用。"""
     app = FastAPI()
 
     def _handler(status_code: int):

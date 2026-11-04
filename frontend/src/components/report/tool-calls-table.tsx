@@ -93,12 +93,12 @@ function ExpandableRow({ call, bodyLoaded, loadingBody, onRequestBody }: Expanda
 
 interface ToolCallsTableProps {
   calls: AgentToolCall[];
-  /** 请求/响应正文是否已加载 */
+  /** 请求与响应正文是否已加载 */
   bodyLoaded?: boolean;
   loadingBody?: boolean;
   onRequestBody?: () => void;
   emptyText?: string;
-  /** true 时表头使用失败样式（用于「只看失败」的表） */
+  /** 表头使用失败样式，用于「只看失败」的表格 */
   danger?: boolean;
 }
 

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { cn } from "@/lib/utils";
 
-/** 图纸角标：四角十字墨线。 */
+/** 装饰性四角标记。 */
 function CornerMarks() {
   const base = "pointer-events-none absolute h-3 w-3 border-primary";
   return (
@@ -22,6 +22,7 @@ function CornerMarks() {
   );
 }
 
+/** 仪表盘：空间、接口、执行记录与平均成功率总览。 */
 export default function DashboardPage() {
   const { data: spacesData } = useSpaces({ page: 1, page_size: 1 });
   const { data: agentRunsData } = useAgentRuns();
@@ -33,9 +34,8 @@ export default function DashboardPage() {
     const totalEndpoints = endpointsData?.total ?? 0;
     const totalRuns = agentRunsData?.total ?? 0;
 
-    // 加权成功率：按调用次数汇总再相除，而不是「每个 run 的 success_rate 求平均」。
-    // 前者才是真实成功率——一个调了 1 次工具的 run 和一个调了 50 次的 run
-    // 在算术平均里权重相同，会把大盘数字带偏。
+    // 成功率按调用次数加权汇总，而非对每个 run 的失败率取算术平均，
+    // 否则调用 1 次与调用 50 次的 run 权重相同，会拉偏大盘数字。
     const totalCalls = runs.reduce((sum, r) => sum + r.tool_call_count, 0);
     const totalOk = runs.reduce((sum, r) => sum + r.ok_count, 0);
     const avgSuccessRate = totalCalls > 0 ? Math.round((totalOk / totalCalls) * 100) : 0;
@@ -57,7 +57,6 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Hero 标题块：图纸网格 + 四角标 + 注解式页头 */}
       <div className="relative overflow-hidden rounded-[4px] border border-border bg-card p-6 shadow-xs lg:p-8">
         <div className="bg-blueprint-grid absolute inset-0" aria-hidden="true" />
         <CornerMarks />
@@ -86,7 +85,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 统计读数带：mono 读数 + 竖墨线分隔 */}
       <div className="flex flex-col divide-y divide-border-subtle rounded-[4px] border border-border bg-card shadow-xs sm:flex-row sm:divide-x sm:divide-y-0">
         {statItems.map((item) => {
           const Icon = item.icon;

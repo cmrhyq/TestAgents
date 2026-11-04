@@ -1,11 +1,7 @@
 """空间工作目录的初始文件模板。
 
-每个新建空间会得到一套「开箱可用」的骨架文件：
-- ``AGENTS.md``：空间级智能体指令，用户可直接编辑，会注入 system prompt
-- ``memory/MEMORY.md``：跨会话记忆镜像（由 DB 渲染，只读）
-- ``docs/README.md``：说明往哪里放需求/接口文档（知识库源目录）
-
-模板用 ``str.format`` 占位，只暴露少量变量，避免模板里出现意外的花括号报错。
+新建空间时写入 ``AGENTS.md``、``memory/MEMORY.md`` 与 ``docs/README.md``。
+模板以 ``str.format`` 占位，非占位符的花括号需写成双花括号。
 """
 
 from __future__ import annotations

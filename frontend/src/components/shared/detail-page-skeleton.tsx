@@ -1,5 +1,4 @@
-/** 详情页加载骨架屏。 */
-
+/** 详情页加载骨架。 */
 export function DetailPageSkeleton() {
   return (
     <div className="flex h-64 items-center justify-center">

@@ -1,12 +1,7 @@
 """Skill 文件系统发现。
 
-**文件是真源**：每次需要 skill 内容都从 ``SKILL.md`` 读，不做 DB 缓存，
-避免「改了文件但 Agent 还在用旧内容」这类难查的问题。
-
-两级发现，空间级覆盖内置同名：
-
-    workspaces/{space_id}/.skills/{name}/SKILL.md   ← 优先级高
-    backend/skills/{name}/SKILL.md                  ← 随代码分发
+内容以文件为真源，每次读取都重新解析 ``SKILL.md``，不做 DB 缓存。
+分两级发现，空间级同名 skill 覆盖内置 skill。
 """
 
 from __future__ import annotations
@@ -38,11 +33,12 @@ class DiscoveredSkill:
 
     @property
     def name(self) -> str:
+        """skill 名，取自 frontmatter。"""
         return self.manifest.name
 
     @property
     def display_path(self) -> str:
-        """相对 backend 根的路径，供前端展示与入库。"""
+        """相对 backend 根的路径，用于前端展示与入库；不在根下时返回绝对路径。"""
         from src.core.config import get_backend_root
 
         try:
@@ -52,7 +48,9 @@ class DiscoveredSkill:
 
 
 class SkillRepository:
-    """扫描、定位、安装 skill 目录。
+    """扫描、定位与安装 skill 目录。
+
+    目录结构以文件系统为真源，本类不做缓存。
 
     Args:
         builtin_root: 内置 skill 根目录；None 时取配置 ``skill.builtin_root``
@@ -79,9 +77,15 @@ class SkillRepository:
     # ─── 发现 ────────────────────────────────────────────────────────────
 
     def discover(self, space_id: int | str | None) -> list[DiscoveredSkill]:
-        """扫描两级目录，返回去重后的 skill 列表（按名排序）。
+        """扫描两级目录，返回按名排序、空间级覆盖同名的 skill 列表。
 
-        空空间也要能工作：空间目录不存在时只会扫到内置 skill。
+        空间目录不存在时只返回内置 skill。
+
+        Args:
+            space_id: 空间 ID；None 时只扫描内置目录
+
+        Returns:
+            去重后的 skill 列表
         """
         found: dict[str, DiscoveredSkill] = {}
 
@@ -97,7 +101,15 @@ class SkillRepository:
         return sorted(found.values(), key=lambda s: s.name)
 
     def find(self, name: str, space_id: int | str | None = None) -> DiscoveredSkill | None:
-        """按名查找（空间级优先）。"""
+        """按名查找 skill，空间级优先。
+
+        Args:
+            name: skill 名
+            space_id: 空间 ID；None 时只查内置目录
+
+        Returns:
+            命中的 skill；不存在或格式非法时返回 None
+        """
         if space_id is not None:
             candidate = self._load(self._space_skill_dir(space_id) / name, SCOPE_SPACE)
             if candidate is not None:
@@ -105,10 +117,14 @@ class SkillRepository:
         return self._load(self.builtin_root / name, SCOPE_BUILTIN)
 
     def load_selected(self, names: list[str], space_id: int | str | None) -> list[DiscoveredSkill]:
-        """按名批量加载；不存在或格式非法的名字静默跳过。
+        """按名批量加载，不存在或格式非法的名字记录 warning 后跳过。
 
-        「用户选了但 skill 已被删」不应该让整轮对话失败——记录 warning 即可，
-        Agent 少一份方法论，但仍能正常工作。
+        Args:
+            names: skill 名列表
+            space_id: 空间 ID
+
+        Returns:
+            成功加载的 skill 列表，顺序与入参一致
         """
         result: list[DiscoveredSkill] = []
         for name in names:
@@ -122,7 +138,14 @@ class SkillRepository:
     # ─── 安装 ────────────────────────────────────────────────────────────
 
     def install_dir(self, space_id: int | str | None) -> Path:
-        """导入 skill 的目标根目录（会确保存在）。"""
+        """返回导入目标根目录，不存在时创建。
+
+        Args:
+            space_id: 空间 ID；None 表示内置目录
+
+        Returns:
+            目标目录路径
+        """
         if space_id is None:
             self.builtin_root.mkdir(parents=True, exist_ok=True)
             return self.builtin_root
@@ -134,15 +157,16 @@ class SkillRepository:
     # ─── 内部 ────────────────────────────────────────────────────────────
 
     def _space_skill_dir(self, space_id: int | str) -> Path:
+        """返回空间级 skill 根目录。"""
         return self.workspace.space_dir(space_id) / SPACE_SKILL_DIR
 
     def _scan(self, root: Path, scope: str) -> list[DiscoveredSkill]:
+        """扫描一层子目录；根目录不存在时返回空列表。"""
         if not root.is_dir():
             return []
 
         skills: list[DiscoveredSkill] = []
-        # 只看一层子目录：skill 是「目录即包」，不做无限递归，
-        # 否则 references/ 里放一个 SKILL.md 就会被误认为独立 skill
+        # 只扫一层：skill 以目录为单位，递归会让 references/ 下的 SKILL.md 被误认作独立 skill
         for child in sorted(root.iterdir()):
             if not child.is_dir() or child.name.startswith("."):
                 continue
@@ -152,6 +176,7 @@ class SkillRepository:
         return skills
 
     def _load(self, skill_dir: Path, scope: str) -> DiscoveredSkill | None:
+        """读取并解析目录下的 ``SKILL.md``，缺失或非法时返回 None。"""
         skill_file = skill_dir / SKILL_FILE
         if not skill_file.is_file():
             return None

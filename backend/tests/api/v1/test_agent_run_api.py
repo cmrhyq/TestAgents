@@ -1,15 +1,7 @@
-"""Agent 执行记录 API 测试（列表 / 详情 / 留痕 / 清理 / 报告新链路）。
+"""Agent 执行记录 API：列表、详情、工具调用、清理与报告。
 
-这批接口是「test_* → agent_*」改造后的对外入口，几条关键契约在这里锁死：
-
-1. ``DELETE /agent/runs/cleanup`` 必须命中清理逻辑，**不能**被 ``/{run_id}``
-   抢走路由（否则 "cleanup" 会被当 int 解析，直接 422）。
-2. ``running`` 状态的记录永远不进清理候选——它可能是进程被 kill 后残留的
-   活会话，也可能是正在跑的用户请求。
-3. 列表默认不返回 ``response_body``（可能是 MB 级），只有显式
-   ``include_body=true`` 才带出来。
-4. 报告不再有独立的 ``report`` 表：它按 ``run_id`` 聚合 ``agent_tool_call``
-   里 ``tool_name='send_request'`` 的行，成功率按 **HTTP 2xx** 计算。
+约束：`/cleanup` 路由必须排在 `/{run_id}` 之前，否则会被当作 int 解析返回 422；
+`running` 记录永不进入清理候选；列表默认不返回 body，需显式 `include_body=true`。
 """
 
 from __future__ import annotations
@@ -30,6 +22,7 @@ OTHER_SPACE_ID = 8802
 
 @pytest.fixture()
 def factory(tmp_path):
+    """构造含两个空间的临时库，返回 sessionmaker。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'agent_run.db'}")
     Base.metadata.create_all(engine)
     maker = sessionmaker(bind=engine, expire_on_commit=False)
@@ -47,6 +40,8 @@ def factory(tmp_path):
 
 @pytest.fixture()
 def client(factory) -> Generator[TestClient, None, None]:
+    """把数据库依赖指向临时库的客户端。"""
+
     def _get_db() -> Generator[Session, None, None]:
         session = factory()
         try:
@@ -79,6 +74,7 @@ def seed(factory):
         created_at: str = "2026-01-01T10:00:00.000",
         title: str = "查一下订单接口",
     ) -> int:
+        """插入一条执行记录并返回其 id。"""
         from src.data.models.agent_run import AgentRun
 
         with factory() as session:
@@ -110,6 +106,7 @@ def seed(factory):
         response_body: str = '{"code": 0}',
         status_code: int | None = None,
     ) -> int:
+        """插入一条工具调用留痕并返回其 id。"""
         from src.data.models.agent_tool_call import AgentToolCall
 
         kwargs = {}
@@ -155,6 +152,8 @@ def seed(factory):
 
 
 class TestAgentRunList:
+    """列表：统计列、过滤、排序与分页。"""
+
     def test_empty_list(self, client):
         response = client.get("/api/v1/agent/runs/")
 
@@ -168,7 +167,7 @@ class TestAgentRunList:
         body = client.get("/api/v1/agent/runs/").json()
 
         item = body["items"][0]
-        # 新语义统计列（旧的 pass_rate/total_cases 必须彻底消失）
+        # 新统计列，旧字段必须消失
         assert item["tool_call_count"] == 2
         assert item["ok_count"] == 1
         assert item["error_count"] == 1
@@ -203,11 +202,13 @@ class TestAgentRunList:
         page2 = client.get("/api/v1/agent/runs/", params={"page": 2, "page_size": 2}).json()
         assert page2["total"] == 5
         assert len(page2["items"]) == 2
-        # 倒序的第 2 页 = 第 3、4 条（1102、1101）
+        # 倒序第 2 页对应 1102、1101
         assert [i["id"] for i in page2["items"]] == [1102, 1101]
 
 
 class TestAgentRunDetail:
+    """详情内嵌工具调用摘要，记录缺失返回 404。"""
+
     def test_detail_embeds_tool_call_briefs(self, client, seed):
         seed.run(run_id=1200)
         seed.tool_call(1200, seq=1, ok=1)
@@ -235,6 +236,8 @@ class TestAgentRunDetail:
 
 
 class TestAgentToolCallList:
+    """工具调用列表与 body 的按需返回。"""
+
     def test_excludes_body_by_default(self, client, seed):
         seed.run(run_id=1300)
         seed.tool_call(1300, seq=1, response_body='{"code": 0}')
@@ -243,8 +246,7 @@ class TestAgentToolCallList:
 
         assert body["total"] == 1
         item = body["items"][0]
-        # 默认口径是「字段不存在」而不是「字段为 null」——null 会让人误以为
-        # 这次调用真的没有请求体，而实际只是没查回来。
+        # 默认返回字段不存在而非 null，避免被误读为本次调用无请求体
         assert "request_body" not in item
         assert "response_body" not in item
         assert "args_json" not in item
@@ -277,8 +279,10 @@ class TestAgentToolCallList:
 
 
 class TestCleanupRoute:
+    """清理路由匹配与清理范围。"""
+
     def test_cleanup_route_not_shadowed_by_run_id(self, client):
-        """路由顺序回归：/cleanup 若排在 /{run_id} 之后会被解析成 int 并 422。"""
+        """路由顺序回归：`/cleanup` 排在 `/{run_id}` 之后会被当作 int 解析并返回 422。"""
         response = client.delete("/api/v1/agent/runs/cleanup", params={"dry_run": True})
 
         assert response.status_code == 200, response.text

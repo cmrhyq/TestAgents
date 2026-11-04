@@ -10,7 +10,7 @@ import type {
   SearchResponse,
 } from "@/lib/types";
 
-/** 列出空间下的知识库文档。 */
+/** 列出空间下的知识库文档；`spaceId` 为空时不发起请求。 */
 export function useDocuments(spaceId?: string | number | null) {
   return useQuery<DocumentListResponse>({
     queryKey: queryKeys.knowledge.documents(spaceId),
@@ -22,7 +22,7 @@ export function useDocuments(spaceId?: string | number | null) {
   });
 }
 
-/** 上传并索引文档。后端同步切片，返回时已完成。 */
+/** 上传并索引文档；后端同步切片，响应返回时索引已完成。 */
 export function useUploadDocument(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -32,7 +32,7 @@ export function useUploadDocument(spaceId?: string | number | null) {
       form.append("file", file);
       const { data } = await api.post<KnowledgeDocument>(`/spaces/${spaceId}/documents`, form, {
         headers: { "Content-Type": "multipart/form-data" },
-        // 大文档切片可能超过默认 30s
+        // 大文档切片可能超过默认 30 秒超时
         timeout: 120000,
       });
       return data;
@@ -45,6 +45,7 @@ export function useUploadDocument(spaceId?: string | number | null) {
   });
 }
 
+/** 删除文档并失效文档列表缓存。 */
 export function useDeleteDocument(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -78,7 +79,7 @@ export function useReindexDocument(spaceId?: string | number | null) {
   });
 }
 
-/** 查看文档切片（排障与效果评估）。 */
+/** 读取文档的切片列表，用于排障与检索效果评估。 */
 export function useDocumentChunks(documentId: string | number | null | undefined) {
   return useQuery<KnowledgeChunk[]>({
     queryKey: queryKeys.knowledge.chunks(documentId ?? ""),
@@ -91,10 +92,9 @@ export function useDocumentChunks(documentId: string | number | null | undefined
 }
 
 /**
- * 检索预览：在界面上直接验证「Agent 能查到什么」。
+ * 按关键字检索空间知识库，默认取前 5 条命中。
  *
- * 做成 mutation 而不是 query：检索是用户主动触发的动作，
- * 输入框每敲一个字就发一次请求既浪费也没意义。
+ * 用 mutation 而非 query：检索由用户显式触发，不随输入变化自动请求。
  */
 export function useSearchKnowledge(spaceId?: string | number | null) {
   return useMutation<SearchResponse, Error, { query: string; top_k?: number }>({

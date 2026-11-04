@@ -11,6 +11,7 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
+/** 错误边界：捕获子树渲染异常并展示重试入口。 */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);

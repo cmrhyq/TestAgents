@@ -11,10 +11,9 @@ import type {
 } from "@/lib/types";
 
 /**
- * 列出空间下的跨会话记忆。
+ * 列出空间下的跨会话记忆，可按分类过滤。
  *
- * 记忆是「按 space 隔离」的：换空间就换一套记忆，这是产品约束不是实现细节——
- * A 项目的鉴权约定不该出现在 B 项目的对话上下文里。
+ * 记忆按空间隔离，不同空间之间互不共享。
  */
 export function useMemories(spaceId?: string | number | null, category?: string) {
   return useQuery<MemoryListResponse>({
@@ -29,6 +28,7 @@ export function useMemories(spaceId?: string | number | null, category?: string)
   });
 }
 
+/** 新建记忆并失效记忆缓存。 */
 export function useCreateMemory(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -45,6 +45,7 @@ export function useCreateMemory(spaceId?: string | number | null) {
   });
 }
 
+/** 更新记忆并失效记忆缓存。 */
 export function useUpdateMemory(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 
@@ -62,7 +63,7 @@ export function useUpdateMemory(spaceId?: string | number | null) {
   });
 }
 
-/** 删除记忆（后端默认软删，MEMORY.md 镜像会同步重建）。 */
+/** 删除记忆；后端默认软删，并同步重建 MEMORY.md 镜像。 */
 export function useDeleteMemory(spaceId?: string | number | null) {
   const queryClient = useQueryClient();
 

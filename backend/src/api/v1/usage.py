@@ -1,12 +1,6 @@
 """LLM 成本统计路由。
 
 数据来自 ``llm_log``，按空间 / 会话 / 时间窗口聚合。
-
-用法::
-
-    GET /api/v1/usage/stats                         # 全站近 7 天
-    GET /api/v1/usage/stats?space_id=123&days=30    # 某空间近 30 天
-    GET /api/v1/usage/stats?conversation_id=456     # 单次对话花了多少
 """
 
 from __future__ import annotations
@@ -73,5 +67,16 @@ def get_usage_stats(
     days: int = Query(default=DEFAULT_WINDOW_DAYS, ge=1, le=MAX_WINDOW_DAYS, description="统计窗口（天）"),
     session: Session = Depends(get_db),
 ) -> UsageStats:
+    """聚合 LLM 调用成本统计。
+
+    Args:
+        space_id: 按空间过滤，不传则全站统计
+        conversation_id: 按会话过滤
+        days: 统计窗口天数，取值 1 到 ``MAX_WINDOW_DAYS``
+        session: 请求级数据库会话
+
+    Returns:
+        调用次数、token 用量、已知成本与分组明细
+    """
     data = UsageService(session).stats(space_id=space_id, conversation_id=conversation_id, days=days)
     return UsageStats(**data)

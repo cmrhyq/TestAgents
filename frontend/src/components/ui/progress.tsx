@@ -1,3 +1,4 @@
+/** 进度条：按 `value` 填充，取值区间为 0 到 100。 */
 import type { ComponentPropsWithoutRef } from "react";
 import { forwardRef } from "react";
 import * as ProgressPrimitive from "@radix-ui/react-progress";

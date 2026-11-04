@@ -31,24 +31,23 @@ function JsonBlock({
   );
 }
 
-/** 区分「没有请求体」和「字段还没拉回来」——两件事在 UI 上不能长得一样。 */
+/** 判断调用记录是否带有请求与响应正文字段。 */
 function hasBody(call: AgentToolCall): call is AgentToolCallDetail {
   return "response_body" in call || "request_body" in call;
 }
 
 interface HttpPayloadPanelProps {
   call: AgentToolCall | AgentToolCallDetail;
-  /** 正文是否已加载（run 详情是按需拉的） */
+  /** 请求与响应正文是否已加载；未加载时展示加载入口。 */
   bodyLoaded: boolean;
   loadingBody?: boolean;
   onRequestBody?: () => void;
 }
 
 /**
- * 单次工具调用的完整入参 / 请求 / 响应面板。
+ * 单次工具调用的入参、请求与响应面板。
  *
- * 字段来源：`send_request` 类工具会填满 HTTP 列；`query_db` / `read_file`
- * 这类只有通用列，HTTP 全部为 NULL，此时只显示入参与结果预览。
+ * 非 HTTP 工具（如 `query_db`、`read_file`）的 HTTP 字段为空，只展示入参与结果预览。
  */
 export function HttpPayloadPanel({
   call,

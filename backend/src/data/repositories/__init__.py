@@ -8,7 +8,6 @@ from src.data.repositories.message_repository import MessageRepository
 from src.data.repositories.space_repository import SpaceRepository
 
 __all__ = [
-    # 数据访问层
     "BaseRepository",
     "RunScopedRepositoryMixin",
     "SpaceRepository",

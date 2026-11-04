@@ -8,6 +8,11 @@ function createResourceKeys<const TPrefix extends string>(prefix: TPrefix) {
   };
 }
 
+/**
+ * React Query 查询键注册表，按资源前缀集中管理。
+ *
+ * `all` 用于整资源缓存失效；`list` 与 `detail` 是 `createCrudHooks` 依赖的固定成员。
+ */
 export const queryKeys = {
   spaces: createResourceKeys("spaces"),
   endpoints: createResourceKeys("endpoints"),
@@ -47,4 +52,5 @@ export const queryKeys = {
   },
 };
 
+/** 单个资源的查询键集合，供 `createCrudHooks` 使用。 */
 export type ResourceQueryKeys = ReturnType<typeof createResourceKeys>;

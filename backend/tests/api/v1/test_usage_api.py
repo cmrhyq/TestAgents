@@ -1,7 +1,7 @@
-"""用量统计 API 测试。
+"""用量统计 API。
 
-重点验证「成本未知」不会被伪装成 0：``cost_usd`` 只累加有定价的调用，
-``unpriced_calls`` 单独暴露未计价次数。
+约束：未知成本不伪装为 0，`cost_usd` 只累加有定价的调用，未计价次数由
+`unpriced_calls` 单独暴露。
 """
 
 from __future__ import annotations
@@ -24,11 +24,13 @@ CONVERSATION_ID = 6001
 
 
 def _ago(days: int = 0, minutes: int = 0) -> str:
+    """返回指定天数与分钟数之前的时间字符串。"""
     return (datetime.now() - timedelta(days=days, minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
 
 
 @pytest.fixture()
 def session_factory(tmp_path):
+    """构造临时库并返回 sessionmaker。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'usage_api.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -38,6 +40,7 @@ def session_factory(tmp_path):
 
 @pytest.fixture()
 def client(session_factory) -> Generator[TestClient, None, None]:
+    """把数据库依赖指向临时库的客户端。"""
     from app import app
 
     def _get_db() -> Generator[Session, None, None]:
@@ -69,6 +72,7 @@ def _log(
     success: int = 1,
     created_at: str | None = None,
 ) -> None:
+    """写入一条 `llm_log` 记录，未给 `cost` 时成本为 null。"""
     with session_factory() as session:
         session.add(
             LLMLog(
@@ -89,6 +93,8 @@ def _log(
 
 
 class TestEmpty:
+    """无数据时的零值返回。"""
+
     def test_returns_zeros(self, client):
         body = client.get("/api/v1/usage/stats").json()
         assert body["total_calls"] == 0
@@ -99,6 +105,8 @@ class TestEmpty:
 
 
 class TestAggregation:
+    """调用数、token、失败数与成本聚合。"""
+
     def test_sums_tokens_and_calls(self, client, session_factory):
         _log(session_factory, tokens=100)
         _log(session_factory, tokens=250)
@@ -118,7 +126,7 @@ class TestAggregation:
         assert body["failed_calls"] == 1
 
     def test_cost_unknown_is_not_zero(self, client, session_factory):
-        """全部未计价：cost_usd 必须是 null，unpriced_calls 等于总调用数。"""
+        """全部未计价时 `cost_usd` 为 null，`unpriced_calls` 等于总调用数。"""
         _log(session_factory)
         _log(session_factory)
 
@@ -128,7 +136,7 @@ class TestAggregation:
         assert body["unpriced_calls"] == 2
 
     def test_cost_sums_only_priced_calls(self, client, session_factory):
-        """混合场景：cost 只累加有值的，unpriced 单独计数。"""
+        """混合场景下成本只累加有值调用，未计价单独计数。"""
         _log(session_factory, cost=0.001)
         _log(session_factory, cost=0.002)
         _log(session_factory, cost=None)
@@ -141,6 +149,8 @@ class TestAggregation:
 
 
 class TestFiltering:
+    """空间、会话与时间窗过滤。"""
+
     def test_filter_by_space(self, client, session_factory):
         _log(session_factory, tokens=100, space_id=SPACE_ID)
         _log(session_factory, tokens=900, space_id=OTHER_SPACE)
@@ -175,6 +185,8 @@ class TestFiltering:
 
 
 class TestGrouping:
+    """按模型与路由档位分组。"""
+
     def test_by_model(self, client, session_factory):
         _log(session_factory, model="zai/glm-4-flash", tokens=100)
         _log(session_factory, model="zai/glm-4-flash", tokens=100)
@@ -196,7 +208,7 @@ class TestGrouping:
         assert {row["key"] for row in body["by_tier"]} == {"SIMPLE", "REASONING"}
 
     def test_empty_tier_is_skipped(self, client, session_factory):
-        """非路由模型的调用没有档位，不应出现一个空的 ``unknown`` 桶。"""
+        """非路由模型没有档位，不应产生空桶。"""
         _log(session_factory, tier="")
 
         body = client.get("/api/v1/usage/stats").json()

@@ -28,10 +28,9 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * 知识库 tab：文档上传 + 切片状态 + 检索预览。
+ * 知识库 tab：文档上传、切片状态与检索预览。
  *
- * 「检索预览」不是装饰——语义检索的效果很难凭空判断，让用户输入一个真实问题
- * 看看能召回什么，比任何说明文字都有用。召回不对就是切片或文档质量问题。
+ * 检索预览用真实问题验证召回效果，召回异常通常意味着切片或文档质量问题。
  */
 export function KnowledgeTab({ spaceId }: { spaceId: string }) {
   const { data, isLoading, isError, refetch } = useDocuments(spaceId);
@@ -84,7 +83,6 @@ export function KnowledgeTab({ spaceId }: { spaceId: string }) {
         </div>
       </div>
 
-      {/* 检索预览 */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">检索预览</CardTitle>

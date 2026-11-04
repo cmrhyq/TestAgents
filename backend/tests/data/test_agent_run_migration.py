@@ -1,12 +1,7 @@
-"""v3 / v4 迁移测试：test_* 执行链路 -> agent_run / agent_tool_call。
+"""v3 迁移：test_* 执行链路迁移到 `agent_run` / `agent_tool_call`。
 
-重点验证五件事：
-
-1. ``test_run`` 的行按语义映射进 ``agent_run``，且**主键保留**
-2. ``report`` 的外键改指 ``agent_run``，且**行不能在 DROP test_run 时被级联删光**
-3. 遗留三张用例表 + 旧视图彻底消失
-4. 迁移幂等：连跑两次结果一致
-5. v4 删掉 ``report`` 表并补上报告聚合索引（报告改为按 run 实时聚合）
+约束：`report` 外键改指 `agent_run`，其行不得因 `DROP test_run` 级联丢失；
+遗留用例表与视图彻底清除；迁移幂等。
 """
 
 import sqlite3
@@ -133,14 +128,17 @@ def old_db(tmp_path) -> Path:
 
 
 def _engine(db_path: Path):
+    """指向临时库的引擎。"""
     return create_engine(f"sqlite:///{db_path}")
 
 
 def _tables(engine) -> set[str]:
+    """返回库中全部表名。"""
     return set(inspect(engine).get_table_names())
 
 
 def _views(engine) -> set[str]:
+    """返回库中全部视图名。"""
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT name FROM sqlite_master WHERE type='view'")).fetchall()
     return {row[0] for row in rows}
@@ -148,6 +146,8 @@ def _views(engine) -> set[str]:
 
 @pytest.mark.unit
 class TestMigrationV3:
+    """遗留对象清理、字段语义映射与幂等。"""
+
     def test_legacy_tables_are_dropped(self, old_db):
         engine = _engine(old_db)
         migrate_v3(engine)
@@ -177,7 +177,7 @@ class TestMigrationV3:
                 )
             ).one()
 
-        # 主键原样保留 —— 这是 report.run_id 不用改值的前提
+        # 主键保留，report.run_id 无需改值
         assert row[0] == 5001
         assert row[1] == "历史批次"  # name -> title
         assert row[2] == "agent"
@@ -222,7 +222,7 @@ class TestMigrationV3:
     def test_data_survives_and_is_idempotent(self, old_db):
         engine = _engine(old_db)
         migrate_v3(engine)
-        migrate_v3(engine)  # 再跑一遍
+        migrate_v3(engine)
 
         with engine.connect() as conn:
             runs = conn.execute(text("SELECT COUNT(*) FROM agent_run")).scalar()

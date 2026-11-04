@@ -8,7 +8,6 @@ from src.data.migration.migration import (
 )
 
 __all__ = [
-    # 迁移工具
     "init_database_from_orm",
     "init_database_from_sql",
     "ensure_database",

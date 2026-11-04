@@ -130,6 +130,7 @@ const columns: Column<ReportRow>[] = [
   },
 ];
 
+/** 报告列表页：查看与下载已生成的报告。 */
 export default function ReportsPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);

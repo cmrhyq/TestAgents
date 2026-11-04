@@ -1,3 +1,4 @@
+/** 多行输入框。 */
 import type { TextareaHTMLAttributes } from "react";
 import { forwardRef } from "react";
 

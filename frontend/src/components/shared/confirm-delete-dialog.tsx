@@ -21,6 +21,7 @@ interface ConfirmDeleteDialogProps {
   cancelText?: string;
 }
 
+/** 删除前的二次确认对话框，标题、描述与按钮文案可覆盖。 */
 export function ConfirmDeleteDialog({
   open,
   onOpenChange,

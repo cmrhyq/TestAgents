@@ -1,7 +1,7 @@
-"""知识库路由。
+"""知识库路由：文档上传、切片查看、检索预览、删除与重建索引。
 
-上传 → 落盘 ``docs/`` → 切片 → （可选）向量索引。
-检索能力有降级：向量库不可用时走词法匹配，文档行上的 ``index_mode`` 会如实反映。
+上传的文件先落盘 ``docs/`` 再切片；向量能力不可用时降级为词法检索，
+文档行的 ``index_mode`` 记录实际生效的索引方式。
 """
 
 from __future__ import annotations
@@ -38,12 +38,16 @@ class DocumentItem(BaseModel):
 
 
 class DocumentListResponse(BaseModel):
+    """文档列表响应；``vector_enabled`` 表示当前是否启用向量检索。"""
+
     items: list[DocumentItem]
     total: int
     vector_enabled: bool = False
 
 
 class ChunkItem(BaseModel):
+    """文档切片。"""
+
     id: str
     seq: int
     content: str
@@ -57,6 +61,7 @@ class SearchBody(BaseModel):
 
 
 def _to_item(doc) -> DocumentItem:
+    """把文档模型转换为列表项。"""
     return DocumentItem(
         id=str(doc.id),
         space_id=str(doc.space_id),
@@ -79,7 +84,23 @@ async def upload_document(
     file: UploadFile = File(..., description="需求/接口文档（md/txt/json/yaml/csv 等文本格式）"),
     db: Session = Depends(get_db),
 ):
-    """上传并索引知识库文档。"""
+    """上传并索引知识库文档。
+
+    副作用：文件写入空间 ``docs/`` 目录并落库切片，可能调用嵌入模型。
+    文件上限 20MB，且仅接受文本类后缀。
+
+    Args:
+        space_id: 目标空间 ID
+        file: 上传文件，支持 md/txt/json/yaml/csv 等文本格式
+        db: 请求级数据库会话
+
+    Returns:
+        新建文档记录，HTTP 201
+
+    Raises:
+        NotFoundError: 空间不存在，返回 HTTP 404
+        ValidationError: 文件过大、后缀不支持或内容为空，返回 HTTP 422
+    """
     SpaceService(db).get_or_raise(space_id, "空间不存在")
 
     data = await file.read()
@@ -101,7 +122,18 @@ async def upload_document(
 
 @router.get("/spaces/{space_id}/documents", response_model=DocumentListResponse)
 def list_documents(space_id: int, db: Session = Depends(get_db)):
-    """列出空间下的知识库文档。"""
+    """列出空间下的知识库文档，按创建时间倒序。
+
+    Args:
+        space_id: 空间 ID
+        db: 请求级数据库会话
+
+    Returns:
+        文档列表、总数与当前是否启用向量检索
+
+    Raises:
+        NotFoundError: 空间不存在，返回 HTTP 404
+    """
     SpaceService(db).get_or_raise(space_id, "空间不存在")
     kb = get_knowledge_base(space_id)
     documents = kb.list_documents(space_id)
@@ -114,7 +146,18 @@ def list_documents(space_id: int, db: Session = Depends(get_db)):
 
 @router.get("/documents/{document_id}/chunks", response_model=list[ChunkItem])
 def list_chunks(document_id: int, db: Session = Depends(get_db)):
-    """查看文档切片（排障与效果评估用）。"""
+    """列出文档的全部切片，按序号升序。
+
+    Args:
+        document_id: 文档 ID
+        db: 请求级数据库会话
+
+    Returns:
+        切片列表
+
+    Raises:
+        NotFoundError: 文档不存在，返回 HTTP 404
+    """
     kb = get_knowledge_base()
     document = kb.get_document(document_id)
     if document is None:
@@ -127,7 +170,20 @@ def list_chunks(document_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: int, db: Session = Depends(get_db)):
-    """删除文档及其切片、向量、磁盘文件。"""
+    """删除文档，同时移除其切片、向量与磁盘源文件。
+
+    向量删除失败只记录日志，不影响库中记录与文件的清理。
+
+    Args:
+        document_id: 文档 ID
+        db: 请求级数据库会话
+
+    Returns:
+        无响应体，HTTP 204
+
+    Raises:
+        NotFoundError: 文档不存在，返回 HTTP 404
+    """
     kb = get_knowledge_base()
     document = kb.get_document(document_id)
     if document is None:
@@ -137,7 +193,20 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
 
 @router.post("/documents/{document_id}/reindex", response_model=DocumentItem)
 def reindex_document(document_id: int, db: Session = Depends(get_db)):
-    """以磁盘文件为准重建切片索引。"""
+    """以磁盘源文件为准重建切片索引。
+
+    副作用：覆盖库中切片并重写向量。
+
+    Args:
+        document_id: 文档 ID
+        db: 请求级数据库会话
+
+    Returns:
+        重建后的文档记录
+
+    Raises:
+        NotFoundError: 文档不存在，返回 HTTP 404
+    """
     kb = get_knowledge_base()
     document = kb.get_document(document_id)
     if document is None:
@@ -155,7 +224,19 @@ def search_documents(
     body: SearchBody,
     db: Session = Depends(get_db),
 ):
-    """检索预览：在界面上直接验证「Agent 能查到什么」。"""
+    """检索预览：按当前索引方式返回命中的切片。
+
+    Args:
+        space_id: 空间 ID
+        body: 检索词与返回条数上限，``top_k`` 取值 1-20
+        db: 请求级数据库会话
+
+    Returns:
+        含 ``query``、``vector_enabled`` 与命中切片列表的字典
+
+    Raises:
+        NotFoundError: 空间不存在，返回 HTTP 404
+    """
     SpaceService(db).get_or_raise(space_id, "空间不存在")
     kb = get_knowledge_base(space_id)
     hits = kb.search(space_id, body.query, top_k=body.top_k)

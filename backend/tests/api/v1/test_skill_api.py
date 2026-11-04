@@ -1,7 +1,6 @@
-"""Skills API 测试。
+"""Skills API：列表、详情、zip 导入与启停。
 
-覆盖：列表（内置 + 空间覆盖）、详情、导入 zip、启停。
-服务实例用临时目录替换，其余走真实路由与表结构。
+服务实例与工作区指向临时目录，其余走真实路由与表结构。
 """
 
 from __future__ import annotations
@@ -27,16 +26,19 @@ SPACE_ID = 4242
 
 
 def _skill_md(name: str, description: str = "desc", body: str = "正文") -> str:
+    """生成最小可解析的 `SKILL.md` 文本。"""
     return f"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n"
 
 
 def _write_skill(root: Path, name: str, description: str = "desc") -> None:
+    """在 `root` 下写入一个技能目录。"""
     skill_dir = root / name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(_skill_md(name, description), encoding="utf-8")
 
 
 def _zip(entries: dict[str, str]) -> bytes:
+    """把 `{路径: 内容}` 打成 zip 字节。"""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         for name, content in entries.items():
@@ -46,6 +48,7 @@ def _zip(entries: dict[str, str]) -> bytes:
 
 @pytest.fixture()
 def client(tmp_path) -> Generator[TestClient, None, None]:
+    """返回挂载真实 app 的客户端，并替换全局工作区与服务单例。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
@@ -86,6 +89,8 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
 
 
 class TestList:
+    """技能列表与默认启用状态。"""
+
     def test_lists_builtin_skill(self, client):
         response = client.get("/api/v1/skills")
 
@@ -99,6 +104,8 @@ class TestList:
 
 
 class TestImport:
+    """zip 导入的落盘结果与非法包拒绝。"""
+
     def test_imports_into_space(self, client, tmp_path):
         response = client.post(
             "/api/v1/skills/import",
@@ -132,6 +139,8 @@ class TestImport:
 
 
 class TestToggle:
+    """启停开关的即时生效与跨请求持久化。"""
+
     def test_disable_then_listed_as_disabled(self, client):
         url = "/api/v1/skills/builtin-alpha"
 
@@ -155,6 +164,8 @@ class TestToggle:
 
 
 class TestDetail:
+    """详情接口返回正文与作用域。"""
+
     def test_returns_body(self, client):
         response = client.get("/api/v1/skills/builtin-alpha")
 

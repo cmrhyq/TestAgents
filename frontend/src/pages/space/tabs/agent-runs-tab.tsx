@@ -2,6 +2,7 @@ import { DataTable } from "@/components/shared/data-table.tsx";
 import { buildAgentRunColumns } from "../columns";
 import type { AgentRun } from "@/lib/types.ts";
 
+/** `AgentRunsTab` 的属性。 */
 export interface AgentRunsTabProps {
   data: AgentRun[];
   total: number;
@@ -13,6 +14,7 @@ export interface AgentRunsTabProps {
   onPageChange(page: number): void;
 }
 
+/** 执行记录 tab：表格展示本空间的执行记录。 */
 export function AgentRunsTab({
   data,
   total,

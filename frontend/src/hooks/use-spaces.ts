@@ -28,4 +28,5 @@ const {
   },
 });
 
+/** 空间的增删改查 hook，由 `createCrudHooks` 按 `/spaces` 生成。 */
 export { useSpaces, useSpace, useCreateSpace, useUpdateSpace, useDeleteSpace };

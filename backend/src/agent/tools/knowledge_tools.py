@@ -1,7 +1,6 @@
 """知识库检索工具。
 
-只暴露检索，不暴露写入——「往知识库里塞什么」应当由人决定（上传文档），
-让 Agent 自己往知识库写会迅速污染检索质量。
+只暴露检索，不暴露写入：写入由人上传文档控制，避免污染检索质量。
 """
 
 from __future__ import annotations
@@ -17,15 +16,23 @@ logger = get_logger(__name__)
 
 
 def make_knowledge_tools(space_id: int | str, knowledge: KnowledgeBase | None = None) -> list[BaseTool]:
-    """构造知识库检索工具。"""
+    """构造知识库检索工具。
+
+    Args:
+        space_id: 空间 ID，检索范围限定在该空间
+        knowledge: 知识库实例；None 时使用全局实例
+
+    Returns:
+        工具列表：``knowledge_search``
+    """
     kb = knowledge or _default_knowledge(space_id)
 
     @tool
     def knowledge_search(query: str, top_k: int = 5) -> str:
         """在当前空间的领域知识库里做语义检索（需求文档、接口文档、业务规则）。
 
-        回答业务语义问题前先查一遍，不要凭接口 schema 猜业务规则。
-        返回 JSON 数组，每项含 document（文档名）、seq（片段序号）、content（正文）、score（相关度）。
+        涉及业务语义时先检索，不要仅凭接口 schema 推断业务规则。命中时返回
+        JSON 数组（document、seq、content、score），无命中时返回带 hits 与 note 的对象。
 
         Args:
             query: 检索问题或关键词
@@ -56,6 +63,7 @@ def make_knowledge_tools(space_id: int | str, knowledge: KnowledgeBase | None = 
 
 
 def _default_knowledge(space_id: int | str) -> KnowledgeBase:
+    """返回该空间的知识库实例。"""
     from src.memory import get_knowledge_base
 
     return get_knowledge_base(space_id)

@@ -11,6 +11,7 @@ import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { ToolCallsTable } from "@/components/report/tool-calls-table.tsx";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/format";
 
+/** 执行记录详情页：读数汇总与工具调用留痕。 */
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -18,8 +19,7 @@ export default function RunDetailPage() {
 
   const { data, isLoading, isError, refetch } = useAgentRunDetail(runId);
 
-  // 正文按需加载：带 body 的查询单条上限 2MB，一轮 ReAct 可能有几十次调用，
-  // 进来就全量拉会把详情页变成几十 MB 的 JSON。用户展开某一行时才放开。
+  // 正文按需加载：单条上限 2MB，一轮执行可能有数十次调用，全量拉取会让详情页体积过大。
   const [wantBody, setWantBody] = useState(false);
   const {
     data: callsData,
@@ -131,7 +131,6 @@ export default function RunDetailPage() {
         </div>
       )}
 
-      {/* 读数带：mono 读数 + 色点标注，竖墨线分隔 */}
       <div className="rounded-[4px] border border-border bg-card shadow-xs">
         <div className="flex flex-col divide-y divide-border-subtle sm:flex-row sm:divide-x sm:divide-y-0">
           {readouts.map((item) => (

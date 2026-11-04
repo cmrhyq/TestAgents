@@ -1,8 +1,6 @@
-"""会话 API 测试（空间下会话列表 / 消息 / 删除 / 新字段）。
+"""会话 API：创建、更新、消息列举、删除与空间过滤。
 
-这几条接口是「空间会话」需求的落地：用户要能看到某个空间下开过哪些对话、
-每轮聊了什么，也能删掉不要的。消息没有独立写入接口（只能由对话产生），
-所以插入消息直接走 service。
+消息没有独立写入接口，用例通过 `ConversationService` 直接插入。
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ OTHER_SPACE_ID = 8091
 
 @pytest.fixture()
 def factory(tmp_path):
+    """构造含两个空间的临时库，返回 sessionmaker。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'conv.db'}")
     Base.metadata.create_all(engine)
     maker = sessionmaker(bind=engine, expire_on_commit=False)
@@ -41,6 +40,8 @@ def factory(tmp_path):
 
 @pytest.fixture()
 def client(factory) -> Generator[TestClient, None, None]:
+    """把数据库依赖指向临时库的客户端。"""
+
     def _get_db() -> Generator[Session, None, None]:
         session = factory()
         try:
@@ -63,7 +64,7 @@ def client(factory) -> Generator[TestClient, None, None]:
 
 @pytest.fixture()
 def append_message(factory):
-    """直接走 service 追加消息（消息没有独立写入接口）。"""
+    """直接走 service 追加消息，消息无独立写入接口。"""
 
     def _append(conversation_id: int, role: str, content: str):
         with factory() as session:
@@ -76,6 +77,7 @@ def append_message(factory):
 
 
 def _create(client: TestClient, **overrides) -> dict:
+    """创建会话并返回响应体。"""
     payload = {"space_id": SPACE_ID, "title": "", "mode": "agent", **overrides}
     response = client.post("/api/v1/conversations/", json=payload)
     assert response.status_code == 201, response.text
@@ -83,6 +85,8 @@ def _create(client: TestClient, **overrides) -> dict:
 
 
 class TestConversationCrud:
+    """会话增删改查与新字段。"""
+
     def test_create_returns_new_fields(self, client):
         created = _create(client, mode="plan", skill_names=["api-test-design"])
 
@@ -91,7 +95,7 @@ class TestConversationCrud:
         assert created["space_id"] == SPACE_ID
 
     def test_mode_is_normalized_on_create(self, client):
-        """历史值 Run/Ask/Plan 也要落到小写标准值，否则 CHECK 约束会拦。"""
+        """历史值 Run/Ask/Plan 需归一为小写标准值，否则 CHECK 约束会拦截。"""
         assert _create(client, mode="Ask")["mode"] == "ask"
         assert _create(client, mode="Plan")["mode"] == "plan"
 
@@ -130,7 +134,7 @@ class TestConversationCrud:
         assert len(detail.json()["messages"]) == 1
 
     def test_title_generated_from_first_message(self, client, append_message):
-        """新会话标题为空时用首条 user 消息生成，否则列表里全是一串空标题。"""
+        """标题为空时用首条 user 消息生成，避免列表出现空标题。"""
         cid = _create(client)["id"]
         assert client.get(f"/api/v1/conversations/{cid}").json()["title"] == ""
 
@@ -168,6 +172,8 @@ class TestConversationCrud:
 
 
 class TestSpaceConversationList:
+    """空间过滤与分页。"""
+
     def test_filters_by_space(self, client):
         _create(client)
         _create(client)

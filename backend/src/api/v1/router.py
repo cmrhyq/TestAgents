@@ -1,4 +1,7 @@
-"""API v1 路由汇总。"""
+"""API v1 路由汇总。
+
+子路由在此统一挂载，顺序决定 OpenAPI 文档中的分组展示顺序。
+"""
 
 from fastapi import APIRouter
 

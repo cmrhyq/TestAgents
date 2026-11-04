@@ -1,3 +1,4 @@
+/** 卡片容器：`Card` 与 `CardHeader`、`CardContent`、`CardFooter` 组合使用。 */
 import type { HTMLAttributes } from "react";
 import { forwardRef } from "react";
 

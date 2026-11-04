@@ -1,12 +1,6 @@
-"""
-API 测试基础服务类模块
+"""HTTP 请求封装。
 
-该模块提供 API 测试的基础服务类，封装 HTTP 请求操作，支持：
-- 所有标准 HTTP 方法（GET, POST, PUT, DELETE, PATCH）
-- 请求和响应的自动日志记录
-- 响应数据提取和缓存
-- 多种认证方式（Bearer Token, Basic Auth, API Key）
-- 错误处理和自动重试机制
+基于 requests 会话复用连接，统一超时、可选认证、指数退避重试与响应字段缓存。
 """
 
 import random
@@ -25,7 +19,19 @@ logger = get_logger(__name__)
 
 
 def split_url(url: str) -> tuple[str, str]:
-    """返回 (base_url, endpoint)"""
+    """拆分 URL 为 ``(base_url, endpoint)``。
+
+    endpoint 保留 path、query 与 fragment。
+
+    Args:
+        url: 完整 URL
+
+    Returns:
+        base_url 为 ``scheme://host``，endpoint 为其余部分
+
+    Raises:
+        ValueError: 缺少 scheme 或 host
+    """
     p = urlparse(url.strip())
     if not p.scheme or not p.netloc:
         raise ValueError(f"无效的 URL: {url}")
@@ -40,10 +46,11 @@ def split_url(url: str) -> tuple[str, str]:
 
 
 def get_random_pc_ua():
+    """随机生成一个常见桌面浏览器的 User-Agent。
+
+    Returns:
+        User-Agent 字符串
     """
-    随机生成PC端常见浏览器的User-Agent
-    """
-    # 浏览器名称和对应版本范围
     browsers = {
         "Chrome": {
             "versions": [
@@ -73,25 +80,20 @@ def get_random_pc_ua():
         },
     }
 
-    # 随机选择操作系统版本
     windows_versions = ["10.0", "11.0", "6.3", "6.2", "6.1"]
     windows_ver = random.choice(windows_versions)
 
-    # 随机Mac版本
     mac_ver = random.randint(10, 15)
     mac_rev = random.randint(0, 9)
 
-    # 随机选择浏览器
     browser_name = random.choice(list(browsers.keys()))
     browser_data = browsers[browser_name]
 
-    # 随机选择版本
     version = random.choice(browser_data["versions"])
 
-    # 为Opera额外添加Chrome版本
+    # 部分浏览器模板同时需要 Chrome 与 OPR 版本号
     chrome_ver = f"{random.randint(80, 120)}.0.{random.randint(1000, 9999)}.{random.randint(10, 999)}"
 
-    # 生成User-Agent
     template = browser_data["template"]
     if browser_name == "Safari":
         user_agent = template.format(mac_ver=mac_ver, mac_rev=mac_rev, version=version)
@@ -103,21 +105,54 @@ def get_random_pc_ua():
     return user_agent
 
 
-class HttpRequest:
+def _encode_header_for_wire(value: Any) -> str:
+    """把请求头值转成 requests 可编码的形式。
+
+    requests/urllib3 只用 latin-1 编码请求头，非 ASCII 值会抛 ``UnicodeEncodeError``。
+    这里先按 UTF-8 编为字节再以 latin-1 解码回字符串，使原始字节原样发出。
+
+    Args:
+        value: 原始头值，任意类型按 ``str`` 处理
+
+    Returns:
+        可直接交给 requests 的头值
     """
-    API 测试基础服务类
+    text = str(value)
+    try:
+        text.encode("latin-1")
+        return text
+    except UnicodeEncodeError:
+        return text.encode("utf-8").decode("latin-1")
 
-    提供统一的 HTTP 请求接口，支持：
-    - 所有标准 HTTP 方法
-    - 自动日志记录
-    - 响应数据提取和缓存
-    - 多种认证方式
-    - 错误处理和重试机制
 
-    使用示例：
-        service = BaseService("https://api.example.com")
-        response = service.get("/users/1")
-        user_id = service.extract_and_cache(response, "user_id", "id")
+def _sanitize_headers(headers: dict[str, Any]) -> dict[str, str]:
+    """校验头名并编码头值。
+
+    头名必须是 ASCII（RFC 9110 的 token 规则），非 ASCII 内容应放入 body 或查询参数。
+
+    Args:
+        headers: 原始请求头
+
+    Returns:
+        可直接交给 requests 的请求头
+
+    Raises:
+        ValueError: 头名含非 ASCII 字符
+    """
+    result: dict[str, str] = {}
+    for name, value in headers.items():
+        header_name = str(name)
+        if not header_name.isascii():
+            raise ValueError(f"请求头名称必须是 ASCII，收到: {header_name}（非 ASCII 内容请放到 body 或 URL 参数里）")
+        result[header_name] = _encode_header_for_wire(value)
+    return result
+
+
+class HttpRequest:
+    """HTTP 请求客户端。
+
+    持有单个 ``requests.Session`` 复用连接，创建后超时、SSL 校验与认证方式固定不变。
+    实例可作为上下文管理器使用，退出时关闭会话。
     """
 
     def __init__(
@@ -129,37 +164,38 @@ class HttpRequest:
         auth_type: str | None = None,
         auth_credentials: dict[str, str] | None = None,
     ):
-        """
-        初始化 BaseService 实例
+        """初始化客户端。
+
+        副作用：创建会话，并按 ``auth_type`` 写入会话级认证头。
 
         Args:
-            base_url: API 基础 URL，如果为 None 则使用配置文件中的设置
-            connect_timeout: API 连接超时时间（秒）
-            read_timeout: API 读取超时时间（秒）
-            verify_ssl: 是否验证 SSL 证书
-            auth_type: 认证类型，可选值：'bearer', 'basic', 'api_key'
-            auth_credentials: 认证凭证字典
+            base_url: API 基础 URL
+            connect_timeout: 连接超时秒数
+            read_timeout: 读取超时秒数
+            verify_ssl: 是否校验 SSL 证书
+            auth_type: 认证类型，取值 ``bearer`` / ``basic`` / ``api_key``
+            auth_credentials: 认证凭证，字段随 ``auth_type`` 而定
         """
         self.base_url = base_url
         self.cache = CacheManager.get_instance()
 
-        # 创建 session 以复用连接
+        # 复用连接，避免每次请求重复 TLS 握手
         self.session = requests.Session()
 
-        # 设置默认超时
         self.timeout = (connect_timeout, read_timeout)
 
-        # 设置 SSL 验证
         self.session.verify = verify_ssl
 
-        # 设置认证
         self._setup_authentication(auth_type, auth_credentials)
 
         logger.info(f"HTTP客户端初始化，base_url: {self.base_url}", base_url=self.base_url)
 
     def _setup_authentication(self, auth_type: str | None, auth_credentials: dict[str, str] | None) -> None:
-        """
-        设置认证方式
+        """按认证类型配置会话。
+
+        凭证缺失时静默跳过，不抛错。
+
+        副作用：写入 ``session.headers`` 或 ``session.auth``。
 
         Args:
             auth_type: 认证类型
@@ -191,34 +227,32 @@ class HttpRequest:
                 logger.info(f"API Key认证已配置，header: {header_name}", auth_type="api_key", header_name=header_name)
 
     def _build_url(self, endpoint: str) -> str:
-        """
-        构建完整的 URL
+        """拼出完整 URL，已是绝对地址时原样返回。
 
         Args:
-            endpoint: API 端点路径
+            endpoint: 端点路径或完整 URL
 
         Returns:
-            str: 完整的 URL
+            完整 URL
         """
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
             return endpoint
         return urljoin(self.base_url, endpoint.lstrip("/"))
 
     def _log_request(self, method: str, url: str, **kwargs) -> None:
-        """
-        记录请求信息
+        """以 debug 级别记录请求。
 
         Args:
             method: HTTP 方法
             url: 请求 URL
-            **kwargs: 其他请求参数
+            **kwargs: 请求参数，其中 ``data`` 只记录占位符
         """
         log_data: dict[str, Any] = {
             "method": method,
             "url": url,
         }
 
-        # 记录请求参数（不记录敏感信息）
+        # data 可能是表单明文，日志中只留占位符
         if "params" in kwargs:
             log_data["params"] = kwargs["params"]
 
@@ -234,8 +268,7 @@ class HttpRequest:
         logger.debug(f"发送请求: {method} {url}", **log_data)
 
     def _log_response(self, response: requests.Response) -> None:
-        """
-        记录响应信息
+        """以 debug 级别记录响应状态、耗时与 JSON 响应体。
 
         Args:
             response: 响应对象
@@ -246,7 +279,6 @@ class HttpRequest:
             "url": response.url,
         }
 
-        # 尝试记录响应体（如果是 JSON）
         try:
             if response.headers.get("Content-Type", "").startswith("application/json"):
                 log_data["response_body"] = response.json()
@@ -261,19 +293,26 @@ class HttpRequest:
     def _make_request_with_retry(
         self, method: str, url: str, enable_retry: bool = True, max_retries: int = 3, retry_interval: int = 1, **kwargs
     ) -> requests.Response:
-        """
-        发送 HTTP 请求，支持自动重试
+        """发送请求，失败时按指数退避重试。
+
+        仅连接错误、超时与 5xx 响应会重试，其余异常直接抛出。
+        每次尝试都会合并会话头、注入随机 User-Agent 并编码头值。
+
+        副作用：发起网络请求；每次尝试都会写请求与响应日志。
 
         Args:
             method: HTTP 方法
-            url: 请求 URL
-            **kwargs: 其他请求参数
+            url: 完整 URL
+            enable_retry: 是否启用重试
+            max_retries: 最大重试次数，首次请求不计入
+            retry_interval: 首次重试等待秒数，之后每次翻倍
+            **kwargs: 透传给 ``Session.request``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
 
         Raises:
-            RequestException: 请求失败且重试次数用尽
+            RequestException: 重试耗尽或遇到不可重试的异常
         """
         max_retries = max_retries if enable_retry else 0
         retry_delay = retry_interval
@@ -283,27 +322,21 @@ class HttpRequest:
         for attempt in range(max_retries + 1):
             try:
                 if "headers" in kwargs:
-                    # 合并会话头和请求头
-                    headers = kwargs["headers"]
-                    # headers["Content-Type"] = "application/json;charset=utf-8"
+                    # 会话头与请求头合并，非 ASCII 值按 UTF-8 字节发送
+                    headers = dict(self.session.headers)
+                    headers.update(kwargs["headers"] or {})
                     headers["User-Agent"] = get_random_pc_ua()
-                    kwargs["headers"] = headers
+                    kwargs["headers"] = _sanitize_headers(headers)
                 else:
-                    # headers = {"Content-Type": "application/json;charset=utf-8", "User-Agent": get_random_pc_ua()}
-                    headers = {"User-Agent": get_random_pc_ua()}
-                    kwargs["headers"] = headers
+                    headers = dict(self.session.headers)
+                    headers["User-Agent"] = get_random_pc_ua()
+                    kwargs["headers"] = _sanitize_headers(headers)
 
-                # 记录请求信息
                 self._log_request(method, url, **kwargs)
 
-                # 发送请求
                 response = self.session.request(method=method, url=url, timeout=self.timeout, **kwargs)
 
-                # 记录响应信息
                 self._log_response(response)
-
-                # 检查 HTTP 错误
-                # response.raise_for_status()
 
                 return response
 
@@ -318,7 +351,7 @@ class HttpRequest:
 
                 if attempt < max_retries:
                     time.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
+                    retry_delay *= 2
                 else:
                     logger.error(
                         f"[http_request] 请求重试耗尽，共{max_retries + 1}次尝试: {str(e)}",
@@ -340,96 +373,103 @@ class HttpRequest:
                 logger.error(f"请求异常: {str(e)}", error=str(e))
                 raise
 
-        # 如果所有重试都失败，抛出最后一个异常
+        # 全部重试失败时抛出最后一次异常
         if last_exception:
             raise last_exception
         raise RequestException(f"Request failed after {max_retries + 1} attempts")
 
     def get(self, endpoint: str, **kwargs) -> requests.Response:
-        """
-        发送 GET 请求
+        """发送 GET 请求。
+
+        副作用：发起网络请求。
 
         Args:
-            endpoint: API 端点路径
-            **kwargs: 其他请求参数（params, headers 等）
+            endpoint: 端点路径或完整 URL
+            **kwargs: 透传给 ``Session.request``，如 ``params`` / ``headers``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
         """
         url = self._build_url(endpoint)
         return self._make_request_with_retry("GET", url, **kwargs)
 
     def post(self, endpoint: str, **kwargs) -> requests.Response:
-        """
-        发送 POST 请求
+        """发送 POST 请求。
+
+        副作用：发起网络请求。
 
         Args:
-            endpoint: API 端点路径
-            **kwargs: 其他请求参数（json, data, headers 等）
+            endpoint: 端点路径或完整 URL
+            **kwargs: 透传给 ``Session.request``，如 ``json`` / ``data`` / ``headers``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
         """
         url = self._build_url(endpoint)
         return self._make_request_with_retry("POST", url, **kwargs)
 
     def put(self, endpoint: str, **kwargs) -> requests.Response:
-        """
-        发送 PUT 请求
+        """发送 PUT 请求。
+
+        副作用：发起网络请求。
 
         Args:
-            endpoint: API 端点路径
-            **kwargs: 其他请求参数（json, data, headers 等）
+            endpoint: 端点路径或完整 URL
+            **kwargs: 透传给 ``Session.request``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
         """
         url = self._build_url(endpoint)
         return self._make_request_with_retry("PUT", url, **kwargs)
 
     def delete(self, endpoint: str, **kwargs) -> requests.Response:
-        """
-        发送 DELETE 请求
+        """发送 DELETE 请求。
+
+        副作用：发起网络请求。
 
         Args:
-            endpoint: API 端点路径
-            **kwargs: 其他请求参数（params, headers 等）
+            endpoint: 端点路径或完整 URL
+            **kwargs: 透传给 ``Session.request``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
         """
         url = self._build_url(endpoint)
         return self._make_request_with_retry("DELETE", url, **kwargs)
 
     def patch(self, endpoint: str, **kwargs) -> requests.Response:
-        """
-        发送 PATCH 请求
+        """发送 PATCH 请求。
+
+        副作用：发起网络请求。
 
         Args:
-            endpoint: API 端点路径
-            **kwargs: 其他请求参数（json, data, headers 等）
+            endpoint: 端点路径或完整 URL
+            **kwargs: 透传给 ``Session.request``
 
         Returns:
-            requests.Response: 响应对象
+            响应对象
         """
         url = self._build_url(endpoint)
         return self._make_request_with_retry("PATCH", url, **kwargs)
 
     def extract_and_cache(self, response: requests.Response, cache_key: str, json_path: str | None = None) -> Any:
-        """
-        从响应中提取数据并存储到缓存
+        """按路径从响应中取值并写入缓存。
+
+        路径未命中时同样写入 None，便于下游区分「已取过但为空」。
+
+        副作用：写入全局 ``CacheManager``。
 
         Args:
-            response: 响应对象
-            cache_key: 缓存键名
-            json_path: JSON 路径，使用点号分隔（如 'data.user.id'）
-                      如果为 None，则缓存整个响应体
+            response: 响应对象，需为 JSON
+            cache_key: 缓存键
+            json_path: 点号分隔的路径，如 ``data.user.id``；None 时缓存整个响应体
 
         Returns:
-            Any: 提取的数据
+            提取到的值；路径未命中时为 None
 
         Raises:
-            ValueError: 如果响应不是 JSON 格式或路径无效
+            ValueError: 响应体不是合法 JSON
         """
         try:
             response_data = response.json()
@@ -437,13 +477,12 @@ class HttpRequest:
             logger.error(f"响应JSON解析失败: {str(e)}", error=str(e))
             raise ValueError(f"Response is not valid JSON: {str(e)}") from e
 
-        # 如果没有指定路径，缓存整个响应
+        # 未指定路径时缓存整个响应体
         if json_path is None:
             self.cache.set(cache_key, response_data)
             logger.info(f"缓存完整响应，key: {cache_key}", cache_key=cache_key)
             return response_data
 
-        # 按照路径提取数据
         extracted_value = self._extract_by_path(response_data, json_path)
 
         if extracted_value is not None:
@@ -458,15 +497,14 @@ class HttpRequest:
         return extracted_value
 
     def _extract_by_path(self, data: Any, path: str) -> Any:
-        """
-        按照路径从数据中提取值
+        """按点号路径取值，列表段按整数下标解析。
 
         Args:
-            data: 数据对象（通常是字典或列表）
-            path: 路径字符串，使用点号分隔（如 'data.user.id'）
+            data: 已解析的响应数据
+            path: 点号分隔路径；空串时返回原数据
 
         Returns:
-            Any: 提取的值，如果路径无效则返回 None
+            取到的值；路径不存在或类型不匹配时返回 None
         """
         if not path:
             return data
@@ -476,11 +514,9 @@ class HttpRequest:
 
         for key in keys:
             try:
-                # 处理列表索引
                 if isinstance(current, list):
                     index = int(key)
                     current = current[index]
-                # 处理字典键
                 elif isinstance(current, dict):
                     current = current[key]
                 else:
@@ -497,30 +533,28 @@ class HttpRequest:
         return current
 
     def get_cached_value(self, cache_key: str, default: Any = None) -> Any:
-        """
-        从缓存中获取值
+        """读取缓存值。
 
         Args:
-            cache_key: 缓存键名
-            default: 如果键不存在时返回的默认值
+            cache_key: 缓存键
+            default: 键不存在时的返回值
 
         Returns:
-            Any: 缓存的值，如果不存在则返回 default
+            缓存值或 default
         """
         value = self.cache.get(cache_key, default)
         logger.debug(f"获取缓存值: {cache_key}", cache_key=cache_key)
         return value
 
     def validate_status_code(self, response: requests.Response, expected_status: int | list[int]) -> bool:
-        """
-        验证响应状态码
+        """校验响应状态码是否命中期望值。
 
         Args:
             response: 响应对象
-            expected_status: 期望的状态码，可以是单个整数或整数列表
+            expected_status: 期望状态码，单个整数或列表
 
         Returns:
-            bool: 如果状态码匹配返回 True，否则返回 False
+            命中返回 True，否则返回 False
         """
         if isinstance(expected_status, int):
             expected_status = [expected_status]
@@ -543,21 +577,18 @@ class HttpRequest:
         return is_valid
 
     def close(self) -> None:
-        """
-        关闭 session，释放资源
+        """关闭会话，释放连接。
+
+        副作用：之后的请求无法再复用该实例。
         """
         if self.session:
             self.session.close()
             logger.debug("HTTP会话已关闭", base_url=self.base_url)
 
     def __enter__(self):
-        """
-        支持上下文管理器
-        """
+        """进入上下文，返回自身。"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """
-        退出上下文时自动关闭 session
-        """
+        """退出上下文时关闭会话。"""
         self.close()

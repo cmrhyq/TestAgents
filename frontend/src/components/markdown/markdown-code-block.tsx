@@ -17,8 +17,9 @@ function PlainCodeBlock({ code, language }: { code: string; language: string }) 
 }
 
 /**
- * 代码块：流式期间渲染 plain pre/code；流结束后对编程语言用 Shiki 高亮（双主题）。
- * text/ASCII 图始终用 plain pre，保留换行与空格对齐。
+ * 代码块：流式期间渲染纯文本 pre/code，流结束后对编程语言做 Shiki 高亮。
+ *
+ * `text` 与 ASCII 图始终走纯文本渲染，以保留换行与空格对齐。
  */
 export function MarkdownCodeBlock({ code, language, isStreaming }: MarkdownCodeBlockProps) {
   const usePlain = isStreaming || !shouldHighlightLanguage(language);

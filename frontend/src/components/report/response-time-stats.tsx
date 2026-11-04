@@ -5,7 +5,7 @@ import { computeResponseStats } from "@/lib/stats";
 interface ResponseTimeStatsProps {
   /** 每次工具调用的耗时（毫秒） */
   durations: number[];
-  /** 读数带标题后缀，默认「响应」 */
+  /** 读数标题的后缀，默认「响应」 */
   label?: string;
 }
 

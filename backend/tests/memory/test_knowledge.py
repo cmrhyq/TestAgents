@@ -1,7 +1,6 @@
-"""KnowledgeBase 单元测试。
+"""`KnowledgeBase` 的摄取、检索与管理。
 
-覆盖：文档摄取（落盘 + 切片 + 入库）、有无向量库两条路径、检索降级、删除。
-向量库与 embedding 全部注入 mock，不依赖外部服务。
+向量库与 embedding 均注入替身，配合临时 SQLite 与临时工作区，不依赖外部服务。
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ SPACE_ID = 3001
 
 @pytest.fixture()
 def session_scope(tmp_path):
+    """构造临时 SQLite 库，产出提交/回滚受控的 session 上下文管理器。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'kb.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -85,6 +85,7 @@ def lexical_kb(tmp_path, session_scope) -> KnowledgeBase:
 
 @pytest.fixture()
 def vector_kb(tmp_path, session_scope) -> KnowledgeBase:
+    """带向量库与 embedder 的实例，走 vector 索引路径。"""
     return KnowledgeBase(
         workspace=WorkspaceManager(root=tmp_path / "workspaces"),
         session_scope=session_scope,
@@ -94,6 +95,8 @@ def vector_kb(tmp_path, session_scope) -> KnowledgeBase:
 
 
 class TestIngest:
+    """文档摄取：落盘、切片、索引模式与非法输入。"""
+
     def test_writes_file_and_chunks(self, lexical_kb, tmp_path):
         doc = lexical_kb.ingest(SPACE_ID, "需求.md", "# 需求\n\n登录要支持短信验证码".encode())
 
@@ -129,6 +132,8 @@ class TestIngest:
 
 
 class TestSearch:
+    """检索：命中与未命中、空间隔离、top_k 上限。"""
+
     def test_lexical_search_finds_content(self, lexical_kb):
         lexical_kb.ingest(SPACE_ID, "api.md", "用户登录接口需要传 username 和 password".encode())
 
@@ -166,6 +171,8 @@ class TestSearch:
 
 
 class TestManage:
+    """文档列举、删除与重建索引。"""
+
     def test_list_documents(self, lexical_kb):
         lexical_kb.ingest(SPACE_ID, "a.md", "内容 A".encode())
         lexical_kb.ingest(SPACE_ID, "b.md", "内容 B".encode())

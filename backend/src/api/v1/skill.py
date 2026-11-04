@@ -1,9 +1,7 @@
-"""Skills 管理路由。
+"""Skills 管理路由：列表、详情、导入与启停。
 
-- ``GET  /skills``            列出可见 skill（内置 + 空间），带启用状态
-- ``GET  /skills/{name}``     详情（含 SKILL.md 正文，供前端详情抽屉）
-- ``POST /skills/import``     导入 zip 包
-- ``PATCH /skills/{name}``    启用 / 禁用
+skill 内容以文件为真源，本层只读写启用状态与安装目录；
+空间级同名 skill 覆盖内置 skill。
 """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ from src.skill.service import SkillImportError, get_skill_service
 
 router = APIRouter(prefix="/skills", tags=["技能管理"])
 
-# 单个 skill 包上限：够放文档与脚本，又不至于让人把整个仓库塞进来
+# 单个 skill 包上限 20MB
 MAX_ZIP_BYTES = 20 * 1024 * 1024
 
 
@@ -59,7 +57,17 @@ def list_skills(
     space_id: int | None = Query(default=None, description="空间 ID；不传则只返回内置 skill"),
     db: Session = Depends(get_db),
 ):
-    """列出可见 skill。空间级同名 skill 会覆盖内置。"""
+    """列出可见 skill，并同步其目录与描述等元信息。
+
+    副作用：把发现的 skill 元信息同步进 ``skill`` 表（只更新已有行）。
+
+    Args:
+        space_id: 空间 ID；不传则只返回内置 skill
+        db: 请求级数据库会话
+
+    Returns:
+        skill 列表与总数，每项带启用状态
+    """
     service = get_skill_service()
     skills = service.list_skills(space_id)
     registry = SkillRegistry(db)
@@ -88,7 +96,19 @@ def get_skill(
     space_id: int | None = Query(default=None, description="空间 ID"),
     db: Session = Depends(get_db),
 ):
-    """获取单个 skill 详情（含 SKILL.md 正文）。"""
+    """查询单个 skill 详情，含 SKILL.md 正文。
+
+    Args:
+        name: skill 名，需符合小写字母/数字/连字符规则
+        space_id: 空间 ID，用于空间级覆盖
+        db: 请求级数据库会话
+
+    Returns:
+        skill 详情与启用状态
+
+    Raises:
+        NotFoundError: skill 不存在，返回 HTTP 404
+    """
     skill = get_skill_service().find(name, space_id)
     if skill is None:
         raise NotFoundError(f"skill 不存在: {name}")
@@ -112,9 +132,21 @@ async def import_skill(
     space_id: int | None = Query(default=None, description="安装到哪个空间；不传则装进内置库"),
     db: Session = Depends(get_db),
 ):
-    """导入 zip 包形式的 skill。
+    """导入 zip 包中的 skill，一个包可含多个 skill。
 
-    一个 zip 可以包含多个 skill（每个 skill 一个目录）。
+    副作用：解压落盘到目标目录（同名目录先删后写），并写入启用状态；
+    条目路径越界时整包拒绝。
+
+    Args:
+        file: skill 包，zip 格式，每个 skill 一个目录并含 SKILL.md
+        space_id: 安装到指定空间；不传则装进内置库
+        db: 请求级数据库会话
+
+    Returns:
+        导入后该可见范围内的 skill 列表
+
+    Raises:
+        ValidationError: 包过大、非法 zip、无 SKILL.md 或含越界路径，返回 HTTP 422
     """
     data = await file.read()
     if len(data) > MAX_ZIP_BYTES:
@@ -139,7 +171,22 @@ def toggle_skill(
     space_id: int | None = Query(default=None, description="空间 ID"),
     db: Session = Depends(get_db),
 ):
-    """启用或禁用某个 skill。"""
+    """启用或禁用某个 skill。
+
+    副作用：写 ``skill`` 表。
+
+    Args:
+        name: skill 名
+        body: 目标启用状态
+        space_id: 空间 ID；不传则改全局默认
+        db: 请求级数据库会话
+
+    Returns:
+        更新后的 skill 列表项
+
+    Raises:
+        NotFoundError: skill 不存在，返回 HTTP 404
+    """
     skill = get_skill_service().find(name, space_id)
     if skill is None:
         raise NotFoundError(f"skill 不存在: {name}")

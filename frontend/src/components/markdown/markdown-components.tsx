@@ -5,7 +5,7 @@ import { MarkdownMermaidBlock } from "./markdown-mermaid-block.tsx";
 
 const SAFE_PROTOCOL = /^(https?:|mailto:)/i;
 
-/** 创建带 isStreaming 上下文的 ReactMarkdown components 映射。 */
+/** 创建带流式上下文的 ReactMarkdown 组件映射。 */
 export function createMarkdownComponents(isStreaming: boolean): Components {
   return {
     pre: ({ children }) => <>{children}</>,

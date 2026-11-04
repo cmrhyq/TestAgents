@@ -19,9 +19,16 @@ interface CreateCrudHooksOptions {
   queryKeys: ResourceQueryKeys;
   basePath: string;
   labels: CrudLabels;
+  /** 创建成功后是否弹 toast，默认 true */
   toastOnCreate?: boolean;
 }
 
+/**
+ * 按资源路径生成一套 React Query CRUD hook。
+ *
+ * 写操作成功后失效 `queryKeys.all`（连带列表与详情），更新时额外失效对应详情；
+ * 错误提示优先取后端 message，缺失时回退到 `labels` 中的文案。
+ */
 export function createCrudHooks<
   TEntity,
   TList,

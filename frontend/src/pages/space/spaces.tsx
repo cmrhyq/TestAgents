@@ -36,6 +36,7 @@ const STATUS_FILTERS = [
   { value: "0", label: "未启用", status: 0 },
 ];
 
+/** 空间列表页：搜索、状态筛选、创建与删除。 */
 export default function SpacesPage() {
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState("");
@@ -49,7 +50,6 @@ export default function SpacesPage() {
 
   const deleteSpace = useDeleteSpace();
 
-  // 过滤条件变化时回到第 1 页
   useEffect(() => {
     setPage(1);
   }, [debouncedKeyword, status]);
@@ -151,7 +151,6 @@ export default function SpacesPage() {
         }
       />
 
-      {/* 查询模块 */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

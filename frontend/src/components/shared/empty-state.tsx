@@ -7,6 +7,7 @@ interface EmptyStateProps {
   action?: ReactNode;
 }
 
+/** 空态占位：图标、标题、描述与操作区。 */
 export function EmptyState({ icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center px-4 py-12 text-center">

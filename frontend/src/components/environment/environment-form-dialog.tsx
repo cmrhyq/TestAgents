@@ -20,6 +20,7 @@ interface EnvironmentFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   spaceId: string | number;
+  /** 有值时进入编辑模式，否则为新建。 */
   environment?: Environment | null;
 }
 
@@ -176,6 +177,7 @@ function EnvironmentFormContent({ spaceId, environment, onClose }: EnvironmentFo
   );
 }
 
+/** 环境表单弹窗：新建与编辑复用，提交成功后关闭。 */
 export function EnvironmentFormDialog({
   open,
   onOpenChange,
