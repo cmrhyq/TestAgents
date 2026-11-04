@@ -1,21 +1,7 @@
 """Agent 运行时：手写 ReAct 循环。
 
-**为什么不用 LangGraph**：这里只需要「模型 ↔ 工具」两节点循环，
-StateGraph / reducer / checkpoint 全都用不上，却要额外维护一套 state schema
-和事件映射。手写约 200 行，事件粒度完全可控（``tool_call`` 要带 args、
-``tool_result`` 要带耗时），单测也更直接。
-
-三条硬规则：
-
-1. **模式在执行路径上生效**。工具列表进模型前再按模式过滤一次，不依赖调用方
-   是否已经裁过——`ask` 模式下模型手里根本不存在 `send_request`，
-   它就不可能"违抗指令"去发请求。
-2. **工具异常不打断流**。异常转成 ``ok=False`` 的工具结果回灌给模型，
-   让模型自己纠偏（换个参数、换个接口、或如实报告失败）。整条流因为
-   一次工具报错而中断，是比失败更糟的体验。
-3. **工具调用分片交给 LangChain 合并**。流式下参数是 ``{"val`` + ``ue": 1}``
-   这样分片到达的，手写拼接极易错位；``AIMessageChunk.__add__`` 已经把
-   分片累积与 JSON 解析做对了。
+三条约束：模式过滤在工具进入模型前再执行一次；工具异常转成 ``ok=False`` 的结果
+回灌模型而不中断流；流式 tool_call 参数交由 ``AIMessageChunk.__add__`` 合并。
 """
 
 from __future__ import annotations
@@ -41,6 +27,7 @@ from src.agent.events import (
     ToolResultEvent,
 )
 from src.agent.modes import filter_tools
+from src.agent.recording import RunRecorder, ToolOutcome
 from src.agent.tools.registry import ToolBundle, build_tools
 from src.core.logging import get_logger
 
@@ -53,8 +40,8 @@ __all__ = ["RunRequest", "run"]
 class RunRequest:
     """一轮对话的输入。
 
-    这里刻意**不收** ORM 对象：运行时只依赖纯数据，才能在没有数据库的情况下
-    单测，也避免 session 生命周期跨进异步生成器（很容易拿到已关闭的 session）。
+    只依赖纯数据、不含 ORM 对象，便于无数据库单测，也避免 session 生命周期
+    跨进异步生成器。
 
     Attributes:
         instruction: 用户本轮指令
@@ -70,6 +57,7 @@ class RunRequest:
         memories: 待注入的跨会话记忆
         skill_blocks: 已渲染的 skill 文本块
         history: 历史消息
+        run_id: 执行记录 ID，由调用方在 recorder.start() 后回填（供 llm_log 归因）
     """
 
     instruction: str
@@ -85,6 +73,7 @@ class RunRequest:
     memories: list[dict[str, Any]] = field(default_factory=list)
     skill_blocks: str = ""
     history: list[BaseMessage] = field(default_factory=list)
+    run_id: int | None = None
 
 
 async def run(
@@ -92,13 +81,17 @@ async def run(
     *,
     model: Any | None = None,
     bundle: ToolBundle | None = None,
+    recorder: RunRecorder | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """执行一轮对话，逐事件产出。
+
+    会调用模型与工具（工具可能产生外部副作用），并通过 ``recorder`` 写执行记录。
 
     Args:
         request: 本轮输入
         model: 聊天模型（测试注入用）；None 时取全局 gateway
         bundle: 工具集合（测试注入用）；None 时按请求装配
+        recorder: 执行记录器；None 表示不落库（单测、无 DB 场景）
 
     Yields:
         AgentEvent：start → (text_delta | tool_call | tool_result)* → final | error
@@ -111,7 +104,7 @@ async def run(
         environment_id=request.environment_id,
     )
     policy = tools.policy
-    # 再裁一次：bundle 可能是调用方手工构造的，模式保证必须在执行路径上闭环
+    # 再裁一次：bundle 可能由调用方手工构造，模式保证需在执行路径上闭环
     allowed = filter_tools(tools.tools, policy, tools.skill_allowed)
 
     yield StartEvent(
@@ -119,6 +112,7 @@ async def run(
         space_id=request.space_id,
         mode=policy.mode.value,
         skills=list(request.skill_names),
+        run_id=request.run_id,
     )
 
     messages: list[BaseMessage] = [
@@ -128,6 +122,8 @@ async def run(
     ]
     chat = _make_streamer(model, allowed, request)
     tool_map = {tool.name: tool for tool in allowed}
+    # seq 用局部计数器，模块级全局会被并发轮次互相污染
+    seq_counter = iter(range(1, 1_000_000))
 
     logger.info(
         "Agent 轮次开始",
@@ -167,12 +163,29 @@ async def run(
             yield ToolCallEvent(id=call_id, name=name, args=dict(args))
 
             started = perf_counter()
-            ok, content = await _execute(tool_map, name, args)
-            duration_ms = int((perf_counter() - started) * 1000)
+            outcome: ToolOutcome | None = None
+            try:
+                outcome = await _execute(tool_map, name, args)
+            finally:
+                # 放 finally：即使此刻断流也要留痕；recorder 内部是短事务，不 await、不 yield
+                duration_ms = int((perf_counter() - started) * 1000)
+                if outcome is not None and recorder is not None:
+                    try:
+                        recorder.tool_call(
+                            step=step,
+                            seq=next(seq_counter),
+                            call_id=call_id,
+                            name=name,
+                            args=dict(args),
+                            outcome=outcome,
+                            duration_ms=duration_ms,
+                        )
+                    except Exception:  # 记录层内部已兜，这里防未知错误打断流
+                        logger.warning("工具调用记录失败", tool=name)
 
-            yield ToolResultEvent(
-                id=call_id, name=name, ok=ok, content=content, duration_ms=duration_ms
-            )
+            # 模型看到的内容必须与前端一致，否则排障时会误判
+            content = _for_model(outcome.text)
+            yield ToolResultEvent(id=call_id, name=name, ok=outcome.ok, content=content, duration_ms=duration_ms)
             messages.append(ToolMessage(content=content, tool_call_id=call_id, name=name or None))
 
     logger.warning("Agent 超过最大轮次", max_steps=policy.max_steps)
@@ -184,6 +197,7 @@ async def run(
 # ---------------------------------------------------------------------------
 
 def _system_prompt(request: RunRequest, tools: ToolBundle) -> str:
+    """按请求组装本轮 system prompt。"""
     snapshot = SpaceSnapshot(
         space_id=request.space_id,
         space_name=request.space_name or f"空间 {request.space_id}",
@@ -200,8 +214,7 @@ def _system_prompt(request: RunRequest, tools: ToolBundle) -> str:
 
 
 def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest) -> Any:
-    """返回「发一轮消息 → 产出 chunk 流」的可调用对象。
-    """
+    """返回把消息转成 chunk 流的可调用对象。"""
     if model is not None:
         bound = model.bind_tools(tools) if tools else model
         return bound.astream
@@ -216,6 +229,7 @@ def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest
             tools,
             space_id=request.space_id,
             conversation_id=request.conversation_id,
+            run_id=request.run_id,
         )
 
     return _stream
@@ -226,10 +240,10 @@ def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest
 # ---------------------------------------------------------------------------
 
 def _merge(accumulated: Any, chunk: Any) -> Any:
-    """把流式 chunk 累积起来。
+    """累积流式 chunk。
 
-    优先用 LangChain 的 ``+``（会累积 content 与 tool_call_chunks 并解析参数）；
-    遇到不可加的 provider 私有 chunk 时退化为「只保留 content」。
+    优先用 LangChain 的 ``+``，它会累积 content 与 tool_call_chunks 并解析参数；
+    遇到不可相加的 provider 私有 chunk 时退化为只保留 content。
     """
     if accumulated is None:
         return chunk
@@ -241,7 +255,7 @@ def _merge(accumulated: Any, chunk: Any) -> Any:
 
 
 def _chunk_text(chunk: Any) -> str:
-    """取 chunk 的纯文本。多模态 content 是 list，拼掉非文本部分。"""
+    """取 chunk 的纯文本；多模态 content 为 list 时只拼接文本部分。"""
     content = getattr(chunk, "content", "") if chunk is not None else ""
     if isinstance(content, str):
         return content
@@ -257,6 +271,7 @@ def _chunk_text(chunk: Any) -> str:
 
 
 def _usage(accumulated: Any) -> dict[str, Any]:
+    """取 chunk 的 usage 元数据；无则返回空字典。"""
     usage = getattr(accumulated, "usage_metadata", None) if accumulated is not None else None
     return dict(usage) if usage else {}
 
@@ -264,8 +279,7 @@ def _usage(accumulated: Any) -> dict[str, Any]:
 def _assistant_message(accumulated: Any, calls: list[dict]) -> AIMessage:
     """把累积结果固化成 AIMessage 回写上下文。
 
-    只保留 ``id/name/args/type`` 四个键：provider 附加字段（如
-    ``index``、``provider_specific_fields``）回传时会被部分模型拒绝。
+    只保留 ``id/name/args/type`` 四个键：provider 附加字段回传时会被部分模型拒绝。
     """
     return AIMessage(
         content=_chunk_text(accumulated),
@@ -285,28 +299,46 @@ def _assistant_message(accumulated: Any, calls: list[dict]) -> AIMessage:
 # 工具执行
 # ---------------------------------------------------------------------------
 
-async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any]) -> tuple[bool, str]:
-    """执行单个工具调用，返回 ``(是否成功, 结果文本)``。
+async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any]) -> ToolOutcome:
+    """执行单个工具调用，异常一律转成 ``ToolOutcome``。
 
-    任何异常都在这里被吃掉并转成文本——工具失败是**正常业务分支**，
-    不是链路故障。模型需要看到失败原因才能自我修正。
+    工具失败属正常业务分支，需回灌模型以便自我修正；``error_type`` /
+    ``error_message`` 同时保留原始异常，供记录层归因。
+
+    Args:
+        tool_map: 工具名到工具实例的映射
+        name: 工具名
+        args: 调用参数
+
+    Returns:
+        ``ToolOutcome``；失败时 ``ok=False`` 并带错误类型与原文
     """
     tool = tool_map.get(name)
     if tool is None:
-        return False, (
+        return ToolOutcome(
+            False,
             f"工具 {name} 不存在。当前可用工具：{', '.join(sorted(tool_map)) or '（无）'}。"
-            f"请只调用列表中存在的工具。"
+            f"请只调用列表中存在的工具。",
+            "not_found",
+            f"tool {name} not found",
         )
 
     try:
         result = await _ainvoke(tool, args)
     except ValidationError as exc:  # 参数不符合 schema：最常见的模型失误
-        return False, f"工具 {name} 参数不合法：{_validation_message(exc)}"
+        message = _validation_message(exc)
+        return ToolOutcome(False, f"工具 {name} 参数不合法：{message}", "validation", message)
     except Exception as exc:
         logger.warning("工具执行失败", tool=name, error=str(exc))
-        return False, f"工具 {name} 执行失败：{type(exc).__name__}: {exc}"
+        return ToolOutcome(
+            False,
+            f"工具 {name} 执行失败：{type(exc).__name__}: {exc}",
+            type(exc).__name__,
+            str(exc),
+        )
 
-    return True, _stringify(result)
+    # 这里返回全量文本供落库；给模型的截断在 _for_model 处理
+    return ToolOutcome(True, _raw_text(result))
 
 
 def _validation_message(exc: Exception) -> str:
@@ -326,11 +358,7 @@ def _validation_message(exc: Exception) -> str:
 
 
 async def _ainvoke(tool: BaseTool, args: dict[str, Any]) -> Any:
-    """统一的工具调用入口。
-
-    LangChain 的 ``ainvoke`` 对同步工具会走线程池，但对某些自定义 tool 实现
-    可能不存在——这里做一次降级，避免单测里注入的假工具直接 AttributeError。
-    """
+    """统一的工具调用入口；缺少 ``ainvoke`` 时退化为同步 ``invoke``。"""
     ainvoke = getattr(tool, "ainvoke", None)
     if callable(ainvoke):
         return await ainvoke(args)
@@ -340,20 +368,21 @@ async def _ainvoke(tool: BaseTool, args: dict[str, Any]) -> Any:
 _MAX_RESULT_CHARS = 8_000
 
 
-def _stringify(result: Any) -> str:
-    """工具返回值归一化为文本，并做长度上限。
-
-    上限比 SSE 下发（4k）更宽：模型看到的内容要多于用户看到的内容，
-    否则模型会以为自己读到的就是全部。
-    """
+def _raw_text(result: Any) -> str:
+    """工具返回值归一化为文本，不做长度限制（供落库与后续截断复用）。"""
     if isinstance(result, str):
-        text = result
-    else:
-        try:
-            text = json.dumps(result, ensure_ascii=False, default=str)
-        except Exception:
-            text = str(result)
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except Exception:
+        return str(result)
 
-    if len(text) > _MAX_RESULT_CHARS:
-        return text[:_MAX_RESULT_CHARS] + f"\n…（工具结果已截断，原始长度 {len(text)} 字符）"
-    return text
+
+def _for_model(raw: str) -> str:
+    """给模型看的版本，上限 8000 字符。
+
+    该上限宽于 SSE 下发（4k）、窄于落库（2MB），三者各自独立，不要复用同一常量。
+    """
+    if len(raw) <= _MAX_RESULT_CHARS:
+        return raw
+    return raw[:_MAX_RESULT_CHARS] + f"\n…（工具结果已截断，原始长度 {len(raw)} 字符）"

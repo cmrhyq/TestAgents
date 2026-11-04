@@ -1,7 +1,6 @@
-"""工作流触发服务。
+"""OpenAPI 文档上传与解析服务。
 
-承接 ``api/v1/workflow.py`` 的业务：OpenAPI 文档上传保存与解析编排。
-路由层只负责收文件、调 Service、返回 schema。
+承接 ``api/v1/workflow.py`` 的业务编排：保存上传文件、解析并写入环境与接口。
 """
 
 import json
@@ -18,7 +17,7 @@ from src.utils.parser import OpenAPIParser
 
 logger = get_logger(__name__)
 
-# 上传的 OpenAPI 文档持久化目录，供后续解析时读取
+# 上传文档的持久化目录，后续解析按该目录下的路径读取
 _UPLOAD_DIR = Path("uploads")
 _ALLOWED_SUFFIXES = (".json", ".yaml", ".yml")
 
@@ -28,6 +27,15 @@ class WorkflowService:
 
     @staticmethod
     def _build_environments(space_id: int, parser: OpenAPIParser) -> list[EnvironmentCreate]:
+        """把 OpenAPI ``servers`` 转为环境创建参数。
+
+        Args:
+            space_id: 目标空间主键
+            parser: 已加载的 OpenAPI 解析器
+
+        Returns:
+            环境创建参数列表，与 ``parser.base_url`` 相同的条目置为默认环境
+        """
         return [
             EnvironmentCreate(
                 space_id=space_id,
@@ -42,6 +50,18 @@ class WorkflowService:
 
     @staticmethod
     def _build_endpoints(space_id: int, parser: OpenAPIParser) -> list[EndpointCreate]:
+        """把 OpenAPI 接口定义转为接口创建参数。
+
+        结构字段预序列化为 JSON 字符串，``header`` 参数单独存一份，``content_type``
+        取请求体的首个 media type，缺省为 ``application/json``。
+
+        Args:
+            space_id: 目标空间主键
+            parser: 已加载的 OpenAPI 解析器
+
+        Returns:
+            接口创建参数列表，顺序与解析结果一致
+        """
         result = []
         for ep in parser.endpoints:
             header_params = [p for p in ep.get("parameters", []) if p.get("in") == "header"]
@@ -75,22 +95,24 @@ class WorkflowService:
         return result
 
     def save_upload(self, filename: str, content: bytes) -> str:
-        """校验并保存上传的 OpenAPI 文档，返回绝对路径。
+        """校验并保存上传的 OpenAPI 文档。
+
+        副作用：在 ``uploads`` 目录写入新文件，文件名加随机前缀避免覆盖。
 
         Args:
-            filename: 原始文件名
+            filename: 原始文件名，只取其 basename
             content: 文件内容
 
         Returns:
-            服务器保存后的绝对路径
+            保存后的绝对路径
 
         Raises:
-            ValidationError: 文件名或后缀非法
+            ValidationError: 文件名为空或后缀不在 ``.json`` / ``.yaml`` / ``.yml`` 内
         """
         if not filename:
             raise ValidationError("文件名不能为空")
 
-        # 仅保留文件名部分，防止路径遍历（如 ../../etc/passwd）
+        # 只取 basename，避免 ../ 形式的路径遍历
         safe_name = Path(filename).name
         suffix = Path(safe_name).suffix.lower()
         if suffix not in _ALLOWED_SUFFIXES:
@@ -105,18 +127,25 @@ class WorkflowService:
         return str(resolved)
 
     def parse_openapi(self, space_id: int, filename: str, content: bytes) -> dict:
-        """上传并解析 OpenAPI 文档，解析接口并存入数据库。
+        """解析 OpenAPI 文档并把环境与接口写入数据库。
+
+        使用 ``init_database_from_config`` 独立开启会话，与请求级会话无关，事务在该
+        会话上下文退出时提交；临时文件在 ``finally`` 中删除。
+
+        副作用：写临时文件、写库并提交，环境与接口按 ``(space_id, name)`` /
+        ``(space_id, path, method)`` 去重，已存在的条目被跳过。
 
         Args:
-            space_id: 空间id
-            filename: 原始文件名
+            space_id: 目标空间主键
+            filename: 原始文件名，只用于判断后缀与日志
             content: 文件内容
 
         Returns:
-            {"endpoint_count": int, "space_id": int}
+            ``{"endpoint_count": int, "space_id": int}``，计数为解析出的条目数，
+            非实际新增数
 
         Raises:
-            ValidationError: 文件名非法或解析失败
+            ValidationError: 文件名为空、后缀不支持、解析失败或写入冲突
         """
         if not filename:
             raise ValidationError("文件名不能为空")

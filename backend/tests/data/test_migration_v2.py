@@ -1,9 +1,7 @@
-"""v2 迁移测试：旧库 -> Agent 平台 schema。
+"""v2 迁移：旧库到 Agent 平台 schema。
 
-重点验证三件事：
-1. 旧 ``mode`` 取值（Run/Ask/Plan）被正确归一化为 agent/ask/plan
-2. ``conversation`` 表重建时**不能**因为外键级联把 message 行吃掉
-3. 迁移幂等：连跑两次结果一致
+约束：旧 `mode` 取值归一化为 agent/ask/plan；重建 `conversation` 时外键级联不得删除
+`message` 行；迁移需幂等。
 """
 
 import sqlite3
@@ -86,10 +84,13 @@ def old_db(tmp_path) -> Path:
 
 
 def _engine(db_path: Path):
+    """指向临时库的引擎。"""
     return create_engine(f"sqlite:///{db_path}")
 
 
 class TestMigration:
+    """字段补齐、取值归一化与重建后的数据完整性。"""
+
     def test_adds_workspace_path_and_backfills(self, old_db):
         engine = _engine(old_db)
         migrate_v2(engine)
@@ -115,7 +116,7 @@ class TestMigration:
         assert rows == {100: "agent", 101: "ask", 102: "plan"}
 
     def test_preserves_messages_during_rebuild(self, old_db):
-        """重建 conversation 时若外键仍开启，DROP TABLE 会级联删掉 message。"""
+        """重建 `conversation` 时若外键仍开启，`DROP TABLE` 会级联删除 `message`。"""
         engine = _engine(old_db)
         migrate_v2(engine)
 
@@ -136,7 +137,7 @@ class TestMigration:
         assert row[1] is None
 
     def test_can_insert_agent_mode_after_migration(self, old_db):
-        """旧的 CHECK 会让插入 'agent' 直接失败，迁移后必须能写入。"""
+        """旧 CHECK 约束会拒绝写入 `agent`，迁移后必须可插入。"""
         engine = _engine(old_db)
         migrate_v2(engine)
 

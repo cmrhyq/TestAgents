@@ -4,7 +4,7 @@ interface HttpMethodBadgeProps {
   method: string;
 }
 
-/** 印章式 HTTP 方法徽章：描边 + mono 大写，色来自 --color-method-* token。 */
+/** 各 HTTP 方法的徽章配色。 */
 const methodStyles: Record<string, string> = {
   GET: "border-method-get/50 bg-method-get/5 text-method-get",
   POST: "border-method-post/50 bg-method-post/5 text-method-post",
@@ -15,6 +15,7 @@ const methodStyles: Record<string, string> = {
 
 const DEFAULT_STYLE = "border-border bg-muted text-muted-foreground";
 
+/** HTTP 方法徽章：按方法着色，未收录的方法使用默认样式。 */
 export function HttpMethodBadge({ method }: HttpMethodBadgeProps) {
   const upper = method.toUpperCase();
   const style = methodStyles[upper] ?? DEFAULT_STYLE;

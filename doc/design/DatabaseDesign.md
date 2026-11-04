@@ -1,805 +1,599 @@
-# ⛧ 数据库设计文档 — TestAgents ⛧
+# 数据库设计
+
+> 版本：v2.0（对应 `feature/web_ui` 分支当前实现）
+> 定位：以 `backend/src/data/models/*.py` 的 ORM 定义为准，逐表记录字段、约束、索引与外键策略；
+> 并说明若干「看起来可以简化、实际不能改」的设计取舍。
+>
+> 关联文档：[架构设计](Architecture.md) · [ER 图](ER.md) · [系统流程图](SystemFlowchart.md)
 
 ---
 
-> *「数据库乃系统之基石，表结构即逻辑之骨架。此文档详录每一列、每一约束，以供后来者参阅。」*
+## 一、总体约定
+
+| 项目 | 取值 |
+|---|---|
+| 数据库引擎 | SQLite 3（连接建立时启用 WAL、外键约束、UTF-8） |
+| ORM | SQLAlchemy 2.0（`DeclarativeBase` + `Mapped[]` 注解风格） |
+| 文件位置 | `backend/db/TestAgents.db`，首次启动自动创建 |
+| 主键策略 | 全局雪花 ID（`src/utils/id.py::next_id`），`autoincrement=False` |
+| 时间字段 | `Text` 存本地时间字符串，由 `local_now()` 生成（形如 `2026-11-04 23:41:07`） |
+| 表数量 | 12 张，见 `src/data/migration/migration.py::EXPECTED_TABLES` |
+| 复合主键 | 无。所有表使用单列代理主键，业务唯一性由 UNIQUE 约束表达 |
+
+### 1.1 为什么时间用 Text 而不是 DateTime
+
+SQLite 没有原生时间类型，SQLAlchemy 的 `DateTime` 落到 SQLite 也只是字符串。既然物理存储相同，
+显式用 `Text` 可以避免「取出来是 `datetime` 还是 `str`」的隐式转换差异，也让不同时区的导出结果
+保持字面可比。代价是无法用 SQL 时间函数做区间计算，因此所有时间窗口筛选都靠字符串前缀比较
+（`created_at >= '2026-11-01'`）完成，这也是 `llm_log` 上建 `(space_id, created_at)` 复合索引的原因。
+
+### 1.2 表结构如何建立与演进
+
+启动序列（`app.py` 的 lifespan → `init_database_from_orm()`）：
+
+1. `Base.metadata.create_all()` —— 只建**不存在**的表。已存在的表不会被改动，包括新增列与索引。
+2. `migrate_v2()` —— 重建 `conversation` 表以替换 CHECK 约束（SQLite 不能原地修改 CHECK），
+   并对 `llm_log` 补归因列与索引。
+3. `migrate_v3()` —— `test_run` 转 `agent_run`、新增 `agent_tool_call`、删除遗留用例三表
+   （`test_case` / `test_result` / `test_summary`）。
+4. `migrate_v4()` —— 删除 `report` 表，报告改为按 `run_id` 实时聚合 `agent_tool_call`。
+5. 创建分析视图（`v_run_overview` 等）。
+
+三个迁移脚本都是幂等的：重复启动不会重复建列，也不会丢数据。顺序不能调整，原因见各脚本的
+模块注释——`v4` 必须排在 `v3` 之后，因为 `v3` 在历史库上会重建 `report` 表以改写外键。
+
+新增表只需添加模型文件（`create_all` 会建）；给**已有表**加列或加索引必须写迁移脚本，
+`create_all` 不会 ALTER 已存在的表。
 
 ---
 
-## 〇、概述
+## 二、space — 测试空间
 
-| 项目         | 说明                                 |
-|------------|------------------------------------|
-| **数据库引擎**  | SQLite 3                           |
-| **ORM 框架** | SQLAlchemy 2.0                     |
-| **文件位置**   | `backend/db/TestAgents.db`（首次运行自动创建） |
-| **ID 策略**  | 全局雪花算法（`next_id` 生成器），非自增          |
-| **时间格式**   | `Text` 存储本地时间字符串（`local_now` 函数生成） |
-| **表数量**    | 15 张（v1.0 新增 space_memory / knowledge_document / knowledge_chunk / skill） |
+空间是几乎所有数据的隔离边界。一个空间对应磁盘上一个工作目录，目录路径记在 `workspace_path`。
 
----
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `name` | Text | NOT NULL，UNIQUE | 空间名称，全局唯一 |
+| `description` | Text | default `""` | 描述 |
+| `status` | Integer | NOT NULL，default 1 | 1=启用，0=停用 |
+| `workspace_path` | Text | NOT NULL，default `""` | 工作目录相对路径，形如 `workspaces/{id}` |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-## 一、space — 空间表
+索引：`idx_space_name`（`name`）。
 
-> *「万事之始，皆立于空间。一个空间，统辖其下所有接口与测试。」*
+级联关系（ORM `cascade="all, delete-orphan"`，DB 侧对应 `ON DELETE CASCADE`）：
+`environment`、`endpoint`、`agent_run`、`conversation`、`space_memory`、`knowledge_document`。
 
-### 字段定义
+> **`space` 没有 `base_url`**。基础 URL 属于环境（`environment.base_url`），一个空间可以有多个环境。
+> 早期版本在 `space` 上放过 `base_url`，与「多环境」模型冲突，已删除。
 
-| 字段            | 类型      | 约束                   | 说明             |
-|---------------|---------|----------------------|----------------|
-| `id`          | Integer | **PK**, 非自增          | 全局唯一 ID        |
-| `name`        | Text    | NOT NULL, **UNIQUE** | 空间名称           |
-| `base_url`    | Text    | NOT NULL             | 默认基础 URL       |
-| `description` | Text    | default=""           | 描述             |
-| `workspace_path` | Text | default=""         | 工作目录相对路径（`workspaces/{id}`），Agent 文件沙箱根；v1.0 新增 |
-| `status`      | Integer | NOT NULL, default=1  | 状态（1=启用，0=未启用） |
-| `created_at`  | Text    | NOT NULL             | 创建时间           |
-| `updated_at`  | Text    | NOT NULL             | 更新时间           |
-
-### 索引
-
-| 索引名              | 字段     |
-|------------------|--------|
-| `idx_space_name` | `name` |
-
-### 关系
-
-- 1:N → `environment`（CASCADE 级联删除）
-- 1:N → `endpoint`（CASCADE 级联删除）
-- 1:N → `test_run`（CASCADE 级联删除）
-- 1:N → `conversation`（CASCADE 级联删除）
+> **删空间不删目录**。删除空间时工作目录被重命名为 `workspaces/.deleted-{id}-{时间戳}`，
+> 保留现场供事后追查。数据库行消失、磁盘证据留存，这是一个刻意的非对称设计。
 
 ---
 
-## 二、environment — 环境表
+## 三、environment — 测试环境
 
-> *「同一接口，在不同环境中呈现不同面貌——开发、测试、生产，各有各的真相。」*
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 所属空间 |
+| `name` | Text | NOT NULL | 环境名，如 dev / staging / prod |
+| `base_url` | Text | NOT NULL | 环境基础 URL |
+| `description` | Text | default `""` | 描述 |
+| `variables` | Text | default `"{}"` | 环境变量，JSON 对象字符串 |
+| `is_default` | Integer | NOT NULL，default 1 | 是否默认环境 |
+| `is_production` | Integer | NOT NULL，default 0 | 生产环境标记 |
+| `status` | Integer | NOT NULL，default 1 | 1=启用，0=停用 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-### 字段定义
+索引：`idx_env_space`（`space_id`）。
 
-| 字段            | 类型      | 约束                            | 说明         |
-|---------------|---------|-------------------------------|------------|
-| `id`          | Integer | **PK**, 非自增                   | 全局唯一 ID    |
-| `space_id`    | Integer | **FK** → `space.id`, NOT NULL | 所属空间       |
-| `name`        | Text    | NOT NULL                      | 环境名称       |
-| `base_url`    | Text    | NOT NULL                      | 环境基础 URL   |
-| `description` | Text    | default=""                    | 环境描述       |
-| `variables`   | Text    | default="{}"                  | 环境变量（JSON） |
-| `is_default`  | Integer | NOT NULL, default=1           | 是否默认环境     |
-| `is_production` | Integer | NOT NULL, default=0         | 是否生产环境；为 1 时 `send_request` 直接拒绝请求（v1.0 新增） |
-| `status`      | Integer | NOT NULL, default=1           | 状态         |
-| `created_at`  | Text    | NOT NULL                      | 创建时间       |
-| `updated_at`  | Text    | NOT NULL                      | 更新时间       |
-
-### 索引
-
-| 索引名             | 字段         |
-|-----------------|------------|
-| `idx_env_space` | `space_id` |
-
-### 外键删除策略
-
-| 外键         | 指向         | 策略      |
-|------------|------------|---------|
-| `space_id` | `space.id` | CASCADE |
+`is_production` 是安全闸门的唯一依据：为 1 时 `send_request` 拒绝任何写方法（POST / PUT / PATCH /
+DELETE），并把拒绝原因作为工具结果回灌模型，而不是抛异常。它是**数据层的权威标记**，不依赖 prompt 约束。
 
 ---
 
-## 三、endpoint — 接口表
+## 四、endpoint — 接口定义
 
-> *「接口者，系统与外界沟通之门户也。路径、方法、参数，缺一不可。」*
+由 OpenAPI 文档解析产生，是 Agent 查接口的工具数据源。
 
-### 字段定义
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 所属空间 |
+| `operation_id` | Text | NOT NULL | OpenAPI `operationId` |
+| `name` | Text | NOT NULL | 接口名 |
+| `path` | Text | NOT NULL | 请求路径 |
+| `method` | Text | NOT NULL | HTTP 方法 |
+| `tags` | Text | default `"[]"` | 标签，JSON 数组字符串 |
+| `summary` | Text | NULL | 简述 |
+| `description` | Text | default `""` | 详述 |
+| `params` | Text | NULL | 路径/查询参数定义，JSON |
+| `headers` | Text | default `"{}"` | 请求头定义，JSON |
+| `body` | Text | NULL | 请求体 Schema，JSON |
+| `responses` | Text | default `"[]"` | 响应定义，JSON 数组 |
+| `security` | Text | default `"[]"` | 安全要求，JSON 数组 |
+| `content_type` | Text | default `"application/json"` | 内容类型 |
+| `deprecated` | Integer | NOT NULL，default 0 | 是否废弃 |
+| `status` | Integer | NOT NULL，default 1 | 1=启用，0=停用 |
+| `version` | Integer | NOT NULL，default 1 | 版本号 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-| 字段             | 类型      | 约束                            | 说明                  |
-|----------------|---------|-------------------------------|---------------------|
-| `id`           | Integer | **PK**, 非自增                   | 全局唯一 ID             |
-| `space_id`     | Integer | **FK** → `space.id`, NOT NULL | 所属空间                |
-| `operation_id` | Text    | NOT NULL                      | OpenAPI operationId |
-| `name`         | Text    | NOT NULL                      | 接口名称                |
-| `path`         | Text    | NOT NULL                      | 请求路径                |
-| `method`       | Text    | NOT NULL                      | HTTP 方法             |
-| `tags`         | Text    | default="[]"                  | 标签（JSON 数组）         |
-| `summary`      | Text    | NULLABLE                      | 简要描述                |
-| `description`  | Text    | default=""                    | 详细描述                |
-| `params`       | Text    | NULLABLE                      | 路径/查询参数（JSON）       |
-| `headers`      | Text    | default="{}"                  | 请求头定义（JSON）         |
-| `body`         | Text    | NULLABLE                      | 请求体 Schema（JSON）    |
-| `responses`    | Text    | default="[]"                  | 响应定义（JSON 数组）       |
-| `security`     | Text    | default="[]"                  | 安全要求（JSON 数组）       |
-| `content_type` | Text    | default="application/json"    | 内容类型                |
-| `deprecated`   | Integer | NOT NULL, default=0           | 是否已废弃               |
-| `status`       | Integer | NOT NULL, default=1           | 状态                  |
-| `version`      | Integer | NOT NULL, default=1           | 版本号                 |
-| `created_at`   | Text    | NOT NULL                      | 创建时间                |
-| `updated_at`   | Text    | NOT NULL                      | 更新时间                |
+约束：
 
-### 约束
+| 名称 | 类型 | 规则 |
+|---|---|---|
+| `ck_api_method` | CHECK | `method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')` |
+| `uq_space_path_method` | UNIQUE | `(space_id, path, method)` |
 
-| 约束名                    | 类型     | 规则                                                                 |
-|------------------------|--------|--------------------------------------------------------------------|
-| `ck_api_method`        | CHECK  | `method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')` |
-| `uq_space_path_method` | UNIQUE | `(space_id, path, method)`                                         |
+索引：`idx_endpoint_space`（`space_id`）、`idx_endpoint_operation_id`（`operation_id`）。
 
-### 索引
-
-| 索引名                         | 字段             |
-|-----------------------------|----------------|
-| `idx_endpoint_space`        | `space_id`     |
-| `idx_endpoint_operation_id` | `operation_id` |
-
-### 外键删除策略
-
-| 外键         | 指向         | 策略      |
-|------------|------------|---------|
-| `space_id` | `space.id` | CASCADE |
+同一空间内「路径 + 方法」唯一：重复解析同一份 OpenAPI 文档不会产生重复接口。
 
 ---
 
-## 四、test_run — 测试运行表
+## 五、agent_run — Agent 执行记录
 
-> *「每一次测试运行，都是一场审判——代码在此接受检验，真相在此大白。」*
+一次 ReAct 对话对应一条记录。`conversation` / `message` 保存**说了什么**，
+`agent_run` 保存**这一轮怎么得出结论**（用了哪些工具、成败、耗时、花了多少 token）。
 
-### 字段定义
+统计列在收尾时一次性算出并冗余落库，列表页因此不需要聚合明细表。
 
-| 字段                | 类型      | 约束                                  | 说明         |
-|-------------------|---------|-------------------------------------|------------|
-| `id`              | Integer | **PK**, 非自增                         | 全局唯一 ID    |
-| `space_id`        | Integer | **FK** → `space.id`, NOT NULL       | 关联空间       |
-| `environment_id`  | Integer | **FK** → `environment.id`, NULLABLE | 关联环境       |
-| `name`            | Text    | default=""                          | 运行名称       |
-| `status`          | Text    | NOT NULL, default="pending"         | 运行状态       |
-| `trigger_type`    | Text    | NOT NULL, default="manual"          | 触发方式       |
-| `input_file`      | Text    | default=""                          | 输入文件路径     |
-| `input_snapshot`  | Text    | default="{}"                        | 输入快照（JSON） |
-| `config_snapshot` | Text    | default="{}"                        | 配置快照（JSON） |
-| `llm_provider`    | Text    | default=""                          | LLM 提供商    |
-| `llm_model`       | Text    | default=""                          | LLM 模型名称   |
-| `total_cases`     | Integer | NOT NULL, default=0                 | 用例总数       |
-| `passed_cases`    | Integer | NOT NULL, default=0                 | 通过数        |
-| `failed_cases`    | Integer | NOT NULL, default=0                 | 失败数        |
-| `skipped_cases`   | Integer | NOT NULL, default=0                 | 跳过数        |
-| `error_cases`     | Integer | NOT NULL, default=0                 | 错误数        |
-| `pass_rate`       | Float   | NOT NULL, default=0.0               | 通过率        |
-| `started_at`      | Text    | NULLABLE                            | 开始时间       |
-| `finished_at`     | Text    | NULLABLE                            | 结束时间       |
-| `total_duration`  | Float   | NOT NULL, default=0.0               | 总耗时（秒）     |
-| `error_message`   | Text    | default=""                          | 错误信息       |
-| `created_at`      | Text    | NOT NULL                            | 创建时间       |
-| `updated_at`      | Text    | NOT NULL                            | 更新时间       |
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 所属空间 |
+| `environment_id` | Integer | FK → `environment.id`，SET NULL | 使用的环境 |
+| `conversation_id` | Integer | NULL，**无外键** | 关联会话，见下方说明 |
+| `title` | Text | NOT NULL，default `""` | 取用户指令前 50 字 |
+| `mode` | Text | NOT NULL，default `"agent"` | `agent` / `ask` / `plan` |
+| `trigger_type` | Text | NOT NULL，default `"chat"` | `chat` / `manual` / `scheduled` / `ci` |
+| `llm_provider` | Text | NOT NULL，default `""` | 模型厂商 |
+| `llm_model` | Text | NOT NULL，default `""` | 模型名 |
+| `status` | Text | NOT NULL，default `"running"` | `running` / `completed` / `failed` / `cancelled` |
+| `started_at` | Text | NULL | 开始时间 |
+| `finished_at` | Text | NULL | 结束时间 |
+| `duration_ms` | Integer | NOT NULL，default 0 | 总耗时（毫秒） |
+| `tool_call_count` | Integer | NOT NULL，default 0 | 工具调用总次数 |
+| `ok_count` | Integer | NOT NULL，default 0 | 成功的工具调用数 |
+| `error_count` | Integer | NOT NULL，default 0 | 失败的工具调用数 |
+| `success_rate` | Float | NOT NULL，default 0.0 | 工具调用成功率，百分比 0–100 |
+| `avg_response_time` | Float | NOT NULL，default 0.0 | 工具调用平均耗时（毫秒） |
+| `llm_call_count` | Integer | NOT NULL，default 0 | 本轮 LLM 调用次数（一轮 ReAct 通常 > 1） |
+| `total_tokens` | Integer | NOT NULL，default 0 | 输入 + 输出 token 之和 |
+| `cost_usd` | Float | NOT NULL，default 0.0 | 预估成本（美元） |
+| `error_message` | Text | NOT NULL，default `""` | 失败原因 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-### 约束
+约束与索引：
 
-| 约束名              | 类型    | 规则                                                                 |
-|------------------|-------|--------------------------------------------------------------------|
-| `ck_run_status`  | CHECK | `status IN ('pending','running','completed','failed','cancelled')` |
-| `ck_run_trigger` | CHECK | `trigger_type IN ('manual','scheduled','ci')`                      |
+| 名称 | 类型 | 规则 |
+|---|---|---|
+| `ck_agent_run_status` | CHECK | `status IN ('running','completed','failed','cancelled')` |
+| `ck_agent_run_mode` | CHECK | `mode IN ('agent','ask','plan')` |
+| `ck_agent_run_trigger` | CHECK | `trigger_type IN ('chat','manual','scheduled','ci')` |
+| `idx_agent_run_space` | INDEX | (`space_id`, `created_at`) |
+| `idx_agent_run_conv` | INDEX | (`conversation_id`, `created_at`) |
+| `idx_agent_run_status` | INDEX | (`status`, `created_at`)，驱动清理任务 |
+| `idx_agent_run_created` | INDEX | (`created_at`) |
 
-### 索引
+> **没有 `pending` 状态**。记录插入即为 `running`，避免「进程崩溃后留下永远 pending 的行」——
+> 那类行既不能算完成，也无法自动分辨是否该清理。进程被杀时记录停在 `running`，
+> 由 `DELETE /api/v1/agent/runs/cleanup` 按 `(status, created_at)` 清理。
 
-| 索引名             | 字段               |
-|-----------------|------------------|
-| `idx_run_space` | `space_id`       |
-| `idx_run_env`   | `environment_id` |
+> **`conversation_id` 不建外键**。会话创建失败时执行记录仍需写入（记录的目的是留痕，
+> 不是维持引用完整性）；反过来说，加 CASCADE 会让「删会话」连带删掉执行历史。
 
-### 外键删除策略
-
-| 外键               | 指向               | 策略       |
-|------------------|------------------|----------|
-| `space_id`       | `space.id`       | CASCADE  |
-| `environment_id` | `environment.id` | SET NULL |
-
----
-
-## 五、test_case — 测试用例表
-
-> *「用例乃测试之灵魂——每一条用例，都是对系统的一次质问。」*
-
-### 字段定义
-
-| 字段                | 类型      | 约束                               | 说明            |
-|-------------------|---------|----------------------------------|---------------|
-| `id`              | Integer | **PK**, 非自增                      | 全局唯一 ID       |
-| `run_id`          | Integer | **FK** → `test_run.id`, NOT NULL | 所属测试运行        |
-| `endpoint_id`     | Integer | **FK** → `endpoint.id`, NULLABLE | 关联接口          |
-| `case_id`         | Text    | NOT NULL                         | 用例业务 ID       |
-| `case_name`       | Text    | NOT NULL                         | 用例名称          |
-| `url`             | Text    | NOT NULL                         | 请求 URL        |
-| `method`          | Text    | NOT NULL                         | HTTP 方法       |
-| `scenario_type`   | Text    | NOT NULL, default="normal"       | 场景类型          |
-| `priority`        | Text    | NOT NULL, default="P1"           | 优先级           |
-| `headers`         | Text    | default="{}"                     | 请求头（JSON）     |
-| `body`            | Text    | NULLABLE                         | 请求体（JSON）     |
-| `params`          | Text    | NULLABLE                         | 查询参数（JSON）    |
-| `cache_rules`     | Text    | NULLABLE                         | 缓存规则（JSON）    |
-| `assert_rules`    | Text    | default="[]"                     | 断言规则（JSON 数组） |
-| `expected_result` | Text    | default="成功"                     | 预期结果描述        |
-| `description`     | Text    | default=""                       | 用例描述          |
-| `remark`          | Text    | default=""                       | 备注            |
-| `unique_hash`     | Text    | default=""                       | 去重哈希          |
-| `generated_by`    | Text    | NOT NULL, default="llm"          | 生成方式          |
-| `status`          | Integer | NOT NULL, default=1              | 状态            |
-| `created_at`      | Text    | NOT NULL                         | 创建时间          |
-| `updated_at`      | Text    | NOT NULL                         | 更新时间          |
-
-### 约束
-
-| 约束名                 | 类型    | 规则                                                                                                            |
-|---------------------|-------|---------------------------------------------------------------------------------------------------------------|
-| `ck_case_method`    | CHECK | `method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')`                                            |
-| `ck_case_scenario`  | CHECK | `scenario_type IN ('normal','param_missing','param_type_error','boundary_value','permission_error','custom')` |
-| `ck_case_priority`  | CHECK | `priority IN ('P0','P1','P2')`                                                                                |
-| `ck_case_generated` | CHECK | `generated_by IN ('llm','manual','import')`                                                                   |
-
-### 索引
-
-| 索引名                | 字段            |
-|--------------------|---------------|
-| `idx_case_run`     | `run_id`      |
-| `idx_case_api`     | `endpoint_id` |
-| `idx_case_case_id` | `case_id`     |
-
-### 外键删除策略
-
-| 外键            | 指向            | 策略       |
-|---------------|---------------|----------|
-| `run_id`      | `test_run.id` | CASCADE  |
-| `endpoint_id` | `endpoint.id` | SET NULL |
+> **`cost_usd` 的 0 与 NULL 不同义**。本列 NOT NULL 且由 `llm_log` 聚合而来，
+> 表示「本次执行已知成本之和」；单条 LLM 调用的成本是否为未知，看 `llm_log.cost_usd`。
 
 ---
 
-## 六、test_result — 测试结果表
+## 六、agent_tool_call — 工具调用留痕
 
-> *「结果不会说谎——状态码、响应体、耗时，铁证如山。」*
+单次工具调用一行，同时容纳 `send_request`（HTTP 明细）与非 HTTP 工具（通用列）。
 
-### 字段定义
+正文长度分三档，各有独立用途，**不要合并成同一个常量**：
 
-| 字段                     | 类型      | 约束                                | 说明          |
-|------------------------|---------|-----------------------------------|-------------|
-| `id`                   | Integer | **PK**, 非自增                       | 全局唯一 ID     |
-| `run_id`               | Integer | **FK** → `test_run.id`, NOT NULL  | 所属测试运行      |
-| `test_case_id`         | Integer | **FK** → `test_case.id`, NOT NULL | 关联测试用例      |
-| `case_id`              | Text    | NOT NULL                          | 用例业务 ID（冗余） |
-| `case_name`            | Text    | NOT NULL                          | 用例名称（冗余）    |
-| `status`               | Text    | NOT NULL, default="pending"       | 执行状态        |
-| `request_url`          | Text    | default=""                        | 实际请求 URL    |
-| `request_method`       | Text    | default=""                        | 实际请求方法      |
-| `request_headers`      | Text    | default="{}"                      | 实际请求头（JSON） |
-| `request_body`         | Text    | NULLABLE                          | 实际请求体       |
-| `query_params`         | Text    | NULLABLE                          | 实际查询参数      |
-| `response_status_code` | Integer | NULLABLE                          | 响应状态码       |
-| `response_headers`     | Text    | default="{}"                      | 响应头（JSON）   |
-| `response_body`        | Text    | NULLABLE                          | 响应体         |
-| `response_time`        | Float   | NOT NULL, default=0.0             | 响应时间（秒）     |
-| `error_message`        | Text    | default=""                        | 错误信息        |
-| `retry_count`          | Integer | NOT NULL, default=0               | 重试次数        |
-| `started_at`           | Text    | NULLABLE                          | 开始时间        |
-| `finished_at`          | Text    | NULLABLE                          | 结束时间        |
-| `created_at`           | Text    | NOT NULL                          | 创建时间        |
+| 用途 | 上限 | 落点 |
+|---|---|---|
+| 落库 | 2 MB | `response_body`，超限置 `response_body_truncated=1` |
+| 回灌模型 | 8000 字符 | `runner._for_model` |
+| SSE 下发 | 4000 字符 | `events.ToolResultEvent`，同 `result_preview` |
 
-### 约束
+### 通用列（所有工具都填）
 
-| 约束名                | 类型    | 规则                                                                    |
-|--------------------|-------|-----------------------------------------------------------------------|
-| `ck_result_status` | CHECK | `status IN ('pending','running','passed','failed','skipped','error')` |
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `run_id` | Integer | FK → `agent_run.id`，NOT NULL，CASCADE | 所属执行记录 |
+| `step_index` | Integer | NOT NULL，default 0 | ReAct 轮次，从 0 起 |
+| `seq` | Integer | NOT NULL，default 0 | 本轮内调用序号 |
+| `call_id` | Text | NOT NULL，default `""` | 模型给出的 `tool_call_id` |
+| `tool_name` | Text | NOT NULL，default `""` | 工具名 |
+| `tool_type` | Text | NOT NULL，default `"other"` | 工具分类，见下 |
+| `args_json` | Text | NOT NULL，default `"{}"` | 入参，JSON 对象字符串 |
+| `ok` | Integer | NOT NULL，default 0 | 1=成功，0=失败 |
+| `error_type` | Text | NOT NULL，default `""` | 异常类名 / `validation` / `not_found` |
+| `error_message` | Text | NOT NULL，default `""` | 异常原文，不截断 |
+| `result_preview` | Text | NOT NULL，default `""` | 结果前 4000 字符 |
+| `result_chars` | Integer | NOT NULL，default 0 | 结果总字符数（截断前） |
+| `duration_ms` | Integer | NOT NULL，default 0 | 调用耗时（毫秒） |
+| `created_at` | Text | NOT NULL | 创建时间 |
 
-### 索引
+### HTTP 列（仅 `send_request` 填，其余工具为 NULL）
 
-| 索引名               | 字段             |
-|-------------------|----------------|
-| `idx_result_run`  | `run_id`       |
-| `idx_result_case` | `test_case_id` |
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `http_method` | Text | 请求方法 |
+| `http_url` | Text | 完整 URL |
+| `http_status_code` | Integer | 响应状态码；无响应时 NULL |
+| `request_headers` | Text | 请求头 JSON，敏感头已脱敏 |
+| `request_params` | Text | 查询参数 JSON |
+| `request_body` | Text | 请求体 |
+| `response_headers` | Text | 响应头 JSON |
+| `response_body` | Text | 响应体，上限 2 MB |
+| `response_body_truncated` | Integer | 1=响应体超限已截断 |
+| `response_size_bytes` | Integer | 响应体原始字节数 |
 
-### 外键删除策略
+约束与索引：
 
-| 外键             | 指向             | 策略      |
-|----------------|----------------|---------|
-| `run_id`       | `test_run.id`  | CASCADE |
-| `test_case_id` | `test_case.id` | CASCADE |
+| 名称 | 类型 | 规则 |
+|---|---|---|
+| `ck_tool_call_type` | CHECK | `tool_type IN ('http','db','fs','exec','memory','knowledge','skill','search','other')` |
+| `ck_tool_call_ok` | CHECK | `ok IN (0,1)` |
+| `idx_atc_run` | INDEX | (`run_id`, `seq`)，按执行回放轨迹 |
+| `idx_atc_tool_created` | INDEX | (`tool_name`, `created_at`) |
+| `idx_atc_tool_run` | INDEX | (`tool_name`, `run_id`)，专供报告聚合 |
+| `idx_atc_http_url` | INDEX | (`http_url`) |
 
----
+> **为什么 `ok` 与 HTTP 状态码分开记**。`send_request` 收到 4xx/5xx 不算工具失败——请求发出去了、
+> 响应拿到了，`ok=1` 而 `http_status_code=500` 是合法组合。报告里的「成功」按 2xx 判定，
+> 「异常」指拿不到状态码（网络错误、参数非法、被生产环境闸门拦截）。
 
-## 七、test_summary — 测试汇总表
-
-> *「汇总者，统观全局之眼也。通过率、响应时间、失败原因——一览无余。」*
-
-### 字段定义
-
-| 字段                  | 类型      | 约束                                           | 说明           |
-|---------------------|---------|----------------------------------------------|--------------|
-| `id`                | Integer | **PK**, 非自增                                  | 全局唯一 ID      |
-| `run_id`            | Integer | **FK** → `test_run.id`, NOT NULL, **UNIQUE** | 关联测试运行（一对一）  |
-| `total`             | Integer | NOT NULL, default=0                          | 用例总数         |
-| `passed`            | Integer | NOT NULL, default=0                          | 通过数          |
-| `failed`            | Integer | NOT NULL, default=0                          | 失败数          |
-| `skipped`           | Integer | NOT NULL, default=0                          | 跳过数          |
-| `error`             | Integer | NOT NULL, default=0                          | 错误数          |
-| `pass_rate`         | Float   | NOT NULL, default=0.0                        | 通过率          |
-| `avg_response_time` | Float   | NOT NULL, default=0.0                        | 平均响应时间       |
-| `min_response_time` | Float   | NOT NULL, default=0.0                        | 最小响应时间       |
-| `max_response_time` | Float   | NOT NULL, default=0.0                        | 最大响应时间       |
-| `p95_response_time` | Float   | NOT NULL, default=0.0                        | P95 响应时间     |
-| `total_duration`    | Float   | NOT NULL, default=0.0                        | 总耗时          |
-| `failure_reasons`   | Text    | default="{}"                                 | 失败原因统计（JSON） |
-| `started_at`        | Text    | NULLABLE                                     | 开始时间         |
-| `finished_at`       | Text    | NULLABLE                                     | 结束时间         |
-| `created_at`        | Text    | NOT NULL                                     | 创建时间         |
-
-### 索引
-
-| 索引名                     | 字段          |
-|-------------------------|-------------|
-| `idx_summary_run`       | `run_id`    |
-| `idx_summary_pass_rate` | `pass_rate` |
-
-### 外键删除策略
-
-| 外键       | 指向            | 策略      |
-|----------|---------------|---------|
-| `run_id` | `test_run.id` | CASCADE |
+> **`error_type` 独立成列**。`runner` 会把异常转成给模型看的话术，改写后无法再归因；
+> 原始异常类名单独落库，才能统计「失败集中在哪里」。
 
 ---
 
-## 八、report — 报告表
+## 七、conversation — 会话
 
-> *「报告乃测试之终章——将混沌的数据，锻造为可读的真知。」*
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NULL，CASCADE | 所属空间；可空以支持无空间会话 |
+| `title` | Text | NOT NULL，default `""` | 会话标题 |
+| `mode` | Text | NOT NULL，default `"agent"` | `agent` / `ask` / `plan` |
+| `skill_names` | Text | NOT NULL，default `"[]"` | 会话选中的技能名，JSON 数组 |
+| `environment_id` | Integer | FK → `environment.id`，NULL，SET NULL | 绑定环境 |
+| `status` | Integer | NOT NULL，default 1 | 1=启用，0=停用 |
+| `last_message_at` | Text | NULL | 最后一条消息时间 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-### 字段定义
+约束与索引：
 
-| 字段             | 类型      | 约束                               | 说明       |
-|----------------|---------|----------------------------------|----------|
-| `id`           | Integer | **PK**, 非自增                      | 全局唯一 ID  |
-| `run_id`       | Integer | **FK** → `test_run.id`, NOT NULL | 关联测试运行   |
-| `format`       | Text    | NOT NULL                         | 报告格式     |
-| `file_path`    | Text    | NOT NULL                         | 文件路径     |
-| `file_size`    | Integer | default=0                        | 文件大小（字节） |
-| `generated_at` | Text    | NOT NULL                         | 生成时间     |
+| 名称 | 类型 | 规则 |
+|---|---|---|
+| `ck_conversation_mode` | CHECK | `mode IN ('agent','ask','plan')` |
+| `ck_conversation_status` | CHECK | `status IN (0,1)` |
+| `idx_conversation_space` | INDEX | (`space_id`) |
 
-### 约束
+> **CHECK 约束是重建表换来的**。早期约束为 `mode IN ('Ask','Plan','Run')`，会阻止写入小写 `agent`。
+> SQLite 不支持修改 CHECK，`migrate_v2` 通过「关闭外键 → 建新表 → 拷贝数据 → 删旧表 → 改名 → 重建索引」
+> 完成替换，并用测试钉死「重建过程不能丢 `message` 行」。服务层的 `normalize_mode()` 仍保留旧值兼容映射，
+> 但数据库层只接受小写三值。
 
-| 约束名                | 类型    | 规则                                             |
-|--------------------|-------|------------------------------------------------|
-| `ck_report_format` | CHECK | `format IN ('excel','html','markdown','json')` |
-
-### 索引
-
-| 索引名                 | 字段       |
-|---------------------|----------|
-| `idx_report_run`    | `run_id` |
-| `idx_report_format` | `format` |
-
-### 外键删除策略
-
-| 外键       | 指向            | 策略      |
-|----------|---------------|---------|
-| `run_id` | `test_run.id` | CASCADE |
+> **`mode` 与 `skill_names` 在每轮请求都可能变化**。它们记录的是「会话默认值」，
+> 实际生效的模式以 `POST /chat/stream` 请求体中的 `mode` 为准，服务端每轮重新解析
+> `ModePolicy`，不缓存到会话对象上。
 
 ---
 
-## 九、conversation — 会话表
+## 八、message — 消息
 
-> *「会话者，用户与智能体之间的对话历程也。每轮交互，皆有据可查。」*
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `conversation_id` | Integer | FK → `conversation.id`，NOT NULL，CASCADE | 所属会话 |
+| `role` | Text | NOT NULL | `user` / `assistant` / `system` |
+| `content` | Text | NOT NULL，default `""` | 消息正文 |
+| `meta` | Text | NOT NULL，default `"{}"` | 元数据，JSON 对象字符串 |
+| `created_at` | Text | NOT NULL | 创建时间 |
 
-### 字段定义
+约束与索引：`ck_message_role`（`role IN ('user','assistant','system')`）、`idx_message_conv`（`conversation_id`）。
 
-| 字段                | 类型      | 约束                            | 说明               |
-|-------------------|---------|-------------------------------|------------------|
-| `id`              | Integer | **PK**, 非自增                   | 全局唯一 ID          |
-| `space_id`        | Integer | **FK** → `space.id`, NULLABLE | 关联空间（可空，支持无空间会话） |
-| `title`           | Text    | NOT NULL, default=""          | 会话标题（首条 user 消息截断生成） |
-| `mode`            | Text    | NOT NULL, default="agent"     | 工作模式 `agent` / `ask` / `plan` |
-| `skill_names`     | Text    | NOT NULL, default="[]"        | 本会话选中的 skill 名（JSON 数组） |
-| `environment_id`  | Integer | **FK** → `environment.id`, NULLABLE, ON DELETE SET NULL | 会话绑定的测试环境，供 `send_request` 解析 base_url 与生产环境闸门 |
-| `status`          | Integer | NOT NULL, default=1           | 状态（1=启用，0=未启用）   |
-| `last_message_at` | Text    | NULLABLE                      | 最后消息时间           |
-| `created_at`      | Text    | NOT NULL                      | 创建时间             |
-| `updated_at`      | Text    | NOT NULL                      | 更新时间             |
-
-### 约束
-
-| 约束名                      | 类型    | 规则                                |
-|--------------------------|-------|-----------------------------------|
-| `ck_conversation_mode`   | CHECK | `mode IN ('agent','ask','plan')`  |
-| `ck_conversation_status` | CHECK | `status IN (0,1)`                 |
-
-> **v1.0 迁移说明**：旧约束是 `mode IN ('Ask','Plan','Run')`，会阻止写入 `agent`。
-> SQLite 不支持修改 CHECK，`migrate_v2` 采用「`PRAGMA foreign_keys=OFF` → 建新表 → 拷数据 →
-> 删旧表 → 改名 → 重跑索引」的方式重建，并有测试锁死「重建不能丢 message」。
-> 服务层同时用 `normalize_mode` 兜底历史值（`Run`/`Ask`/`Plan` → 小写标准值）。
-
-### 索引
-
-| 索引名                      | 字段         |
-|--------------------------|------------|
-| `idx_conversation_space` | `space_id` |
-
-### 外键删除策略
-
-| 外键               | 指向               | 策略         |
-|------------------|------------------|------------|
-| `space_id`       | `space.id`       | CASCADE    |
-| `environment_id` | `environment.id` | SET NULL   |
+这张表只追加不修改。工具调用轨迹**不在这里**——它在 `agent_tool_call`，
+`message.meta` 只承载轻量附加信息（如本轮 `run_id`）。
 
 ---
 
-## 九·补、space_memory — 跨会话记忆表（v1.0 新增）
+## 九、space_memory — 跨会话记忆
 
-> *「记忆者，跨会话之结论沉淀也。按空间隔离，可增删改，并镜像为可读文件。」*
+真源是这张表，`workspaces/{space_id}/memory/MEMORY.md` 是只读镜像：
+每次写操作后由 `LongTermMemory.sync_markdown` 全量重建，不做增量同步，避免 DB 与文件漂移。
 
-真源是这张表；`workspaces/{space_id}/memory/MEMORY.md` 是**只读镜像**，
-每次写操作后由 `LongTermMemory.sync_markdown` 全量重建（不做增量，避免与 DB 漂移）。
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 归属空间，隔离边界 |
+| `title` | Text | NOT NULL，default `""` | 要点标题，注入 prompt 时作为要点行 |
+| `content` | Text | NOT NULL，default `""` | 内容正文 |
+| `category` | Text | NOT NULL，default `"fact"` | 见枚举速查 |
+| `tags` | Text | NOT NULL，default `"[]"` | 标签，JSON 数组 |
+| `source_conversation_id` | Integer | FK → `conversation.id`，NULL，SET NULL | 产出该记忆的会话，可追溯 |
+| `status` | Integer | NOT NULL，default 1 | 1=有效，0=软删 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-### 字段定义
+约束与索引：
 
-| 字段                       | 类型      | 约束                        | 说明                          |
-|--------------------------|---------|---------------------------|-----------------------------|
-| `id`                     | Integer | **PK**, 非自增               | 全局唯一 ID                     |
-| `space_id`               | Integer | **FK** → `space.id`, NOT NULL | 记忆归属空间（隔离边界）              |
-| `title`                  | Text    | NOT NULL                  | 要点标题（注入 prompt 时的要点行）      |
-| `content`                | Text    | NOT NULL, default=""      | 内容正文                        |
-| `category`               | Text    | NOT NULL, default="fact"  | `fact` / `decision` / `preference` / `issue` / `glossary` |
-| `tags`                   | Text    | NOT NULL, default="[]"    | 标签（JSON 数组），参与检索匹配          |
-| `source_conversation_id` | Integer | **FK** → `conversation.id`, NULLABLE, ON DELETE SET NULL | 产出该记忆的会话，可追溯 |
-| `status`                 | Integer | NOT NULL, default=1       | 1=有效，0=软删                   |
-| `created_at`             | Text    | NOT NULL                  | 创建时间                        |
-| `updated_at`             | Text    | NOT NULL                  | 更新时间（召回排序依据）                |
-
-### 约束与索引
-
-| 名称                  | 类型    | 规则                                  |
-|---------------------|-------|-------------------------------------|
+| 名称 | 类型 | 规则 |
+|---|---|---|
 | `ck_memory_category` | CHECK | `category IN ('fact','decision','preference','issue','glossary')` |
-| `ck_memory_status`   | CHECK | `status IN (0,1)`                   |
-| `idx_memory_space`   | INDEX | (`space_id`, `status`)              |
-| `idx_memory_category`| INDEX | (`space_id`, `category`)            |
+| `ck_memory_status` | CHECK | `status IN (0,1)` |
+| `idx_memory_space` | INDEX | (`space_id`, `status`) |
+| `idx_memory_category` | INDEX | (`space_id`, `category`) |
 
-### 检索方式
-
-**不用向量检索**。记忆是几十到几百条「结论型短文本」，需要精确命中而非语义相似：
-SQLite `LIKE` 足够，且零外部依赖、结果可解释（能说清命中哪个关键词）、可按更新时间排序。
-查询会被 `extract_keywords` 拆成 ASCII 整词 + CJK 2-gram，多关键词 OR 匹配。
-
----
-
-## 九·补二、skill — 技能表（v1.0 新增）
-
-> *「技能者，可复用的测试方法论也。文件为真源，此表只记录启停与来源。」*
-
-**内容是文件，不是表**：`SKILL.md` 才是有意义的数据，这张表只存前端需要的
-「是否启用」和「装在哪」——重启后由 `SkillRegistry.sync` 从磁盘扫描重新对齐。
-
-### 字段定义
-
-| 字段              | 类型      | 约束                          | 说明                          |
-|-----------------|---------|-----------------------------|-----------------------------|
-| `id`            | Integer | **PK**, 非自增                 | 全局唯一 ID                     |
-| `name`          | Text    | NOT NULL                    | skill 名（`^[a-z0-9][a-z0-9-]{0,63}$`） |
-| `description`   | Text    | NOT NULL, default=""        | 简介（来自 frontmatter）           |
-| `scope`         | Text    | NOT NULL, default="builtin" | `builtin`（随代码分发）/ `space`（用户导入） |
-| `space_id`      | Integer | NULLABLE，**无 FK 约束**         | 空间级 skill 的归属；内置为 NULL。文件系统才是真源，不建 FK 避免「目录已删、行还挂着」导致写入失败 |
-| `directory`     | Text    | NOT NULL, default=""        | 磁盘目录（展示 + 排障用）              |
-| `when_to_use`   | Text    | NOT NULL, default=""        | 何时使用（frontmatter `when_to_use`） |
-| `version`       | Text    | NOT NULL, default=""        | 技能版本号                        |
-| `allowed_tools` | Text    | NOT NULL, default="[]"      | 声明的工具名（JSON 数组），与模式白名单**取交集** |
-| `enabled`       | Integer | NOT NULL, default=1         | 1=启用，0=禁用                   |
-| `discovered_at` | Text    | NOT NULL                    | 最近一次被发现/同步的时间                |
-
-### 约束与索引
-
-| 名称                | 类型    | 规则                            |
-|-------------------|-------|-------------------------------|
-| `ck_skill_scope`  | CHECK | `scope IN ('builtin','space')` |
-| `ck_skill_enabled`| CHECK | `enabled IN (0,1)`             |
-| `idx_skill_scope` | INDEX | (`scope`, `space_id`)          |
-| `idx_skill_name`  | INDEX | (`name`)                      |
-
-> **没有 (`name`,`space_id`) 唯一约束**：同名技能允许在 builtin 与多个 space 下并存，
-> 解析时按「空间优先覆盖内置」的规则择一。
-
-> **安全关键**：`allowed_tools` 只能**收窄**可用工具。`filter_tools` 先按模式去掉副作用工具，
-> 再按 skill 声明取交集——顺序不能反，否则 skill 会成为提权通道。
+**检索方式：关键词 + `LIKE`，不是向量检索。**
+记忆是几十到几百条结论型短文本，需要精确命中而非语义相似；`LIKE` 零外部依赖，
+且能说清「命中了哪个关键词」。查询串先由 `extract_keywords` 拆成 ASCII 整词与 CJK 2-gram，
+再多关键词 OR 匹配，默认返回 20 条（`DEFAULT_RECALL_LIMIT`）。
 
 ---
 
-## 九·补三、knowledge_document / knowledge_chunk — 知识库（v1.0 新增）
+## 十、knowledge_document / knowledge_chunk — 知识库
 
-> *「知识库者，需求文档与接口文档之所归也。切为片段，可语义可词法。」*
+文档原文件落在 `workspaces/{space_id}/docs/`，表里记路径与索引状态；切片表存切分后的正文。
 
-### knowledge_document — 文档表
+### 10.1 knowledge_document
 
-| 字段            | 类型      | 约束                          | 说明                       |
-|---------------|---------|-----------------------------|--------------------------|
-| `id`          | Integer | **PK**, 非自增                 | 全局唯一 ID                  |
-| `space_id`    | Integer | **FK** → `space.id`, NOT NULL | 归属空间                     |
-| `filename`    | Text    | NOT NULL                    | 原始文件名                    |
-| `file_path`   | Text    | NOT NULL                    | 空间目录内相对路径（真源是磁盘文件）       |
-| `mime`        | Text    | NOT NULL, default=""        | MIME 类型                  |
-| `size`        | Integer | NOT NULL, default=0         | 字节数                      |
-| `chunk_count` | Integer | NOT NULL, default=0         | 切片数                      |
-| `status`      | Text    | NOT NULL, default="pending" | `pending` / `indexed` / `failed` |
-| `index_mode`  | Text    | NOT NULL, default="lexical" | `vector`（Chroma）/ `lexical`（SQLite LIKE 降级） |
-| `error`       | Text    | NOT NULL, default=""        | 索引失败原因                   |
-| `created_at`  | Text    | NOT NULL                    | 创建时间                     |
-| `updated_at`  | Text    | NOT NULL                    | 更新时间                     |
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 归属空间 |
+| `filename` | Text | NOT NULL | 原始文件名 |
+| `file_path` | Text | NOT NULL | 相对空间根目录的路径 |
+| `mime` | Text | NOT NULL，default `"text/plain"` | MIME 类型 |
+| `size` | Integer | NOT NULL，default 0 | 字节数 |
+| `chunk_count` | Integer | NOT NULL，default 0 | 切片数 |
+| `status` | Text | NOT NULL，default `"pending"` | `pending` / `indexed` / `failed` |
+| `index_mode` | Text | NOT NULL，default `"lexical"` | `vector` / `lexical` |
+| `error` | Text | NOT NULL，default `""` | 索引失败原因 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+| `updated_at` | Text | NOT NULL | 更新时间 |
 
-### knowledge_chunk — 切片表
+约束：`ck_document_status`（`status IN ('pending','indexed','failed')`）、
+`ck_document_index_mode`（`index_mode IN ('vector','lexical')`）。索引：`idx_document_space`（`space_id`）。
 
-| 字段            | 类型      | 约束                              | 说明                    |
-|---------------|---------|---------------------------------|-----------------------|
-| `id`          | Integer | **PK**, 非自增                     | 全局唯一 ID               |
-| `document_id` | Integer | **FK** → `knowledge_document.id`, NOT NULL, CASCADE | 所属文档 |
-| `space_id`    | Integer | **FK** → `space.id`, NOT NULL     | 冗余空间 ID，避免检索时多一次 join |
-| `seq`         | Integer | NOT NULL                        | 切片序号（从 0 起）           |
-| `content`     | Text    | NOT NULL                        | 切片正文                  |
-| `chroma_id`   | Text    | NULLABLE                        | Chroma 中的向量 ID（词法模式为空）|
-| `created_at`  | Text    | NOT NULL                        | 创建时间                  |
+### 10.2 knowledge_chunk
 
-### 切片策略
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `document_id` | Integer | FK → `knowledge_document.id`，NOT NULL，CASCADE | 所属文档 |
+| `space_id` | Integer | FK → `space.id`，NOT NULL，CASCADE | 冗余空间 ID，避免检索时多一次 join |
+| `seq` | Integer | NOT NULL，default 0 | 切片序号，从 0 起 |
+| `content` | Text | NOT NULL，default `""` | 切片正文 |
+| `chroma_id` | Text | NULL | Chroma 中的向量 ID；词法模式为空 |
+| `created_at` | Text | NOT NULL | 创建时间 |
 
-固定窗口 + 自然断点回退：目标 800 字符、重叠 100 字符；优先在段落/句号/换行处断开，
-找不到自然断点才硬切。重叠是为了避免「答案正好跨在两个切片的缝里」。
+索引：`idx_chunk_doc`（`document_id`, `seq`）、`idx_chunk_space`（`space_id`）。
 
-### 索引与约束
+### 10.3 切片与检索
 
-| 名称                          | 类型    | 规则                            |
-|-----------------------------|-------|-------------------------------|
-| `ck_document_status`     | CHECK | `status IN ('pending','indexed','failed')` |
-| `ck_document_index_mode` | CHECK | `index_mode IN ('vector','lexical')` |
-| `idx_document_space`     | INDEX | `space_id`                          |
-| `idx_chunk_doc`          | INDEX | (`document_id`, `seq`)              |
-| `idx_chunk_space`        | INDEX | `space_id`                          |
+- 切片：目标 800 字符、重叠 100 字符，优先在段落、句号、换行处断开，找不到自然断点才硬切。
+  重叠是为了避免答案正好落在两个切片的接缝上。
+- 检索双路径：向量检索（Chroma + embedding）失败或未启用时，自动降级为词法检索
+  （`LIKE` + 词频加权打分），`index_mode` 记录该文档实际使用的路径。
+- 向量生效需要三个条件同时满足：`chroma.enabled`、`embedding.enabled`、`embedding.model` 非空。
+  缺任意一个都不会实例化向量检索，且**不报错**——知识库照常可用，只是走词法。
 
 ---
 
-## 九·补四、llm_log — LLM 调用统计表
+## 十一、skill — 技能登记
 
-> *「调用留痕者，成本与排障之凭据也。表系于空间与会话，而不设外键——盖账要能对，不该随业务数据一同湮灭。」*
+内容在文件，不在表里。`SKILL.md` 才是有意义的数据，这张表只存 UI 需要的「是否启用」「装在哪」，
+重启时由 `SkillRegistry.sync` 从磁盘重新扫描对齐。
 
-### 字段定义
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `name` | Text | NOT NULL | 技能名，`^[a-z0-9][a-z0-9-]{0,63}$` |
+| `description` | Text | NOT NULL，default `""` | 简介，来自 frontmatter |
+| `scope` | Text | NOT NULL，default `"builtin"` | `builtin` / `space` |
+| `space_id` | Integer | NULL，**无外键** | 空间级技能的归属；内置为 NULL |
+| `directory` | Text | NOT NULL，default `""` | 磁盘目录，供展示与排障 |
+| `when_to_use` | Text | NOT NULL，default `""` | 适用场景，来自 frontmatter |
+| `version` | Text | NOT NULL，default `""` | 版本号 |
+| `allowed_tools` | Text | NOT NULL，default `"[]"` | 声明的工具名，JSON 数组 |
+| `enabled` | Integer | NOT NULL，default 1 | 1=启用，0=禁用 |
+| `discovered_at` | Text | NOT NULL | 最近一次发现/同步时间 |
 
-| 字段                  | 类型      | 约束                    | 说明                                     |
-|---------------------|---------|-----------------------|----------------------------------------|
-| `id`                | Integer | **PK**, 非自增           | 全局唯一 ID                                |
-| `model_name`        | Text    | NOT NULL              | **实际命中**的模型（如 `zai/glm-4-flash`），不是 Router 的 `smart-router` |
-| `provider`          | Text    | default=""            | 厂商（`model_name` 前缀）                     |
-| `request_type`      | Text    | default=""            | 调用类型：`invoke` / `ainvoke` / `stream` / `astream` / `tools` |
-| `prompt_tokens`     | Integer | default=0             | 输入 token 数                             |
-| `completion_tokens` | Integer | default=0             | 输出 token 数                             |
-| `total_tokens`      | Integer | default=0             | 总 token 数                               |
-| `duration_ms`       | Integer | default=0             | 调用耗时（毫秒）                              |
-| `success`           | Integer | default=1             | 1=成功，0=失败                             |
-| `error_message`     | Text    | default=""            | 失败原因（成功时为空）                             |
-| `space_id`          | Integer | NULLABLE，**无 FK**      | 归因空间；空间删除后本列保留                         |
-| `conversation_id`   | Integer | NULLABLE，**无 FK**      | 归因会话；会话清理后本列保留                         |
-| `routing_tier`      | Text    | default=""            | smart-router 决策档位：`SIMPLE` / `MEDIUM` / `COMPLEX` / `REASONING` |
-| `cost_usd`          | Float   | NULLABLE              | 估算成本（美元）。**NULL = 定价未知，0 = 真的免费**      |
-| `created_at`        | Text    | NOT NULL              | 创建时间                                    |
+约束与索引：
 
-### 索引
+| 名称 | 类型 | 规则 |
+|---|---|---|
+| `ck_skill_scope` | CHECK | `scope IN ('builtin','space')` |
+| `ck_skill_enabled` | CHECK | `enabled IN (0,1)` |
+| `idx_skill_scope` | INDEX | (`scope`, `space_id`) |
+| `idx_skill_name` | INDEX | (`name`) |
 
-| 索引名                          | 字段                              | 用途               |
-|------------------------------|---------------------------------|------------------|
-| `idx_llm_log_model`          | `model_name`                    | 按模型聚合            |
-| `idx_llm_log_created`        | `created_at`                    | 时间窗口筛选           |
-| `idx_llm_log_space`          | (`space_id`, `created_at`)      | 按空间 + 时间算成本      |
-| `idx_llm_log_conversation`   | (`conversation_id`, `created_at`) | 按会话 + 时间算成本     |
+> **没有 `(name, space_id)` 唯一约束**。同名技能允许在 builtin 与多个空间下并存，
+> 解析时按「空间优先覆盖内置」择一。加唯一约束会禁止这种覆盖关系。
 
-### 写入点
+> **`space_id` 不建外键**：文件系统才是真源。目录被手工删除后，若有外键会导致写入失败；
+> 没有外键时，脏行可以由下一次 `sync` 直接清掉。
 
-- 埋点在 `LLMService._record_usage`，由 `invoke` / `ainvoke` / `stream` / `astream` /
-  `invoke_with_tools` / **`astream_with_tools`** 统一调用。
-- `agent/runner.py` 每轮调用 `LLMGateway.astream_with_tools(...)` 并传入 `space_id` /
-  `conversation_id`，因此**一轮 ReAct 对话会产生 1~N 条记录**（每轮都是一次独立计费调用）。
-- `LLMGateway.get_model()` 是「直接取底层 `BaseChatModel`」的弃用快路径，
-  **不经过埋点**，已加 `DeprecationWarning`，业务代码不得使用。
+> **`allowed_tools` 的安全语义**：只能收窄，不能放宽。`filter_tools` 先按模式去掉副作用工具，
+> 再与技能声明取交集，顺序不可颠倒——反了就成了提权通道。
 
-### 为什么归因列不建外键
+---
 
-- 加了 `ON DELETE CASCADE`：删空间会把历史成本一并删掉，账目断档。
-- 加了 `ON DELETE SET NULL`：统计变成孤儿行，仍无法归因。
-- 不建外键：空间/会话删除后行保留，`space_id` 仍能对应到「曾经的空间」，
-  对账时可用（空间 ID 是雪花值，不会重用）。
+## 十二、llm_log — LLM 调用账本
 
-### 成本口径
+每次模型调用一行，包括 ReAct 循环中的每一轮。一轮对话通常产生 1~N 条。
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | Integer | PK，非自增 | 雪花 ID |
+| `model_name` | Text | NOT NULL | **实际命中**的模型，如 `zai/glm-4-flash` |
+| `provider` | Text | default `""` | 厂商，取 `model_name` 前缀 |
+| `request_type` | Text | default `""` | `invoke` / `ainvoke` / `stream` / `astream` / `tools` |
+| `prompt_tokens` | Integer | default 0 | 输入 token 数 |
+| `completion_tokens` | Integer | default 0 | 输出 token 数 |
+| `total_tokens` | Integer | default 0 | 总 token 数 |
+| `duration_ms` | Integer | default 0 | 调用耗时（毫秒） |
+| `success` | Integer | default 1 | 1=成功，0=失败 |
+| `error_message` | Text | default `""` | 失败原因 |
+| `space_id` | Integer | NULL，**无外键** | 归因空间 |
+| `conversation_id` | Integer | NULL，**无外键** | 归因会话 |
+| `run_id` | Integer | NULL，**无外键** | 归因执行记录 |
+| `routing_tier` | Text | default `""` | 路由档位：`SIMPLE` / `MEDIUM` / `COMPLEX` / `REASONING` |
+| `cost_usd` | Float | **NULLABLE** | 估算成本（美元）；NULL 表示定价未知 |
+| `created_at` | Text | NOT NULL | 创建时间 |
+
+索引：
+
+| 名称 | 字段 | 用途 |
+|---|---|---|
+| `idx_llm_log_model` | `model_name` | 按模型聚合 |
+| `idx_llm_log_created` | `created_at` | 时间窗口筛选 |
+| `idx_llm_log_space` | (`space_id`, `created_at`) | 按空间算成本 |
+| `idx_llm_log_conversation` | (`conversation_id`, `created_at`) | 按会话算成本 |
+| `idx_llm_log_run` | (`run_id`, `created_at`) | 按执行记录算成本 |
+
+### 12.1 三个归因列为什么不建外键
+
+- `ON DELETE CASCADE`：删空间会把历史成本一起删掉，账目断档。
+- `ON DELETE SET NULL`：统计变成无法归因的孤儿行，等于白记。
+- 不建外键：空间/会话删除后行保留，`space_id` 仍指向「曾经的那个空间」。
+  雪花 ID 不复用，所以这个引用永远有效。
+
+### 12.2 成本口径
 
 - `cost_usd` 由定价表计算：优先 `config.pricing`（自定义费率），其次 `litellm.model_cost`。
 - 定价表查不到的模型（如 `zai/*`）记为 **NULL**，与「免费」严格区分。
-- 查询口径见 `GET /api/v1/usage/stats`：`cost_usd` 只累加已知成本，
-  `unpriced_calls` 单独暴露未计价次数，避免把部分成本当成全部成本。
+- `GET /api/v1/usage/stats` 同时返回 `cost_usd` 与 `unpriced_calls`：
+  前者只累加已知成本，后者表示有多少次无法计价。只看金额会低估真实开销。
 
+### 12.3 `model_name` 必须是真实模型
 
----
-
-## 十、message — 消息表
-
-> *「消息为会话之血肉——append-only，不可修改，不可删除，唯有追加。」*
-
-### 字段定义
-
-| 字段                | 类型      | 约束                                   | 说明        |
-|-------------------|---------|--------------------------------------|-----------|
-| `id`              | Integer | **PK**, 非自增                          | 全局唯一 ID   |
-| `conversation_id` | Integer | **FK** → `conversation.id`, NOT NULL | 所属会话      |
-| `role`            | Text    | NOT NULL                             | 消息角色      |
-| `content`         | Text    | NOT NULL, default=""                 | 消息内容      |
-| `meta`            | Text    | NOT NULL, default="{}"               | 元数据（JSON） |
-| `created_at`      | Text    | NOT NULL                             | 创建时间      |
-
-### 约束
-
-| 约束名               | 类型    | 规则                                      |
-|-------------------|-------|-----------------------------------------|
-| `ck_message_role` | CHECK | `role IN ('user','assistant','system')` |
-
-### 索引
-
-| 索引名                | 字段                |
-|--------------------|-------------------|
-| `idx_message_conv` | `conversation_id` |
-
-### 外键删除策略
-
-| 外键                | 指向                | 策略      |
-|-------------------|-------------------|---------|
-| `conversation_id` | `conversation.id` | CASCADE |
+`response_metadata["model"]` 是空键，用它兜底会把所有调用记成 Router 的逻辑组名
+（如 `smart-router`），而逻辑组名没有定价，成本将永远是 NULL。取值优先级为：
+`deployment` → `routing_decision.routed_model` → `deployment_model_name` → `model_name` / `model`。
 
 ---
 
-## 十一、枚举值速查
+## 十三、枚举速查
 
-> *「标准化的值域，是数据完整性的守护者。」*
+### agent_run.status
 
-### test_run.status
+| 值 | 含义 |
+|---|---|
+| `running` | 执行中（插入即此态） |
+| `completed` | 正常收尾，产出 `final` |
+| `failed` | 产出 `error` 事件或抛出未捕获异常 |
+| `cancelled` | 客户端断流，未走到明确终态 |
 
-| 值           | 含义   |
-|-------------|------|
-| `pending`   | 等待执行 |
-| `running`   | 执行中  |
-| `completed` | 已完成  |
-| `failed`    | 执行失败 |
-| `cancelled` | 已取消  |
+### agent_run.mode / conversation.mode
 
-### test_run.trigger_type
+| 值 | 含义 | 可用工具 |
+|---|---|---|
+| `agent` | 执行模式（默认） | 全部 17 个 |
+| `ask` | 问答模式，只读 | 12 个只读 |
+| `plan` | 计划模式，只读 | 12 个只读 |
 
-| 值           | 含义       |
-|-------------|----------|
-| `manual`    | 手动触发     |
-| `scheduled` | 定时触发     |
-| `ci`        | CI/CD 触发 |
+### agent_run.trigger_type
 
-### test_case.scenario_type
+| 值 | 含义 |
+|---|---|
+| `chat` | 对话触发（当前唯一来源） |
+| `manual` | 手工触发 |
+| `scheduled` | 定时触发 |
+| `ci` | CI 触发 |
 
-| 值                  | 含义     |
-|--------------------|--------|
-| `normal`           | 正常场景   |
-| `param_missing`    | 参数缺失   |
-| `param_type_error` | 参数类型错误 |
-| `boundary_value`   | 边界值    |
-| `permission_error` | 权限错误   |
-| `custom`           | 自定义场景  |
+### agent_tool_call.tool_type
 
-### test_case.priority
-
-| 值    | 含义          |
-|------|-------------|
-| `P0` | 最高优先级（冒烟测试） |
-| `P1` | 高优先级（核心功能）  |
-| `P2` | 普通优先级（边缘场景） |
-
-### test_case.generated_by
-
-| 值        | 含义       |
-|----------|----------|
-| `llm`    | LLM 自动生成 |
-| `manual` | 人工编写     |
-| `import` | 外部导入     |
-
-### test_result.status
-
-| 值         | 含义        |
-|-----------|-----------|
-| `pending` | 等待执行      |
-| `running` | 执行中       |
-| `passed`  | 通过        |
-| `failed`  | 失败（断言不通过） |
-| `skipped` | 跳过（依赖未满足） |
-| `error`   | 错误（执行异常）  |
-
-### conversation.mode
-
-| 值        | 含义                    | 可用工具        |
-|----------|-----------------------|-------------|
-| `agent`  | 执行模式（默认）：自动挑工具并执行测试   | 全部 17 个      |
-| `ask`    | 问答模式：只回答，不动手          | 12 个只读       |
-| `plan`   | 计划模式：只出计划，不执行         | 12 个只读       |
-
-> v1.0 前为 `Ask` / `Plan` / `Run`，已迁移为小写。旧值由 `normalize_mode()` 兼容映射，
-> 但 DB 层 CHECK 只接受小写三值。
+| 值 | 归属工具 |
+|---|---|
+| `http` | `send_request`、`list_environments` |
+| `db` | `get_space_endpoints`、`get_endpoint_detail_by_id` |
+| `fs` | `read_file`、`write_file`、`list_directory`、`delete_file` |
+| `exec` | `evaluate_assertions`、`extract_jsonpath` |
+| `memory` | `recall`、`remember`、`forget` |
+| `knowledge` | `knowledge_search` |
+| `skill` | `list_skills`、`read_skill` |
+| `search` | `search_space` |
+| `other` | 未分类 |
 
 ### space_memory.category
 
-| 值            | 含义            |
-|--------------|---------------|
-| `fact`       | 客观事实（如鉴权头要求）  |
-| `decision`   | 已定决策（如选用某环境）  |
-| `preference` | 偏好（如命名规范）     |
-| `issue`      | 已知问题 / 坑      |
-| `glossary`   | 领域术语          |
+| 值 | 含义 |
+|---|---|
+| `fact` | 客观事实，如鉴权头要求 |
+| `decision` | 已定决策，如选定某环境 |
+| `preference` | 约定与偏好，如命名规范 |
+| `issue` | 已知问题与坑 |
+| `glossary` | 领域术语 |
 
 ### knowledge_document.status / index_mode
 
-| 字段           | 值                        | 含义                     |
-|--------------|--------------------------|------------------------|
-| `status`     | `pending`                | 已入库，尚未索引               |
-|              | `indexed`                | 索引完成                   |
-|              | `failed`                 | 索引失败（原因见 `error`）      |
-| `index_mode` | `vector`                 | 走向量检索（Chroma + embedding） |
-|              | `lexical`                | 走词法检索（SQLite LIKE 降级）  |
+| 字段 | 值 | 含义 |
+|---|---|---|
+| `status` | `pending` | 已入库，尚未索引 |
+| | `indexed` | 索引完成 |
+| | `failed` | 索引失败，原因见 `error` |
+| `index_mode` | `vector` | 向量检索（Chroma + embedding） |
+| | `lexical` | 词法检索（`LIKE` 降级） |
 
 ### skill.scope
 
-| 值         | 含义               |
-|-----------|------------------|
-| `builtin` | 随代码分发的内置技能       |
-| `space`   | 用户为某个空间导入的技能     |
+| 值 | 含义 |
+|---|---|
+| `builtin` | 随代码分发，位于 `backend/skills/` |
+| `space` | 空间级导入，位于 `<space>/.skills/` |
 
 ### message.role
 
-| 值           | 含义   |
-|-------------|------|
-| `user`      | 用户消息 |
+| 值 | 含义 |
+|---|---|
+| `user` | 用户消息 |
 | `assistant` | 助手回复 |
-| `system`    | 系统消息 |
+| `system` | 系统消息 |
 
-### report.format
+### endpoint.method
 
-| 值          | 含义          |
-|------------|-------------|
-| `excel`    | Excel 格式    |
-| `html`     | HTML 格式     |
-| `markdown` | Markdown 格式 |
-| `json`     | JSON 格式     |
-
-### endpoint.method / test_case.method
-
-| 值         |
-|-----------|
-| `GET`     |
-| `POST`    |
-| `PUT`     |
-| `DELETE`  |
-| `PATCH`   |
-| `HEAD`    |
-| `OPTIONS` |
+`GET` · `POST` · `PUT` · `DELETE` · `PATCH` · `HEAD` · `OPTIONS`
 
 ---
 
-## 十二、数据库重建
+## 十四、重建数据库
 
 ```bash
-# Windows
-del db\LLMTest.db
+# 停止后端进程后删除库文件
+rm backend/db/TestAgents.db          # macOS / Linux
+del backend\db\TestAgents.db         # Windows
 
-# macOS / Linux
-rm db/LLMTest.db
-
-# 重新运行程序即可自动重建所有表结构
-python main.py "解析这份API文档并存储" --api-doc input/httpbin_service.json
+# 重新启动即自动建 12 张表并跑完 v2 / v3 / v4 迁移
+cd backend && uv run python app.py
 ```
 
----
-
-## 十三、修订记录
-
-| 日期         | 说明                                                                                                                                            |
-|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| 2026-08-27 | `project` → `space` 术语层重命名；`test_run.space_id` 改为 NOT NULL + CASCADE；新增 `conversation` / `message` 两表；枚举速查补充 conversation.mode / message.role |
-| 旧版         | 初始版本（project 术语）                                                                                                                              |
+库文件删除不影响 `backend/workspaces/` 下的空间目录：目录与数据行是两套独立存储，
+重建后需要重新创建空间，旧目录会以 `workspaces/.deleted-*` 的形式留在磁盘上，可手工回收。
 
 ---
 
-> *「此文档终。数据库之道，尽在此间。」*
+## 十五、修订记录
 
----
-
-*📎 相关文档：[系统流程图](SystemFlowchart.md) · [ER 图](ER.md)*
+| 日期 | 说明 |
+|---|---|
+| 2026-11-04 | v2.0：按当前 ORM 全量重写。删除 `test_run` / `test_case` / `test_result` / `test_summary` / `report` 五张表的章节（已由 v3/v4 迁移删除）；新增 `agent_run` / `agent_tool_call`；补 `space.base_url` 已移除的说明；`llm_log` 增补 `run_id` 与 `idx_llm_log_run`；表数量由 15 更正为 12 |
+| 2026-10-21 | 补 `llm_log` 章节与归因列 |
+| 2026-08-27 | `project` → `space` 术语层重命名；新增 `conversation` / `message` |

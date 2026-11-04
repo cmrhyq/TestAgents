@@ -1,15 +1,15 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Folder, Globe, CheckCircle, MessageSquare } from "lucide-react";
+import { Folder, Globe, CheckCircle, MessageSquare, Activity } from "lucide-react";
 
 import { useSpaces } from "@/hooks/use-spaces";
-import { useTestRuns } from "@/hooks/use-test-runs";
+import { useAgentRuns } from "@/hooks/use-agent-runs";
 import { useEndpoints } from "@/hooks/use-endpoints";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { cn } from "@/lib/utils";
 
-/** 图纸角标：四角十字墨线。 */
+/** 装饰性四角标记。 */
 function CornerMarks() {
   const base = "pointer-events-none absolute h-3 w-3 border-primary";
   return (
@@ -22,35 +22,41 @@ function CornerMarks() {
   );
 }
 
+/** 仪表盘：空间、接口、执行记录与平均成功率总览。 */
 export default function DashboardPage() {
   const { data: spacesData } = useSpaces({ page: 1, page_size: 1 });
-  const { data: testRunsData } = useTestRuns();
+  const { data: agentRunsData } = useAgentRuns();
   const { data: endpointsData } = useEndpoints();
 
   const stats = useMemo(() => {
-    const runs = testRunsData?.items ?? [];
+    const runs = agentRunsData?.items ?? [];
     const totalSpaces = spacesData?.total ?? 0;
     const totalEndpoints = endpointsData?.total ?? 0;
+    const totalRuns = agentRunsData?.total ?? 0;
 
-    const avgPassRate =
-      runs.length > 0 ? Math.round(runs.reduce((sum, r) => sum + r.pass_rate, 0) / runs.length) : 0;
+    // 成功率按调用次数加权汇总，而非对每个 run 的失败率取算术平均，
+    // 否则调用 1 次与调用 50 次的 run 权重相同，会拉偏大盘数字。
+    const totalCalls = runs.reduce((sum, r) => sum + r.tool_call_count, 0);
+    const totalOk = runs.reduce((sum, r) => sum + r.ok_count, 0);
+    const avgSuccessRate = totalCalls > 0 ? Math.round((totalOk / totalCalls) * 100) : 0;
 
     return {
       totalSpaces,
       totalEndpoints,
-      avgPassRate,
+      totalRuns,
+      avgSuccessRate,
     };
-  }, [spacesData, testRunsData, endpointsData]);
+  }, [spacesData, agentRunsData, endpointsData]);
 
   const statItems = [
     { label: "空间总数", value: stats.totalSpaces, unit: "", icon: Folder },
     { label: "接口总数", value: stats.totalEndpoints, unit: "", icon: Globe },
-    { label: "平均通过率", value: stats.avgPassRate, unit: "%", icon: CheckCircle },
+    { label: "执行记录", value: stats.totalRuns, unit: "", icon: Activity },
+    { label: "平均成功率", value: stats.avgSuccessRate, unit: "%", icon: CheckCircle },
   ];
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Hero 标题块：图纸网格 + 四角标 + 注解式页头 */}
       <div className="relative overflow-hidden rounded-[4px] border border-border bg-card p-6 shadow-xs lg:p-8">
         <div className="bg-blueprint-grid absolute inset-0" aria-hidden="true" />
         <CornerMarks />
@@ -79,7 +85,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 统计读数带：mono 读数 + 竖墨线分隔 */}
       <div className="flex flex-col divide-y divide-border-subtle rounded-[4px] border border-border bg-card shadow-xs sm:flex-row sm:divide-x sm:divide-y-0">
         {statItems.map((item) => {
           const Icon = item.icon;

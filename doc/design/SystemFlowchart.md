@@ -1,159 +1,81 @@
-# 系统流程图 — TestAgents
+# 系统流程图
 
-> 版本：v0.2（对应 v1.0 重构后的实现，2026-10-20）
+> 版本：v2.0（对应 `feature/web_ui` 分支当前实现）
+> 定位：描述一轮对话从 HTTP 请求进入、到事件流结束、再到数据库落定的完整路径，
+> 重点是**每个阶段的失败行为**——正常路径看代码就够，异常路径才需要文档。
 >
-> **与 v0.1 的根本差别**：旧版描述的是 LangGraph 图（intent 路由 → 各节点 → 执行引擎）——
-> 那套代码（`src/workflow.py`、`src/graph/**`）已在 v1.0 重构中整体删除。
-> 现行运行时是一段**手写 ReAct 循环**（`src/agent/runner.py`），流程由「模式 → 工具白名单 → 循环」构成，
-> 不再有意图分类节点、不再有固定图结构。历史设计见 [Architecture.md](Architecture.md) §三。
+> 关联文档：[架构设计](Architecture.md) · [数据库设计](DatabaseDesign.md) · [模式设计](Mode-System-Design.md)
 
 ---
 
 ## 一、总览
 
-一轮对话从 `POST /api/v1/chat/stream` 进入，经过四段**职责分离**的处理：
+一轮对话经过五个阶段，只有第四个阶段调用大模型：
 
-| 阶段 | 位置 | 是否调用 LLM | 产出 |
-|:--|:--|:--:|:--|
-| ① 会话准备 | `ChatStreamService.ensure_conversation` | ❌ | 会话 ID + user 消息落库 |
-| ② 上下文组装 | `ChatStreamService.prepare` + `agent/context.py` | ❌ | `RunRequest`（system prompt + 工具集 + 策略） |
-| ③ 推理执行 | `agent/runner.py` 的 ReAct 循环 | ✅ | 事件流（text / tool_call / tool_result） |
-| ④ 渲染落库 | `api/v1/chat.py` + `save_answer` | ❌ | SSE 帧 + assistant 消息落库 |
+| 阶段 | 位置 | 调用 LLM | 产出 | 失败时的行为 |
+|:--|---|---|---|---|
+| ① 会话准备 | `ChatStreamService.ensure_conversation` | 否 | 会话 ID + user 消息落库 | 记日志，用原 ID 或 0 继续 |
+| ② 上下文组装 | `ChatStreamService.prepare` | 否 | `RunRequest` | 结束流，发一条 `error` |
+| ③ 记录开启 | `AgentRunRecorder.start` | 否 | `agent_run`（`running`）+ `run_id` | `run_id` 为 None，本轮不记账 |
+| ④ 推理执行 | `agent/runner.py::run` | **是** | 事件流 | 内部异常转 `ok=false` 工具结果；模型层异常发 `error` |
+| ⑤ 收尾落库 | `stream_answer` 的 `finally` | 否 | `agent_run` 终态 + assistant 消息 | 吞异常并记日志，不影响已下发内容 |
 
-**关键设计**：LLM 只出现在阶段 ③。阶段 ①④ 是纯确定性代码——这意味着「为什么这轮可用哪些工具」
-可以完全离线复盘，不依赖模型自我报告（见 [Testing-Agent-Roadmap.md](Testing-Agent-Roadmap.md) 的两阶段分离原则）。
+阶段 ③ 必须排在 ② 之后。若在装配失败前就建记录，`finally` 尚未建立，库里会留下一条永远
+`running` 的行——既不会被清理任务识别为超时，也无法判断它是否真的执行过。
 
 ---
 
-## 二、系统主流程
+## 二、时序
 
 ```mermaid
-flowchart TD
-  req["POST /chat/stream<br/>instruction / space_id? / conversation_id?<br/>mode / skill_names / environment_id?"]
+sequenceDiagram
+  autonumber
+  participant C as 客户端
+  participant R as POST /chat/stream
+  participant S as ChatStreamService
+  participant REC as AgentRunRecorder
+  participant A as runner.run
+  participant G as LLMGateway
+  participant DB as SQLite
 
-  subgraph P1["① 会话准备（无 LLM）"]
-    c1{"conversation_id?"}
-    c2["新建 conversation"]
-    c3["落库 user 消息<br/>响应头 X-Conversation-Id"]
-    c1 -->|无| c2 --> c3
-    c1 -->|有| c3
+  C->>R: instruction / space_id / mode / skill_names
+  R->>S: ensure_conversation(body)
+  S->>DB: INSERT conversation（可选）+ message(user)
+  R-->>C: 响应头 X-Conversation-Id
+  Note over R,C: 响应开始，之后全部走 SSE 帧
+  R->>S: prepare(body, conversation_id)
+  S->>DB: SELECT space / environments / message 历史
+  S->>S: 读 AGENTS.md、recall 记忆、渲染技能块
+  S-->>R: RunRequest
+  R->>REC: start(space_id, conversation_id, mode, title)
+  REC->>DB: INSERT agent_run(status=running)
+  REC-->>R: run_id
+  R->>A: run(request, recorder)
+
+  loop step in range(max_steps)
+    A->>G: astream_with_tools(messages, tools, space_id, conversation_id, run_id)
+    G->>G: bind_tools → astream → 埋点
+    G->>DB: INSERT llm_log（每次调用一条）
+    G-->>A: chunk 流（text / tool_calls）
+    A-->>C: event: text_delta
+    alt 有 tool_calls
+      loop 每个调用
+        A-->>C: event: tool_call
+        A->>A: _execute（查 tool_map，异常转 ok=false）
+        A->>REC: tool_call(step, seq, name, args, outcome, duration)
+        REC->>DB: INSERT agent_tool_call
+        A-->>C: event: tool_result
+      end
+    else 无 tool_calls
+      A-->>C: event: final(answer, usage)
+    end
   end
 
-  subgraph P2["② 上下文组装（无 LLM）"]
-    d1["空间快照 + AGENTS.md"]
-    d2["历史消息"]
-    d3["recall 跨会话记忆"]
-    d4["Skill 正文"]
-    d5["build_system_prompt<br/>≤12k 字符"]
-    d6["ModePolicy 工具白名单"]
-    d7["build_tools"]
-    d1 --> d5
-    d2 --> d5
-    d3 --> d5
-    d4 --> d5
-    d5 --> d6 --> d7
-  end
-
-  subgraph P3["③ ReAct 循环（有 LLM）"]
-    r0["yield start"]
-    r1["model.astream(messages)"]
-    r2["合并 AIMessageChunk"]
-    r3{"有 tool_calls?"}
-    r4["yield text_delta"]
-    r5["yield tool_call<br/>白名单二次校验 + 沙箱执行"]
-    r6["yield tool_result(ok, content)"]
-    r7["messages += AIMessage + ToolMessage"]
-    r8["yield final(answer)"]
-    r9["yield error<br/>超最大轮次"]
-    r0 --> r1 --> r2 --> r4 --> r3
-    r3 -->|有| r5 --> r6 --> r7 --> r1
-    r3 -->|无| r8
-    r7 -.step >= max_steps.-> r9
-  end
-
-  subgraph P4["④ 渲染落库（无 LLM）"]
-    o1["render(event, seq)<br/>id: / event: / data:"]
-    o2["save_answer 落库"]
-    o1 --> o2
-  end
-
-  req --> P1 --> P2 --> P3
-  r8 --> P4
-  r9 --> P4
+  R->>REC: finish(status)
+  REC->>DB: SELECT llm_log 按 run_id 聚合
+  REC->>DB: UPDATE agent_run（终态 + 统计 + cost_usd）
+  R->>DB: INSERT message(assistant)（仅正常收尾）
 ```
-
-<details>
-<summary>同图 PlantUML 源（`doc/images/system-flowchart.puml`，可用于导出 SVG）</summary>
-
-```plantuml
-@startuml system-flowchart
-start
-:POST /api/v1/chat/stream
-(instruction + space_id? + conversation_id?
- + mode + skill_names + environment_id?);
-
-partition "① 会话准备（无 LLM）" {
-  if (conversation_id?) then (有)
-    :校验会话存在;
-  else (无)
-    :新建 conversation
-    (mode / skill_names / environment_id);
-  endif
-  :落库 user 消息;
-  :响应头 X-Conversation-Id;
-}
-
-partition "② 上下文组装（无 LLM）" {
-  :加载空间快照
-  (name / base_url / endpoints 计数) + AGENTS.md;
-  :加载历史消息（最近 N 轮）;
-  :按指令关键词 recall 跨会话记忆;
-  :按选择加载 Skill 正文;
-  note right
-    build_system_prompt 固定顺序：
-    人设 → 模式指令 → 空间上下文
-    → 记忆 → Skill → 工具规则
-    上限 12k 字符，超限先砍 skill 再砍记忆
-  end note
-  :ModePolicy = 工具白名单 + 最大步数;
-  :build_tools 按白名单装配工具;
-}
-
-partition "③ ReAct 循环（有 LLM）" {
-  :yield start(conversation_id, mode, tools);
-  repeat
-    :model.astream(messages);
-    :分片合并 AIMessageChunk;
-    while (有文本增量?)
-      :yield text_delta;
-    endwhile
-    if (tool_calls?) then (有)
-      while (逐个工具调用)
-        :yield tool_call(id, name, args);
-        :白名单二次校验 + 沙箱内执行;
-        :yield tool_result(ok, content);
-      endwhile
-      :messages += AIMessage + ToolMessage;
-    else (无)
-      :yield final(answer);
-      stop
-    endif
-  repeat while (step < policy.max_steps)
-  :yield error("超过最大工具调用轮次");
-}
-
-partition "④ 渲染落库（无 LLM）" {
-  :render(event, seq) →
-  id: / event: / data: 三行帧;
-  :save_answer 落库 assistant 全文;
-  :load_history 排除末尾 user 消息
-  避免下一轮重复;
-}
-stop
-@enduml
-```
-
-</details>
 
 ---
 
@@ -162,102 +84,109 @@ stop
 ### 3.1 会话准备
 
 | 步骤 | 代码 | 说明 |
-|:--|:--|:--|
-| 取或建会话 | `ChatStreamService.ensure_conversation` | 有 `conversation_id` 直接复用；无则按 `space_id` / `mode` / `skill_names` / `environment_id` 新建 |
-| 落库用户输入 | 同上 | 先落库再推理，保证「模型挂了也有输入记录」 |
-| 头部回传 | `api/v1/chat.py` | `X-Conversation-Id` 让前端新建会话后立刻拿到 ID 写回 URL |
+|---|---|---|
+| 取或建会话 | `ensure_conversation` | 有 `conversation_id` 直接复用；无则按 `space_id` / `mode` / `skill_names` / `environment_id` 新建 |
+| 落库用户输入 | 同上 | 先落库再推理：模型挂了，输入仍然可查 |
+| 回传会话 ID | `api/v1/chat.py` | 响应头 `X-Conversation-Id`；前端拿到后写回 URL |
+| 缺空间的处理 | `_missing_space_stream` | 不发 400，改为流内一条 `error` 帧。前端已在读流，帧比状态码更容易处理 |
 
 ### 3.2 上下文组装
 
-`prepare()` 一次性把本轮所需的一切装进 `RunRequest`：
+`prepare()` 一次性把本轮所需的一切装进 `RunRequest`。所有外部读取都做了降级：
 
-| 组成 | 来源 | 失效时的行为 |
-|:--|:--|:--|
-| 空间快照 | `space` + `endpoint` 计数 + `AGENTS.md` | 空间不存在 → `error` 事件，不进入循环 |
-| 历史消息 | `message` 表（升序） | 空则只有 system + 当前输入 |
-| 跨会话记忆 | `LongTermMemory.recall`（关键词抽取后 LIKE） | 无命中则不注入 |
-| Skill 正文 | `SkillService.build_prompt_blocks` | 技能名不存在 → 跳过并记日志 |
-| 工具集 | `build_tools(space_id, mode, skill_names, ...)` | 白名单为空 → 模型无法调用工具，退化为纯问答 |
+| 组成 | 来源 | 失败时的行为 |
+|---|---|---|
+| 空间快照 | `space` + 接口计数 + 环境清单 | 查不到给占位名，接口数记 0 |
+| `AGENTS.md` | `workspaces/{id}/AGENTS.md` | 文件缺失则跳过该段 |
+| 历史消息 | `message` 表升序，取最近 20 条 | 读失败按单轮处理 |
+| 跨会话记忆 | `LongTermMemory.recall`（关键词 + LIKE） | 无命中则不注入 |
+| 技能正文 | `SkillService.build_prompt_blocks` | 技能不存在则跳过并记日志 |
 
-### 3.3 ReAct 循环
+历史消息默认**剔除末尾的 user 消息**（`exclude_trailing_user=True`）。阶段 ① 已把本轮提问落库，
+不剔除会让同一个问题在上下文里出现两次。
 
-`src/agent/runner.py::run` 的骨架：
+### 3.3 推理执行
 
-```python
-yield StartEvent(...)
-for step in range(policy.max_steps):
-    accumulated = None
-    async for chunk in model.astream(messages):
-        accumulated = chunk if accumulated is None else accumulated + chunk   # 分片合并交给 LangChain
-        if text := chunk.text: yield TextDeltaEvent(text)
-    if not accumulated.tool_calls:
-        yield FinalEvent(answer=accumulated.text)
-        return
-    for call in accumulated.tool_calls:
-        yield ToolCallEvent(id, name, args)
-        ok, content = await _execute(tool_map, name, args)   # 异常 → ok=False，不中断流
-        yield ToolResultEvent(id, name, ok, content)
-    messages += [accumulated, *tool_messages]
-yield ErrorEvent(f"超过最大工具调用轮次（{policy.max_steps}）")
+见[架构设计](Architecture.md) §3.2 的循环骨架。此处补充三个易错点：
+
+1. **`seq` 用局部计数器**。模块级全局变量会被并发的多轮对话互相污染，前端按 `seq` 排序就会错乱。
+2. **工具记录写在 `finally` 里**。即使客户端在这一刻断流，也要留下「这个工具被调过」的证据；
+   recorder 内部是短事务，不 `await`、不 `yield`。
+3. **回灌模型的内容与下发前端的内容一致**。二者都经过 `_for_model` 截断，
+   若只截一个，排障时会出现「模型说结果很长、前端只看到一半」的假象。
+
+### 3.4 收尾
+
+`finally` 块在两种语境下执行，行为不同：
+
+| 语境 | `settled` | 记录终态 | assistant 消息 |
+|---|:--:|---|---|
+| 收到 `final` | true | `completed` | 落库 |
+| 收到 `error` 或抛未捕获异常 | true | `failed` | 不落库 |
+| 客户端断流（`GeneratorExit`） | false | `cancelled` | 不落库 |
+
+在这个块里**不能 `await`**（会抛 `CancelledError`）、**不能 `yield`**（会抛 `RuntimeError`）、
+**不能向外抛异常**（会覆盖 `GeneratorExit`）。这三个限制是 recorder 三个方法都定义为同步方法的原因。
+
+---
+
+## 四、SSE 帧格式
+
+每帧三行加一个空行：
+
+```
+id: 7
+event: tool_result
+data: {"seq":7,"type":"tool_result","ts":null,"id":"call_1","name":"send_request","ok":true,"content":"...","duration_ms":183}
+
 ```
 
-三个刻意的取舍：
+- `id`：帧序号，流内从 0 单调递增。当前未实现断点续传，`id` 为将来补 `Last-Event-ID` 预留。
+- `event`：事件名，与 `data.type` 相同。两者都带，是为了兼容 `addEventListener` 与统一分发两种写法。
+- `data`：JSON。序列化用 `default=str` 兜底，避免单个不可序列化的值打断整条流。
 
-1. **工具异常不打断流** — 异常转成 `ok=false` 的 `tool_result` 回灌给模型，让模型自己纠错（换参数、换工具、或放弃）。
-   直接把异常抛给用户等于把内部错误暴露成产品缺陷。
-2. **白名单二次校验** — 即使模型凭空编出一个工具名，执行前仍查 `tool_map`，不在表里就是 `unknown tool`。
-   模式限制不是「模型看不见所以不会调」，而是「调了也执行不了」。
-3. **步数上限** — `agent` 12 步、`plan` 8 步。防止模型在两个工具之间来回试探把 token 烧光。
+响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache`、`Connection: keep-alive`、
+`X-Accel-Buffering: no`、`Access-Control-Expose-Headers: X-Conversation-Id`。
 
-### 3.4 SSE 事件协议
-
-六种事件，`data:` 里是 JSON，`seq` 从 0 单调递增：
-
-| 事件 | 载荷 | 前端处理 |
-|:--|:--|:--|
-| `start` | `conversation_id`、`space_id`、`mode`、`tools` | 初始化本轮骨架、渲染「可用工具 N 个」 |
-| `text_delta` | `content` | 追加到当前气泡，触发流式 markdown |
-| `tool_call` | `id`、`name`、`args` | 插入一张折叠的工具卡片 |
-| `tool_result` | `id`、`name`、`ok`、`content`、`duration_ms` | 按 `id` 回填卡片结果，`ok=false` 着错误色 |
-| `final` | `answer`、`usage` | 收尾、显示 token 用量 |
-| `error` | `message` | 红色告警条，保留已收到的部分输出 |
-
-### 3.5 工具执行与沙箱
-
-| 工具组 | 工具 | 约束 |
-|:--|:--|:--|
-| 文件 | `read_file` / `write_file` / `list_directory` / `delete_file` | 路径 `resolve()` 后必须 `is_relative_to(space_root)`；`AGENTS.md`、`memory/MEMORY.md` 禁止删除 |
-| HTTP | `list_environments` / `send_request` | 目标环境 `is_production=1` 时拒绝写方法；URL 必须属于该环境域名 |
-| 数据 | `get_space_endpoints` / `get_endpoint_detail_by_id` / `search_space` | 一律带 `space_id` 过滤，跨空间不可见 |
-| 记忆 | `recall` / `remember` / `forget` | 写入同时同步 `memory/MEMORY.md` 镜像 |
-| 知识库 | `knowledge_search` | 向量检索失败自动降级词法检索 |
-| 技能 | `list_skills` / `read_skill` | 只读，且不能越过当前会话已选技能范围 |
-| 断言 | `evaluate_assertions` / `extract_jsonpath` | 纯函数，无副作用 |
-
-### 3.6 模式 → 工具白名单
-
-| 模式 | 语义 | 工具集 | 最大步数 |
-|:--|:--|:--|:--:|
-| `agent`（默认） | 自动挑工具执行测试 | 全部 17 个 | 12 |
-| `ask` | 只回答问题，不动手 | 12 个只读 | 12 |
-| `plan` | 只出计划，不执行 | 12 个只读 | 8 |
-
-`filter_tools` 在**执行路径**上裁剪，不是在 prompt 里写「请不要调用写工具」。实测 `ask` 模式模型手里根本没有
-`send_request` / `write_file`。
+事件清单见[架构设计](Architecture.md) §3.5。
 
 ---
 
-## 四、与旧版流程的对照
+## 五、失败与中断
 
-| 维度 | 旧（v0.1，LangGraph） | 新（v1.0，手写 ReAct） |
-|:--|:--|:--|
-| 流程形态 | 固定图：START → parse_input → 分支 → 各节点 → END | 单循环，拓扑由模型逐轮决定 |
-| 意图识别 | 独立 LLM 节点分类 `run` / `ask` | 取消。用户用 `mode` 直接选 |
-| 测试生成 | 独立节点批量生成用例 → 落库 → 执行器跑 | 模型在循环里现调工具 |
-| 工具可见性 | 所有节点共享同一套工具 | 按模式裁剪白名单 |
-| 流式输出 | 图事件（node 级） | token 级 `text_delta` + 工具级事件 |
-| 可回溯性 | 依赖 LangSmith 图 trace | 事件流自带完整轨迹，可离线复现 |
+| 现象 | 根因 | 用户看到什么 | 记录里留下什么 |
+|---|---|---|---|
+| 模型调用失败 | 凭证无效、网络不可达、模型名错误 | 一条 `error` 帧，已输出的文本保留 | `agent_run.status=failed` + `error_message` |
+| 工具执行失败 | 参数不合法、路径越界、生产环境拦截 | `tool_result` 但 `ok=false`，流继续 | `agent_tool_call.ok=0` + `error_type` |
+| 工具名不存在 | 模型编造工具 | `tool_result` 含可用工具清单 | 同上，`error_type=not_found` |
+| 超过最大轮次 | 模型陷入循环 | `error` 帧，提示轮次上限 | `status=failed` |
+| 客户端断流 | 用户关页或切走 | 无（连接已断） | `status=cancelled` |
+| 上下文装配失败 | 数据库不可用 | 一条 `error` 帧，无 `start` | **无记录**（记录在装配之后才建） |
+| 缺 `space_id` | 前端未选空间 | 一条 `error` 帧，HTTP 200 | 无记录 |
+
+最后两行是刻意的：装配阶段失败时还没有执行记录，因此查不到任何痕迹。
+如果将来需要追溯这类失败，应当把记录创建提前到 `prepare` 之前并接受「可能留下 running 行」的代价。
 
 ---
 
-*📎 相关文档：[ER 图](ER.md) · [数据库设计](DatabaseDesign.md) · [架构设计](Architecture.md) · [重构设计](Refactor-Design.md)*
+## 六、与旧版流程的对照
+
+旧版（LangGraph）已在 v1.0 重构中整体删除，此处仅保留结构性差别，便于理解为什么现在没有图：
+
+| 维度 | 旧（LangGraph 工作流） | 现（手写 ReAct） |
+|---|---|---|
+| 流程形态 | 固定图：`START → parse_input → 分支 → 各节点 → END` | 单循环，拓扑由模型逐轮决定 |
+| 意图识别 | 独立 LLM 节点分类 `run` / `ask` | 取消，用户直接选 `mode` |
+| 用例生成 | 独立节点批量生成后落库 | 模型在循环内现调工具，产物写文件 |
+| 工具可见性 | 所有节点共享同一套工具 | 按模式裁剪白名单，执行前再校验一次 |
+| 流式粒度 | 节点级事件 | token 级 `text_delta` + 工具级事件 |
+| 可回溯性 | 依赖外部 trace 服务 | 事件流 + `agent_tool_call` 自带轨迹，可离线回放 |
+
+---
+
+## 七、修订记录
+
+| 日期 | 说明 |
+|---|---|
+| 2026-11-04 | v2.0：补执行记录阶段与时序图；`start` 载荷改为 `skills` + `run_id`；步数上限 12/8 → 100/80；补失败与中断对照表；移除 PlantUML 副本 |
+| 2026-10-20 | v0.2：按 ReAct 运行时重写 |

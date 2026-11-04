@@ -1,5 +1,6 @@
 import type { Id, PaginatedResponse } from "./common";
 
+/** 接口定义，字段对应 OpenAPI 解析结果落库后的列。 */
 export interface Endpoint {
   id: Id;
   space_id: Id;
@@ -23,4 +24,5 @@ export interface Endpoint {
   updated_at: string;
 }
 
+/** 接口列表的分页响应。 */
 export type EndpointListResponse = PaginatedResponse<Endpoint>;

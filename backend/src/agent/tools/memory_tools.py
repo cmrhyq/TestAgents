@@ -1,7 +1,6 @@
-"""记忆工具：remember / recall / forget。
+"""记忆工具：``remember`` / ``recall`` / ``forget``。
 
-Agent 判断「这条信息以后还用得上」时自己调 ``remember``——这比在对话结束后
-用 LLM 二次总结要可靠得多：让写记忆的人和做判断的人是同一个，它知道上下文。
+记忆由 Agent 在对话中自行写入：写入者与判断者是同一方，比事后二次总结可靠。
 """
 
 from __future__ import annotations
@@ -23,16 +22,24 @@ def make_memory_tools(
     conversation_id: int | None = None,
     memory: LongTermMemory | None = None,
 ) -> list[BaseTool]:
-    """构造记忆读写工具（绑定空间与会话）。"""
+    """构造记忆读写工具（绑定空间与会话）。
+
+    Args:
+        space_id: 空间 ID，记忆按空间隔离
+        conversation_id: 会话 ID，写入时记录来源
+        memory: 长期记忆实例；None 时使用全局实例
+
+    Returns:
+        工具列表：``recall``、``remember``、``forget``
+    """
     store = memory or _default_memory()
 
     @tool
     def recall(query: str = "") -> str:
         """检索当前空间的跨会话记忆。
 
-        查历史结论、历史决策、已知问题、接口约定时使用。
-        例如「之前有没有说过鉴权怎么取 token？」——先 recall 再回答，
-        不要凭空猜测，也不要重复问用户已经说过的事。
+        用于查询历史结论、历史决策、已知问题与接口约定；先检索再回答，
+        避免重复询问用户已说明过的信息。
 
         Args:
             query: 关键词；留空则返回最近的记忆条目
@@ -60,11 +67,10 @@ def make_memory_tools(
 
     @tool
     def remember(title: str, content: str, category: str = "fact", tags: str = "") -> str:
-        """把一条值得长期记住的结论写入当前空间的跨会话记忆。
+        """把一条长期有效的结论写入当前空间的跨会话记忆。
 
-        **什么时候该用**：用户明确了约定（"我们统一用 v2 接口"）、你踩到了坑
-        （"这个接口在 dev 环境一直 502"）、发现了业务规则（"金额单位是分不是元"）。
-        **什么时候不该用**：一次性的执行结果、临时变量、用户随口说的话。
+        副作用：写入记忆库。适用于用户明确的约定、已踩过的坑、业务规则；
+        不适用于一次性执行结果、临时变量与闲聊内容。
 
         Args:
             title: 一句话概括，作为列表标题
@@ -101,7 +107,7 @@ def make_memory_tools(
     def forget(memory_id: int) -> str:
         """删除一条已经过时或错误的记忆。
 
-        当用户说「那条记错了」「已经不用了」，或你发现某条记忆与现实矛盾时使用。
+        副作用：删除记忆库中的记录。
 
         Args:
             memory_id: 记忆 ID，可从 recall 的结果里取
@@ -117,6 +123,7 @@ def make_memory_tools(
 
 
 def _load_tags(raw: str | None) -> list[str]:
+    """解析记忆的标签 JSON；非法或非列表时返回空列表。"""
     if not raw:
         return []
     try:
@@ -127,6 +134,7 @@ def _load_tags(raw: str | None) -> list[str]:
 
 
 def _default_memory() -> LongTermMemory:
+    """返回全局长期记忆实例。"""
     from src.memory import get_long_term_memory
 
     return get_long_term_memory()

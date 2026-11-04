@@ -1,3 +1,4 @@
+/** 分隔线：`orientation` 控制横向或纵向。 */
 import type { ComponentPropsWithoutRef } from "react";
 import { forwardRef } from "react";
 import * as SeparatorPrimitive from "@radix-ui/react-separator";

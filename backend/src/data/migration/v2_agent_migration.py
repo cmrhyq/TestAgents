@@ -1,15 +1,8 @@
-"""v2 迁移：旧 schema -> Agent 平台 schema。
+"""v2 迁移：旧 schema 升级到 Agent 平台 schema。
 
-要解决三件事：
-
-1. **补列**：``space.workspace_path``、``environment.is_production``、
-   ``conversation.skill_names`` / ``environment_id``
-2. **重建 conversation 表**：旧表有 ``CHECK (mode IN ('Ask','Plan','Run'))``，
-   SQLite 不支持修改约束，只能重建。重建时必须临时关掉外键——否则
-   ``DROP TABLE`` 的隐式 ``DELETE FROM`` 会级联把 message 行一起删掉。
-3. **数据归一化**：``Run``->``agent``、``Ask``->``ask``、``Plan``->``plan``
-
-全部操作幂等：重复执行不会报错，也不会重复改数据。
+补列、重建 ``conversation`` 表、归一化 ``mode`` 取值。SQLite 不能修改既有 CHECK 约束，
+只能重建表；重建时须关闭外键，否则 ``DROP TABLE`` 的隐式删除会级联清空 message 行。
+全部步骤幂等，可重复执行。
 """
 
 from __future__ import annotations
@@ -46,7 +39,7 @@ _ADDED_COLUMNS = [
     ("environment", "is_production", "INTEGER NOT NULL DEFAULT 0"),
     ("conversation", "skill_names", "TEXT NOT NULL DEFAULT '[]'"),
     ("conversation", "environment_id", "INTEGER DEFAULT NULL"),
-    # llm_log 的成本归因维度（v1.0 补：此前无法按空间/会话聚合）
+    # llm_log 的成本归因维度
     ("llm_log", "space_id", "INTEGER DEFAULT NULL"),
     ("llm_log", "conversation_id", "INTEGER DEFAULT NULL"),
     ("llm_log", "routing_tier", "TEXT NOT NULL DEFAULT ''"),
@@ -54,7 +47,7 @@ _ADDED_COLUMNS = [
 ]
 
 # 补索引：(索引名, 表, 列清单)
-# create_all 不会给**已存在**的表加索引，老库补列后索引必须在这里补。
+# ``create_all`` 不会为已存在的表补索引，老库升级后的索引在此创建
 _ADDED_INDEXES = [
     ("idx_llm_log_space", "llm_log", "space_id, created_at"),
     ("idx_llm_log_conversation", "llm_log", "conversation_id, created_at"),
@@ -62,7 +55,15 @@ _ADDED_INDEXES = [
 
 
 def migrate_v2(engine: Engine) -> None:
-    """执行 v2 迁移（幂等）。"""
+    """执行 v2 迁移，幂等，可重复调用。
+
+    仅实现 SQLite 路径，其他方言只记录告警后返回。
+
+    副作用：建表、改列、建索引、回填数据，各步骤自行提交事务。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     if engine.dialect.name != "sqlite":
         logger.warning("v2 迁移仅实现 SQLite 路径，跳过", dialect=engine.dialect.name)
         return
@@ -70,8 +71,7 @@ def migrate_v2(engine: Engine) -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
-    # 先建缺失的表（新表：space_memory / knowledge_* / skill）。
-    # create_all 只创建不存在的表，不会动已有表，因此可以安全地放在重建之前。
+    # create_all 只建缺失的表、不改动已有表，可安全放在重建之前
     _create_missing_tables(engine)
 
     if "conversation" in tables and _has_legacy_mode_check(engine):
@@ -85,17 +85,26 @@ def migrate_v2(engine: Engine) -> None:
 
 
 def _create_missing_tables(engine: Engine) -> None:
-    """按 ORM 模型创建缺失的表。"""
+    """按 ORM 模型创建缺失的表。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     Base.metadata.create_all(engine)
 
 
-# ---------------------------------------------------------------------------
 # 步骤
-# ---------------------------------------------------------------------------
 
 
 def _has_legacy_mode_check(engine: Engine) -> bool:
-    """判断 conversation 是否带着旧的三值 CHECK。"""
+    """判断 ``conversation`` 是否仍带旧的三值 ``mode`` CHECK。
+
+    Args:
+        engine: 目标数据库引擎
+
+    Returns:
+        列定义中含 ``Run`` 取值时返回 True
+    """
     with engine.connect() as conn:
         ddl = conn.execute(
             text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversation'")
@@ -103,22 +112,31 @@ def _has_legacy_mode_check(engine: Engine) -> bool:
 
     if not ddl:
         return False
-    # 旧约束里含 'Run'；新约束只有 agent/ask/plan
+    # 旧约束含 'Run'，新约束只有 agent/ask/plan
     return "'Run'" in ddl or '"Run"' in ddl
 
 
 def _rebuild_conversation(engine: Engine) -> None:
-    """重建 conversation 表并迁移数据。
+    """重建 ``conversation`` 表并搬迁数据。
 
-    必须走 raw connection 手动关外键：SQLAlchemy 的连接事件会在每次
-    connect 时把 ``foreign_keys`` 打开，走 ``engine.connect()`` 关不掉。
+    必须用 raw connection 手动关闭外键：SQLAlchemy 的连接事件在每次 connect 时
+    重新打开 ``foreign_keys``，``engine.connect()`` 无法保持关闭，
+    而 ``DROP TABLE`` 会触发外键级联删除 message 行。
+
+    副作用：建临时表、搬数据、删旧表、改名并提交；失败时回滚。
+
+    Args:
+        engine: 目标数据库引擎
+
+    Raises:
+        Exception: 重建过程中的任何失败，回滚后原样抛出
     """
     raw = engine.raw_connection()
     old_columns = {c["name"] for c in inspect(engine).get_columns("conversation")}
 
     try:
         cursor = raw.cursor()
-        # 新建的表与旧表同名会冲突，先确保上一轮中断没留下残骸
+        # 清理上一轮中断可能残留的临时表
         cursor.execute("PRAGMA foreign_keys=OFF")
         cursor.execute("DROP TABLE IF EXISTS conversation__v2")
         cursor.execute(_CONVERSATION_DDL)
@@ -167,13 +185,25 @@ def _rebuild_conversation(engine: Engine) -> None:
 
 
 def _mode_case_sql() -> str:
-    """把旧 mode 值映射为新值的 SQL CASE 表达式。"""
+    """生成把旧 ``mode`` 值映射为新值的 SQL CASE 表达式。
+
+    Returns:
+        CASE 表达式字符串，未匹配的取值回退为 ``agent``
+    """
     branches = " ".join(f"WHEN '{old}' THEN '{new}'" for old, new in _LEGACY_MODE_MAP.items())
     return f"CASE mode {branches} ELSE 'agent' END"
 
 
 def _add_missing_columns(engine: Engine) -> None:
-    """按需补列（SQLite 的 ADD COLUMN 不支持 IF NOT EXISTS，先查后加）。"""
+    """按需补列。
+
+    SQLite 的 ``ADD COLUMN`` 不支持 ``IF NOT EXISTS``，需先查后加。
+
+    副作用：写库并逐列提交。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
@@ -189,7 +219,13 @@ def _add_missing_columns(engine: Engine) -> None:
 
 
 def _add_missing_indexes(engine: Engine) -> None:
-    """按需补索引（``CREATE INDEX IF NOT EXISTS`` 本身幂等）。"""
+    """按需补索引，``CREATE INDEX IF NOT EXISTS`` 本身幂等。
+
+    副作用：写库并提交。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
@@ -201,7 +237,13 @@ def _add_missing_indexes(engine: Engine) -> None:
 
 
 def _backfill(engine: Engine) -> None:
-    """回填历史数据。"""
+    """回填历史数据：``workspace_path`` 默认值、``mode`` 归一化、``skill_names`` 空值。
+
+    副作用：写库并提交。
+
+    Args:
+        engine: 目标数据库引擎
+    """
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 

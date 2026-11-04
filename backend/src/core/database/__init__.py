@@ -1,7 +1,6 @@
-"""
-数据库模块
+"""数据库模块。
 
-提供 SQLAlchemy 数据库连接管理、ORM 模型和数据访问层。
+提供 SQLAlchemy 连接管理、ORM 模型与数据访问层。
 """
 
 from src.core.database.database_manager import (
@@ -12,7 +11,6 @@ from src.core.database.database_manager import (
 )
 
 __all__ = [
-    # 连接管理
     "DatabaseManager",
     "get_db_manager",
     "init_database",

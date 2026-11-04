@@ -1,3 +1,4 @@
+/** 标签页：Radix Tabs 的样式封装。 */
 import type { ComponentPropsWithoutRef } from "react";
 import { forwardRef } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";

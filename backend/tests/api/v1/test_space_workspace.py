@@ -1,7 +1,6 @@
-"""空间 API 与工作目录联动测试。
+"""空间 API 与工作目录的联动：创建、目录树、`AGENTS.md` 读写与删除归档。
 
-验证「建空间 → 目录落地 → 目录树可查 → 删空间 → 目录归档」这条链路。
-只替换数据库依赖与工作目录根，其余走真实代码路径。
+仅替换数据库依赖与工作目录根，其余走真实路由与异常处理器。
 """
 
 from __future__ import annotations
@@ -22,10 +21,10 @@ from src.workspace.manager import WorkspaceManager
 
 @pytest.fixture()
 def app_client(tmp_path) -> Generator[TestClient, None, None]:
-    """带临时 SQLite + 临时工作目录根的 TestClient。
+    """返回挂载真实 app 的客户端，数据库与工作目录根指向临时目录。
 
-    直接用真实 app，才能覆盖异常处理器（404/409 映射）与路由装配。
-    TestClient 不加 with 上下文，因此不触发 lifespan（不会连真实数据库）。
+    使用真实 app 以覆盖异常处理器与路由装配；TestClient 不进 with 上下文，
+    因此不触发 lifespan，不会连接真实数据库。
     """
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
     Base.metadata.create_all(engine)
@@ -59,12 +58,15 @@ def app_client(tmp_path) -> Generator[TestClient, None, None]:
 
 
 def _create_space(client: TestClient, name: str = "用户中心") -> dict:
+    """创建空间并返回响应体。"""
     response = client.post("/api/v1/spaces/", json={"name": name, "description": "测试"})
     assert response.status_code == 201, response.text
     return response.json()
 
 
 class TestCreateSpaceCreatesWorkspace:
+    """创建空间时落盘初始目录与文件。"""
+
     def test_creates_directory_with_initial_files(self, app_client, tmp_path):
         space = _create_space(app_client)
         space_dir = tmp_path / "workspaces" / str(space["id"])
@@ -88,6 +90,8 @@ class TestCreateSpaceCreatesWorkspace:
 
 
 class TestTree:
+    """目录树查询，含空间不存在时的 404。"""
+
     def test_tree_returns_initial_structure(self, app_client):
         space = _create_space(app_client)
 
@@ -102,6 +106,8 @@ class TestTree:
 
 
 class TestAgentsMd:
+    """`AGENTS.md` 读写往返。"""
+
     def test_roundtrip(self, app_client):
         space = _create_space(app_client)
         url = f"/api/v1/spaces/{space['id']}/agents-md"
@@ -115,6 +121,8 @@ class TestAgentsMd:
 
 
 class TestDeleteSpaceArchivesWorkspace:
+    """删除空间时将目录归档，内容保留。"""
+
     def test_directory_is_archived_not_removed(self, app_client, tmp_path):
         space = _create_space(app_client)
         space_dir = tmp_path / "workspaces" / str(space["id"])
@@ -129,6 +137,8 @@ class TestDeleteSpaceArchivesWorkspace:
 
 
 class TestDuplicateName:
+    """空间重名返回 409。"""
+
     def test_conflict_returns_409(self, app_client):
         _create_space(app_client, "重复名")
         response = app_client.post("/api/v1/spaces/", json={"name": "重复名"})

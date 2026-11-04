@@ -1,3 +1,4 @@
+/** 下拉菜单：Radix DropdownMenu 的样式封装，含复选、单选与子菜单项。 */
 import type { ComponentPropsWithoutRef, HTMLAttributes } from "react";
 import { forwardRef } from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";

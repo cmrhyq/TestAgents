@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
+/** 表格列定义。 */
 export interface Column<T> {
+  /** 行数据的取值路径，支持 `a.b` 形式的嵌套键 */
   key: string;
   header: string;
   render?: (value: unknown, row: T) => ReactNode;
@@ -21,11 +23,11 @@ interface DataTableProps<T extends object> {
   columns: Column<T>[];
   data: T[];
   loading?: boolean;
-  /** 请求失败时为 true，显示错误态而非"暂无数据"（避免误导用户）。 */
+  /** 请求失败时为 true，显示错误态而非空态 */
   error?: boolean;
-  /** error 时的提示文案。 */
+  /** 错误态提示文案 */
   errorText?: string;
-  /** error 态下的恢复动作（如"重试"按钮）。 */
+  /** 错误态下的恢复动作，如重试 */
   onRetry?: () => void;
   emptyText?: string;
   pagination?: PaginationConfig;
@@ -40,6 +42,7 @@ function getNestedValue(obj: unknown, path: string): unknown {
   }, obj);
 }
 
+/** 通用表格：加载骨架、错误态、空态与分页。 */
 export function DataTable<T extends object>({
   columns,
   data,

@@ -1,3 +1,4 @@
+/** 折叠面板：Radix Accordion 的样式封装，展开态图标自动旋转。 */
 import * as React from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { ChevronDownIcon } from "@radix-ui/react-icons";

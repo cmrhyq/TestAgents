@@ -11,8 +11,7 @@ import { MODE_LABELS, type ConversationMode } from "@/lib/types";
 /**
  * 会话 tab：空间下开过的全部对话。
  *
- * 点进去带 ``space_id`` 一起跳，否则对话页会因为没有空间而拒绝加载——
- * 会话本身归属空间，但 URL 是唯一状态源，得显式带上。
+ * 跳转需同时带上 `space_id`，否则对话页无法加载会话。
  */
 export function ConversationsTab({ spaceId }: { spaceId: string }) {
   const { data, isLoading, isError, refetch } = useSpaceConversations(spaceId);

@@ -1,6 +1,6 @@
-"""工作流触发路由。
+"""工作流触发路由：OpenAPI 文档上传。
 
-提供 OpenAPI 文档上传与解析的 HTTP 接口，业务编排见 ``WorkflowService``。
+解析与业务编排见 ``WorkflowService``。
 """
 
 from pathlib import Path
@@ -30,7 +30,19 @@ class UploadOpenAPIResponse(BaseModel):
 async def upload_openapi(
         file: UploadFile = File(..., description="OpenAPI 文档文件（JSON/YAML）"),
 ):
-    """上传 OpenAPI 文档并持久化保存，返回服务器路径供后续运行测试使用。"""
+    """上传 OpenAPI 文档并落盘，返回服务器路径供后续解析。
+
+    副作用：文件写入服务器临时上传目录。
+
+    Args:
+        file: OpenAPI 文档文件，支持 JSON 与 YAML
+
+    Returns:
+        原始文件名、服务器保存路径、状态与提示信息
+
+    Raises:
+        ValidationError: 文件名为空或后缀非 JSON/YAML，返回 HTTP 422
+    """
     service = WorkflowService()
     content = await file.read()
     path = await run_in_threadpool(service.save_upload, file.filename or "", content)

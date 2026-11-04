@@ -1,11 +1,7 @@
 """Runner 与 LLM 统计的接线契约。
 
-**回归背景**：runner 曾用 ``gateway.get_model()`` 拿裸 ``BaseChatModel`` 再自行
-``bind_tools().astream()``，绕过了 ``LLMService`` 的埋点，导致对话链路一条
-``llm_log`` 都不产生。这个文件把「必须走带埋点的入口」钉成契约：
-
-- 未注入模型时，必须调用 ``astream_with_tools`` 并透传归因字段
-- 绝不调用 ``get_model``（否则统计会再次静默失效）
+未注入模型时必须走 `astream_with_tools` 并透传归因字段，不得调用 `get_model`：
+后者绕过 `LLMService` 埋点，会使对话链路不产生任何 `llm_log`。
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ CONVERSATION_ID = 9201
 
 
 class RecordingGateway:
-    """记录调用参数的假网关；``get_model`` 一旦被碰就炸。"""
+    """记录调用参数的假网关，`get_model` 一旦被调用即失败。"""
 
     def __init__(self, rounds: list[list[AIMessageChunk]]) -> None:
         self._rounds = rounds
@@ -42,6 +38,7 @@ class RecordingGateway:
 
 
 def _request() -> RunRequest:
+    """构造 ask 模式的请求。"""
     return RunRequest(
         instruction="空间里有哪些接口",
         space_id=SPACE_ID,
@@ -51,12 +48,13 @@ def _request() -> RunRequest:
 
 
 async def _collect(events) -> list:
+    """把异步事件流收成列表。"""
     return [event async for event in events]
 
 
 @pytest.fixture()
 def patched_gateway(monkeypatch):
-    """把全局 gateway 换成本文件里的记录器。"""
+    """返回装填函数，把全局 gateway 替换为记录器。"""
 
     def _install(rounds: list[list[AIMessageChunk]]) -> RecordingGateway:
         gateway = RecordingGateway(rounds)
@@ -86,7 +84,7 @@ class TestStatelessPath:
         assert call["conversation_id"] == CONVERSATION_ID
 
     async def test_does_not_touch_get_model(self, patched_gateway):
-        """核心断言：get_model 被调用会直接抛 AssertionError。"""
+        """`get_model` 被调用即抛错，用例随之失败。"""
         patched_gateway([[AIMessageChunk(content="ok")]])
 
         events = await _collect(run(_request()))
@@ -95,7 +93,7 @@ class TestStatelessPath:
         assert isinstance(events[-1], FinalEvent)
 
     async def test_passes_filtered_tools(self, patched_gateway):
-        """ask 模式仍需按白名单裁工具，不能因为换了入口就全量下发。"""
+        """ask 模式仍按白名单裁剪工具，更换入口不改变该行为。"""
         gateway = patched_gateway([[AIMessageChunk(content="ok")]])
 
         await _collect(run(_request()))
@@ -106,7 +104,7 @@ class TestStatelessPath:
         assert "read_file" in names
 
     async def test_each_round_goes_through_gateway(self, patched_gateway):
-        """工具轮次里每轮都是一次计费调用，必须各走一次（各记一条 llm_log）。"""
+        """工具轮次每轮都是一次计费调用，需各走一次网关。"""
         gateway = patched_gateway(
             [
                 [
@@ -141,7 +139,7 @@ class TestInjectedModel:
             async def astream(self, messages):
                 yield AIMessageChunk(content="注入模型回答")
 
-        # 全局 gateway 装成「一碰就炸」，验证注入路径确实绕开它
+        # 全局 gateway 装成一碰即错，用于验证注入路径确实绕开它
         patched_gateway([[]])
 
         events = await _collect(run(_request(), model=FakeModel()))

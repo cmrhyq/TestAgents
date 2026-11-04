@@ -1,6 +1,6 @@
-"""SkillRepository 两级发现测试。
+"""`SkillRepository` 的内置与空间两级技能发现。
 
-优先级：空间级 ``workspaces/{id}/.skills/`` 覆盖内置 ``backend/skills/``。
+空间级 `workspaces/{id}/.skills/` 覆盖同名内置技能；`space_id=None` 时只扫描内置目录。
 """
 
 import pytest
@@ -12,6 +12,7 @@ SPACE_ID = 555
 
 
 def _write_skill(root, name: str, description: str = "desc", body: str = "正文") -> None:
+    """在 `root` 下写入一个最小可解析的技能目录。"""
     skill_dir = root / name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
@@ -22,12 +23,15 @@ def _write_skill(root, name: str, description: str = "desc", body: str = "正文
 
 @pytest.fixture()
 def repo(tmp_path) -> SkillRepository:
+    """用临时目录构造仓库，内置根与工作区均与真实环境隔离。"""
     builtin = tmp_path / "skills"
     builtin.mkdir()
     return SkillRepository(builtin_root=builtin, workspace=WorkspaceManager(root=tmp_path / "workspaces"))
 
 
 class TestDiscoverBuiltin:
+    """内置技能发现，以及缺文件、坏文件的容错。"""
+
     def test_finds_skills_in_builtin_root(self, repo, tmp_path):
         _write_skill(tmp_path / "skills", "alpha")
         _write_skill(tmp_path / "skills", "beta")
@@ -61,6 +65,8 @@ class TestDiscoverBuiltin:
 
 
 class TestDiscoverSpace:
+    """空间级技能发现及与内置技能的同名覆盖关系。"""
+
     def test_finds_space_skills(self, repo, tmp_path):
         repo.workspace.create(SPACE_ID, "s")
         space_skills = tmp_path / "workspaces" / str(SPACE_ID) / ".skills"
@@ -109,6 +115,8 @@ class TestDiscoverSpace:
 
 
 class TestFind:
+    """按名查找，空间级优先于内置。"""
+
     def test_finds_by_name(self, repo, tmp_path):
         _write_skill(tmp_path / "skills", "alpha")
 
@@ -132,7 +140,7 @@ class TestFind:
 
 
 class TestInstallDir:
-    """导入 skill 时的目标目录。"""
+    """导入技能时的目标目录。"""
 
     def test_space_install_dir_created(self, repo, tmp_path):
         target = repo.install_dir(SPACE_ID)

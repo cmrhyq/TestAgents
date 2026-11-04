@@ -33,8 +33,9 @@ async function renderMermaid(id: string, code: string, theme: "dark" | "neutral"
 }
 
 /**
- * Mermaid 流程图/时序图块：流式期间显示源码，结束后渲染 SVG。
- * 主题跟随 useTheme：暗色夜图 → "dark"，亮色图纸 → "neutral"；主题切换时以 theme 为 key 重渲染。
+ * Mermaid 图块：流式期间显示源码，结束后渲染 SVG。
+ *
+ * 主题跟随 `useTheme`；主题切换时以主题为依赖重新渲染。
  */
 export function MarkdownMermaidBlock({ code, isStreaming }: MarkdownMermaidBlockProps) {
   const { theme } = useTheme();

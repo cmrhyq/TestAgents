@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+/** 主题取值：亮色或暗色。 */
 export type Theme = "light" | "dark";
 
 const STORAGE_KEY = "lta-theme";
@@ -10,13 +11,14 @@ function getInitialTheme(): Theme {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
-    /* localStorage 不可用时回退默认 */
+    // localStorage 不可用时回退默认值
   }
-  return "light"; // 蓝图默认亮色图纸
+  return "light"; // 默认亮色
 }
 
 /**
- * 主题 hook：亮色图纸为默认，暗色「夜图」通过 html.dark 类切换。
+ * 主题状态：默认亮色，暗色通过 `html.dark` 类切换。
+ *
  * 仅在用户显式切换时写入 localStorage；未显式选择时跟随系统偏好。
  */
 export function useTheme() {
@@ -35,7 +37,7 @@ export function useTheme() {
           setThemeState(e.matches ? "dark" : "light");
         }
       } catch {
-        /* ignore */
+        // 忽略存储读取异常
       }
     };
     media.addEventListener("change", handler);
@@ -47,7 +49,7 @@ export function useTheme() {
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      /* ignore */
+      // 忽略存储写入异常
     }
   }, []);
 
@@ -57,7 +59,7 @@ export function useTheme() {
       try {
         localStorage.setItem(STORAGE_KEY, next);
       } catch {
-        /* ignore */
+        // 忽略存储写入异常
       }
       return next;
     });

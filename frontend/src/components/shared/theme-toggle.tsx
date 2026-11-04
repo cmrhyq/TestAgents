@@ -2,7 +2,7 @@ import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 
-/** 顶栏主题切换按钮：亮色图纸 ⇄ 暗色夜图。 */
+/** 主题切换按钮：亮色与暗色之间切换。 */
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";

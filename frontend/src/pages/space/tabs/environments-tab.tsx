@@ -15,6 +15,7 @@ import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog.tsx";
 import type { Environment } from "@/lib/types.ts";
 
+/** `EnvironmentsTab` 的属性。 */
 export interface EnvironmentsTabProps {
   data: Environment[];
   loading: boolean;
@@ -25,6 +26,7 @@ export interface EnvironmentsTabProps {
   onDelete(environment: Environment): void;
 }
 
+/** 环境 tab：以卡片列表展示与管理环境。 */
 export function EnvironmentsTab({
   data,
   loading,

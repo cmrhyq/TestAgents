@@ -17,11 +17,9 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * 技能管理页。
+ * 技能管理页：查看、启停与导入技能。
  *
- * 默认展示内置技能（不选空间）；选一个空间后会额外列出该空间私有的技能，
- * 同名时空间级覆盖内置。这是「可见范围」而不是「安装位置」——
- * 内置技能属于代码分发，删不掉也不该让人以为能删。
+ * 默认展示内置技能；选择空间后额外列出该空间的私有技能，同名时空间级覆盖内置。
  */
 export default function SkillsPage() {
   const [spaceId, setSpaceId] = useState<string | null>(null);

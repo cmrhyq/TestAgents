@@ -29,6 +29,7 @@ function resolveError(error: unknown): { status?: number; title: string; message
   };
 }
 
+/** 路由错误页：按错误类型渲染状态码、标题与提示。 */
 export default function ErrorPage() {
   const error = useRouteError();
   const navigate = useNavigate();

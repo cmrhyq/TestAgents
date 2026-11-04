@@ -24,7 +24,7 @@ import type { Space } from "@/lib/types";
 interface SpaceFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 有值 = 编辑；null / undefined = 创建。 */
+  /** 有值时进入编辑模式，否则为新建。 */
   space?: Space | null;
 }
 
@@ -165,7 +165,7 @@ function SpaceFormContent({ space, onClose }: SpaceFormContentProps) {
   );
 }
 
-/** 空间表单弹窗：创建 / 编辑二合一。 */
+/** 空间表单弹窗：创建与编辑复用。 */
 export function SpaceFormDialog({ open, onOpenChange, space }: SpaceFormDialogProps) {
   const isEdit = !!space;
 

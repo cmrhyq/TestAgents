@@ -1,13 +1,10 @@
 """空间工作目录管理。
 
-一个空间 = 一个目录（``workspaces/{space_id}/``），它同时是三样东西：
+一个空间对应 ``workspaces/{space_id}/`` 目录，同时是 Agent 的文件沙箱、
+测试资产落地处与空间级约定（``AGENTS.md``）的载体。
 
-1. **Agent 的沙箱**：所有文件工具的路径都被限制在目录内
-2. **测试资产的落地处**：用例、产物、知识库源文档
-3. **空间级约定的载体**：``AGENTS.md`` 会被注入 system prompt
-
-安全边界是本模块的核心职责。``resolve()`` 是唯一允许把「用户/模型给的相对路径」
-变成真实路径的入口，任何越界都抛 ``PathEscapeError``，绝不「尽力而为」地放行。
+安全边界是本模块的核心职责：``resolve()`` 是把外部相对路径转为真实路径的唯一入口，
+越界一律抛 ``PathEscapeError``。
 """
 
 from __future__ import annotations
@@ -17,17 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from data.constant.workspace import WORKSPACE_SKIP_DIRS, WORKSPACE_ARCHIVE_PREFIX
 from src.core.config import resolve_backend_path
 from src.core.logging import get_logger
 from src.workspace import templates
 
 logger = get_logger(__name__)
-
-# 目录树与文件遍历时跳过的噪音目录：既没有信息量，又可能极大
-_SKIP_DIRS = frozenset({"__pycache__", ".git", ".idea", ".mypy_cache", ".pytest_cache", ".ruff_cache", "node_modules"})
-
-# 归档目录前缀：删除空间时保留现场，不物理删除
-_ARCHIVE_PREFIX = ".deleted-"
 
 
 class PathEscapeError(ValueError):
@@ -58,18 +50,17 @@ class WorkspaceManager:
     def resolve(self, space_id: int | str, relative: str) -> Path:
         """把相对路径解析成空间内的绝对路径，越界即拒绝。
 
-        这是沙箱的唯一入口：文件工具、知识库上传都要走这里，
-        不要自己在别处拼 ``space_dir / path``——那样会绕过校验。
+        沙箱唯一入口：文件工具与知识库上传统一走这里，不要自行拼接 ``space_dir / path``。
 
         Args:
             space_id: 空间 ID
             relative: 相对空间根的路径，如 ``docs/a.md``
 
         Returns:
-            解析后的绝对路径（可能尚不存在）
+            解析后的绝对路径，可能尚不存在
 
         Raises:
-            PathEscapeError: 传入绝对路径，或解析后越出空间根
+            PathEscapeError: 传入绝对路径或带盘符，或解析后越出空间根
         """
         raw = (relative or "").strip()
         if not raw:
@@ -88,16 +79,15 @@ class WorkspaceManager:
         return resolved
 
     def relative(self, space_id: int | str, path: Path) -> str:
-        """把空间内的绝对路径转回相对路径（用于持久化与展示）。"""
+        """把空间内的绝对路径转回 POSIX 相对路径，用于持久化与展示。"""
         return path.resolve().relative_to(self.space_dir(space_id).resolve()).as_posix()
 
     # ─── 生命周期 ────────────────────────────────────────────────────────
 
     def create(self, space_id: int | str, space_name: str = "") -> Path:
-        """创建空间目录与初始文件；已存在则只补缺失项。
+        """创建空间目录与初始文件，已存在的文件不覆盖。
 
-        幂等且**不覆盖已有文件**——用户可能已经改过 ``AGENTS.md``，
-        重复调用（例如空间重命名）不能把用户的编辑冲掉。
+        幂等；副作用是写目录与骨架文件，重复调用不会冲掉已有编辑。
 
         Args:
             space_id: 空间 ID
@@ -137,11 +127,14 @@ class WorkspaceManager:
         return space_dir
 
     def ensure(self, space_id: int | str) -> Path:
-        """确保空间目录存在（缺失时按默认名补齐）。"""
+        """确保空间目录存在，缺失时按默认内容补齐。"""
         return self.create(space_id)
 
     def archive(self, space_id: int | str) -> Path | None:
-        """归档空间目录：改名为 ``.deleted-{ts}``，保留现场不物理删除。
+        """归档空间目录：改名为 ``.deleted-{space_id}-{ts}``，不物理删除。
+
+        Args:
+            space_id: 空间 ID
 
         Returns:
             归档后的路径；目录不存在时返回 None
@@ -151,13 +144,20 @@ class WorkspaceManager:
             return None
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        target = self.root / f"{_ARCHIVE_PREFIX}{space_id}-{timestamp}"
+        target = self.root / f"{WORKSPACE_ARCHIVE_PREFIX}{space_id}-{timestamp}"
         space_dir.rename(target)
         logger.warning("空间目录已归档", space_id=str(space_id), archived=str(target))
         return target
 
     def purge(self, space_id: int | str) -> bool:
-        """物理删除空间目录（仅用于测试与显式清理）。"""
+        """物理删除空间目录，不可恢复。
+
+        Args:
+            space_id: 空间 ID
+
+        Returns:
+            是否实际删除；目录不存在时返回 False
+        """
         space_dir = self.space_dir(space_id)
         if not space_dir.is_dir():
             return False
@@ -172,10 +172,11 @@ class WorkspaceManager:
 
         Args:
             space_id: 空间 ID
-            max_depth: 展开层数，默认取配置；1 表示只返回根层、不展开子目录
+            max_depth: 展开层数，不传时取配置；1 表示只返回根层
 
         Returns:
-            ``[{"name", "type", "path", "size", "children"}]``，目录在前、按名排序
+            ``[{"name", "type", "path", "size", "children"}]``，目录在前并按名排序；
+            目录不存在时返回空列表
         """
         if max_depth is None:
             from src.core.config import get_config
@@ -188,7 +189,7 @@ class WorkspaceManager:
         return self._walk(space_dir, max_depth)
 
     def _walk(self, directory: Path, remaining: int) -> list[dict[str, Any]]:
-        """递归收集目录条目；``remaining`` 为剩余可展开层数。"""
+        """递归收集目录条目，``remaining`` 为剩余可展开层数，条目数受配置上限约束。"""
         from src.core.config import get_config
 
         limit = get_config().workspace.tree_max_entries
@@ -203,7 +204,7 @@ class WorkspaceManager:
 
         nodes: list[dict[str, Any]] = []
         for entry in entries[:limit]:
-            if entry.name in _SKIP_DIRS:
+            if entry.name in WORKSPACE_SKIP_DIRS:
                 continue
             is_dir = entry.is_dir()
             node: dict[str, Any] = {
@@ -222,6 +223,7 @@ class WorkspaceManager:
 
     @staticmethod
     def _write_if_absent(path: Path, content: str) -> None:
+        """文件不存在时才写入，避免覆盖已有内容。"""
         if path.exists():
             return
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,7 +231,7 @@ class WorkspaceManager:
 
 
 def _safe_size(path: Path) -> int:
-    """文件大小；取不到时返回 0（悬空符号链接等）。"""
+    """返回文件字节数；取不到时返回 0，兼容悬空符号链接。"""
     try:
         return path.stat().st_size
     except OSError:
@@ -240,7 +242,7 @@ _manager: WorkspaceManager | None = None
 
 
 def get_workspace_manager() -> WorkspaceManager:
-    """全局 WorkspaceManager（无状态，可安全复用）。"""
+    """返回全局 WorkspaceManager 实例（无状态，可复用）。"""
     global _manager
     if _manager is None:
         _manager = WorkspaceManager()
@@ -248,6 +250,6 @@ def get_workspace_manager() -> WorkspaceManager:
 
 
 def reset_workspace_manager() -> None:
-    """重置单例（测试用）。"""
+    """重置全局单例，仅供测试使用。"""
     global _manager
     _manager = None

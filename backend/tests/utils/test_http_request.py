@@ -1,7 +1,6 @@
-"""HttpRequest 和 get_random_pc_ua 单元测试。
+"""`HttpRequest` 与 `get_random_pc_ua` 的行为。
 
-覆盖：UA 生成、初始化、URL 构建、HTTP 方法、重试机制、
-      缓存提取、路径提取、状态码验证、上下文管理器。
+覆盖 UA 生成、初始化鉴权、URL 构建、各 HTTP 方法、重试、路径提取与请求头编码。
 """
 
 from unittest.mock import MagicMock, patch
@@ -13,7 +12,7 @@ from requests.exceptions import Timeout
 
 @pytest.fixture(autouse=True)
 def _mock_dependencies():
-    """Mock DataCache 和 logger 避免外部依赖。"""
+    """替换 `CacheManager`，产出缓存 mock 供断言。"""
     mock_cache = MagicMock()
     with patch("src.utils.http.request.CacheManager") as mock_cache_cls:
         mock_cache_cls.get_instance.return_value = mock_cache
@@ -27,7 +26,7 @@ def _mock_dependencies():
 
 @pytest.mark.unit
 class TestGetRandomPcUa:
-    """UA 生成函数测试。"""
+    """UA 生成结果的字符串形态与随机性。"""
 
     def test_returns_string(self):
         from src.utils.http.request import get_random_pc_ua
@@ -56,7 +55,7 @@ class TestGetRandomPcUa:
 
 @pytest.mark.unit
 class TestHttpRequestInit:
-    """HttpRequest 初始化测试。"""
+    """初始化参数与各鉴权方式。"""
 
     def test_base_url_set(self):
         from src.utils.http.request import HttpRequest
@@ -141,7 +140,7 @@ class TestHttpRequestInit:
 
 @pytest.mark.unit
 class TestHttpRequestBuildUrl:
-    """URL 构建测试。"""
+    """URL 拼接与绝对地址透传。"""
 
     def test_relative_path(self):
         from src.utils.http.request import HttpRequest
@@ -183,7 +182,7 @@ class TestHttpRequestBuildUrl:
 
 @pytest.mark.unit
 class TestHttpRequestMethods:
-    """HTTP 方法调用测试。"""
+    """五个 HTTP 方法传给 `session.request` 的参数。"""
 
     @pytest.fixture()
     def client(self):
@@ -247,9 +246,10 @@ class TestHttpRequestMethods:
 
 @pytest.mark.unit
 class TestHttpRequestRetry:
-    """重试机制测试。"""
+    """重试开关、重试次数与重试后成功。"""
 
     def _create_client(self, session):
+        """构造直接使用给定 session 的客户端。"""
         from src.utils.http.request import HttpRequest
 
         with patch("src.utils.http.request.requests.Session", return_value=session):
@@ -319,9 +319,10 @@ class TestHttpRequestRetry:
 
 @pytest.mark.unit
 class TestHttpRequestExtract:
-    """数据提取与缓存测试。"""
+    """响应提取与缓存写入。"""
 
     def _create_client_with_cache(self):
+        """构造使用空 mock session 的客户端。"""
         from src.utils.http.request import HttpRequest
 
         session = MagicMock()
@@ -405,9 +406,10 @@ class TestHttpRequestExtract:
 
 @pytest.mark.unit
 class TestHttpRequestValidateStatus:
-    """状态码验证测试。"""
+    """状态码校验支持单值与列表。"""
 
     def _create_client(self):
+        """构造替换了 Session 的客户端。"""
         from src.utils.http.request import HttpRequest
 
         with patch("src.utils.http.request.requests.Session"):
@@ -445,7 +447,7 @@ class TestHttpRequestValidateStatus:
 
 @pytest.mark.unit
 class TestHttpRequestCache:
-    """缓存操作测试。"""
+    """缓存读取与默认值。"""
 
     def test_get_cached_value(self, _mock_dependencies):
         from src.utils.http.request import HttpRequest
@@ -477,7 +479,7 @@ class TestHttpRequestCache:
 
 @pytest.mark.unit
 class TestHttpRequestContextManager:
-    """上下文管理器测试。"""
+    """上下文管理器与 `close` 的会话释放。"""
 
     def test_context_manager_enter(self):
         from src.utils.http.request import HttpRequest
@@ -509,3 +511,40 @@ class TestHttpRequestContextManager:
             client = HttpRequest("https://api.example.com")
             client.close()
             session.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+#  请求头编码测试
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestHeaderEncoding:
+    """requests 只用 latin-1 编码请求头，非 ASCII 值必须先转成 UTF-8 字节。"""
+
+    def test_ascii_value_untouched(self):
+        from src.utils.http.request import _encode_header_for_wire
+
+        assert _encode_header_for_wire("Bearer abc") == "Bearer abc"
+
+    def test_non_ascii_value_becomes_utf8_bytes(self):
+        from src.utils.http.request import _encode_header_for_wire
+
+        encoded = _encode_header_for_wire("中文")
+
+        assert encoded.encode("latin-1") == "中文".encode("utf-8")
+
+    def test_sanitize_keeps_all_headers(self):
+        from src.utils.http.request import _sanitize_headers
+
+        result = _sanitize_headers({"X-Test": "中文", "Accept": "application/json"})
+
+        assert result["Accept"] == "application/json"
+        assert result["X-Test"].encode("latin-1") == "中文".encode("utf-8")
+
+    def test_sanitize_rejects_non_ascii_name(self):
+        from src.utils.http.request import _sanitize_headers
+
+        with pytest.raises(ValueError, match="ASCII"):
+            _sanitize_headers({"测试": "x"})
+

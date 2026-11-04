@@ -1,9 +1,7 @@
-"""LLMGateway 单元测试。
+"""`LLMGateway` 的调用入口与消息归一化。
 
-覆盖：chat / achat、chat_stream / achat_stream、invoke_with_tools、
-astream_events，以及消息归一化 helper。
-
-全部使用 MagicMock 模拟 ``LLMService``，不发起真实 LLM 请求。
+覆盖 `chat` / `achat`、两条流式入口、`invoke_with_tools`、`astream_events`
+与消息转换 helper；全部用 MagicMock 替换 `LLMService`，不发起真实请求。
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -57,14 +55,14 @@ class TestMessageHelpers:
 
 
 class TestChat:
-    """chat / achat。"""
+    """`chat` 与 `achat` 的文本归一化。"""
 
     def test_chat_returns_normalized_text(self):
         gateway, service = _gateway_with_service()
         service.invoke.return_value = AIMessage(content="hello")
 
         assert gateway.chat([{"role": "user", "content": "hi"}]) == "hello"
-        # dict 应被转换为 BaseMessage 后才交给 service
+        # dict 需先转换为 BaseMessage 再交给 service
         passed = service.invoke.call_args.args[0]
         assert isinstance(passed[0], HumanMessage)
 
@@ -77,7 +75,7 @@ class TestChat:
 
 
 class TestStream:
-    """chat_stream / achat_stream。"""
+    """两条流式入口只产出非空分片。"""
 
     def test_chat_stream_yields_only_non_empty(self):
         gateway, service = _gateway_with_service()
@@ -103,7 +101,7 @@ class TestStream:
 
 
 class TestTools:
-    """invoke_with_tools。"""
+    """`invoke_with_tools` 的参数透传。"""
 
     def test_invoke_with_tools_passthrough(self):
         gateway, service = _gateway_with_service()
@@ -119,7 +117,7 @@ class TestTools:
 
 
 class TestAstreamEvents:
-    """astream_events 会先把 dict 消息转成 BaseMessage。"""
+    """`astream_events` 先把 dict 消息转成 `BaseMessage`。"""
 
     @pytest.mark.asyncio
     async def test_dict_messages_are_converted(self):

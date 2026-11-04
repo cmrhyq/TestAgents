@@ -1,12 +1,7 @@
-"""结构化数据查询工具（空间 / 接口清单 / 接口详情）。
+"""结构化数据查询工具：空间、接口清单、接口详情。
 
-与旧实现的关键差异：**空间绑定**。
-
-旧实现让模型自己传 ``space_id``，这在真实对话里必然出错——模型会编一个不存在的
-ID，然后拿到「接口不存在」，再重试，白白烧掉几轮。现在 ``space_id`` 由运行时
-从会话上下文注入闭包，模型只需要关心「我要看哪个接口」。
-
-``search_space`` 是唯一的例外：它的语义就是「跨空间找空间」，无法绑定。
+``space_id`` 由运行时从会话上下文注入闭包，不出现在工具参数中；
+``search_space`` 是唯一跨空间的工具，语义即按名称查找空间。
 """
 
 from __future__ import annotations
@@ -20,8 +15,8 @@ from langchain_core.tools import BaseTool, tool
 from sqlalchemy.orm import Session
 
 from src.core.logging import get_logger
-from src.agent.tools.common import as_object
 from src.data.services import EndpointService, SpaceService
+from utils.json_utils import as_object
 
 logger = get_logger(__name__)
 
@@ -32,7 +27,15 @@ SessionScope = Callable[[], AbstractContextManager[Session]]
 
 
 def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None) -> list[BaseTool]:
-    """构造绑定到某个空间的接口查询工具。"""
+    """构造绑定到某个空间的接口查询工具。
+
+    Args:
+        space_id: 空间 ID，固定注入到工具闭包
+        session_scope: 数据库会话作用域工厂；None 时使用全局数据库管理器
+
+    Returns:
+        工具列表：``get_space_endpoints``、``get_endpoint_detail_by_id``
+    """
     scope = session_scope or _default_session_scope()
 
     @tool
@@ -40,8 +43,7 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
         """获取当前空间下所有启用的 API 接口清单。
 
         返回 JSON 数组，每项含 id、name、path、method、summary、tags、response_summary。
-        response_summary 展示接口返回的数据结构摘要，便于判断接口之间的数据依赖
-        （比如"登录接口返回 token，查询接口需要 token"）。
+        response_summary 是成功响应的顶层字段摘要，用于判断接口间的数据依赖。
         """
         with scope() as session:
             endpoints = EndpointService(session).list_active(int(space_id))
@@ -65,13 +67,11 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
         """获取当前空间下某个接口的完整定义。
 
         返回 name、path、method、summary、description、content_type、params（请求参数）、
-        body（请求体 schema）、responses（各状态码结构摘要）、security（鉴权要求）。
-
-        当用户问「这个接口要传什么参数」「请求体长什么样」「返回哪些字段」「要什么鉴权」时使用。
-        endpoint_id 从 get_space_endpoints 的结果里取。
+        body（请求体 schema）、responses（各状态码结构摘要）、security（鉴权要求）、
+        deprecated。接口不存在时返回带 error 字段的 JSON 对象。
 
         Args:
-            endpoint_id: 接口 ID
+            endpoint_id: 接口 ID，取自 ``get_space_endpoints`` 的结果
         """
         with scope() as session:
             matches = EndpointService(session).get_active_by_ids([endpoint_id])
@@ -111,8 +111,7 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
 def search_space(keyword: str = "") -> str:
     """按名称搜索测试空间（跨空间，不限于当前空间）。
 
-    当用户提到别的空间名、或需要确认"空间是否存在"时使用。
-    关键字为空则返回最近的若干空间。
+    关键字为空时返回最近的若干空间。
 
     Args:
         keyword: 空间名称关键字，支持模糊匹配
@@ -163,7 +162,7 @@ def _build_response_summary(responses_json: str) -> str:
 def _build_response_digest(responses_json: str) -> list[dict[str, Any]]:
     """把 responses 压缩为「状态码 + 描述 + 顶层字段」。
 
-    完整 schema 往往几千 token，直接注入既贵又容易淹没关键信息。
+    完整 schema 通常有数千 token，直接注入成本高且淹没关键信息。
     """
     try:
         responses = json.loads(responses_json) if responses_json else []
@@ -199,6 +198,8 @@ def _build_response_digest(responses_json: str) -> list[dict[str, Any]]:
 
 
 def _default_session_scope() -> SessionScope:
+    """返回使用全局数据库管理器的会话作用域工厂。"""
+
     def _scope() -> AbstractContextManager[Session]:
         from src.core.database.database_manager import get_db_manager
 

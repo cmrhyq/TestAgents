@@ -1,94 +1,36 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, FileText } from "lucide-react";
 
-import { useTestRunDetail } from "@/hooks/use-test-runs.ts";
-import { useReports } from "@/hooks/use-reports.ts";
+import { useAgentRunDetail, useAgentToolCalls } from "@/hooks/use-agent-runs.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
-import { HttpMethodBadge } from "@/components/shared/http-method-badge.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
-import { DataTable } from "@/components/shared/data-table.tsx";
-import type { Column } from "@/components/shared/data-table.tsx";
-import type { TestCaseBrief, TestResultBrief } from "@/lib/types.ts";
-import { formatResponseTime } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { ToolCallsTable } from "@/components/report/tool-calls-table.tsx";
+import { formatCost, formatDurationMs, formatTokens } from "@/lib/format";
 
-interface CaseRow {
-  case_name: string;
-  method: string;
-  url: string;
-  status: string;
-  response_time: number;
-  assertion_passed: number;
-  assertion_total: number;
-}
-
-function buildCaseRows(cases: TestCaseBrief[], results: TestResultBrief[]): CaseRow[] {
-  const resultMap = new Map<string | number, TestResultBrief>();
-  for (const r of results) {
-    if (r.test_case_id !== null) {
-      resultMap.set(r.test_case_id, r);
-    }
-  }
-
-  return cases.map((tc) => {
-    const result = resultMap.get(tc.id);
-    return {
-      case_name: tc.case_name,
-      method: tc.method,
-      url: tc.url,
-      status: result?.status ?? tc.status,
-      response_time: result?.response_time ?? 0,
-      assertion_passed: result?.assertion_passed ?? 0,
-      assertion_total: result ? result.assertion_passed + result.assertion_failed : 0,
-    };
-  });
-}
-
-const columns: Column<CaseRow & Record<string, unknown>>[] = [
-  { key: "case_name", header: "用例名称" },
-  {
-    key: "method",
-    header: "方法",
-    render: (_, row) => <HttpMethodBadge method={row.method as string} />,
-  },
-  { key: "url", header: "URL", className: "font-mono text-xs" },
-  {
-    key: "status",
-    header: "状态",
-    render: (_, row) => <StatusBadge status={row.status as string} />,
-  },
-  {
-    key: "response_time",
-    header: "耗时",
-    render: (val) => (
-      <span className="font-mono text-xs tabular-nums">{formatResponseTime(val as number)}</span>
-    ),
-  },
-  {
-    key: "assertion_passed",
-    header: "断言",
-    render: (_, row) => (
-      <span className="font-mono text-xs tabular-nums">
-        {row.assertion_passed as number}/{row.assertion_total as number}
-      </span>
-    ),
-  },
-];
-
+/** 执行记录详情页：读数汇总与工具调用留痕。 */
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const runId = id || "";
 
-  const { data, isLoading, isError, refetch } = useTestRunDetail(runId);
-  const { data: reportsData } = useReports({ run_id: runId });
+  const { data, isLoading, isError, refetch } = useAgentRunDetail(runId);
 
-  const isActive = data?.status === "running" || data?.status === "pending";
-  const isCompleted = data?.status === "completed" || data?.status === "failed";
-  const firstReport = reportsData?.items?.[0];
+  // 正文按需加载：单条上限 2MB，一轮执行可能有数十次调用，全量拉取会让详情页体积过大。
+  const [wantBody, setWantBody] = useState(false);
+  const {
+    data: callsData,
+    isFetching: callsFetching,
+    refetch: refetchCalls,
+  } = useAgentToolCalls(runId, { includeBody: wantBody });
+
+  const isActive = data?.status === "running";
+  const calls = callsData?.items ?? [];
+  // 报告 = 这轮执行里的 send_request，没有 HTTP 调用就没有报告可看
+  const hasHttpCalls = calls.some((call) => call.tool_name === "send_request");
 
   if (isLoading) {
     return (
@@ -112,7 +54,7 @@ export default function RunDetailPage() {
           返回
         </Button>
         <QueryErrorState
-          message="加载运行详情失败"
+          message="加载执行记录详情失败"
           action={
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               重试
@@ -123,7 +65,34 @@ export default function RunDetailPage() {
     );
   }
 
-  const rows = buildCaseRows(data.test_cases, data.test_results);
+  const readouts = [
+    {
+      label: "工具调用",
+      value: String(data.tool_call_count),
+      className: "text-foreground",
+      dot: null as string | null,
+    },
+    { label: "成功", value: String(data.ok_count), className: "text-success", dot: "bg-success" },
+    {
+      label: "失败",
+      value: String(data.error_count),
+      className: "text-destructive",
+      dot: "bg-destructive",
+    },
+    {
+      label: "LLM 调用",
+      value: String(data.llm_call_count),
+      className: "text-foreground",
+      dot: null,
+    },
+    {
+      label: "Tokens",
+      value: formatTokens(data.total_tokens),
+      className: "text-foreground",
+      dot: null,
+    },
+    { label: "成本", value: formatCost(data.cost_usd), className: "text-foreground", dot: null },
+  ];
 
   return (
     <div className="space-y-6">
@@ -133,19 +102,22 @@ export default function RunDetailPage() {
         </Button>
         <div className="flex flex-1 items-center gap-3">
           <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-            {data.name}
+            {data.title || `执行 ${data.id}`}
           </h1>
           <StatusBadge status={data.status} />
+          <span className="rounded-[2px] border border-border bg-muted px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            {data.mode}
+          </span>
           <span className="rounded-[2px] border border-border bg-muted px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
             {data.trigger_type}
           </span>
           {isActive && <Loader2 className="h-4 w-4 animate-spin text-info" />}
         </div>
-        {isCompleted && firstReport && (
+        {hasHttpCalls && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => navigate(`/reports/${firstReport.id}`)}
+            onClick={() => navigate(`/reports/${String(data.id)}`)}
           >
             <FileText className="mr-2 h-4 w-4" />
             查看报告
@@ -153,46 +125,79 @@ export default function RunDetailPage() {
         )}
       </div>
 
-      {/* 结果读数带：mono 读数 + 色点标注，竖墨线分隔 */}
+      {data.error_message && (
+        <div className="rounded-[4px] border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {data.error_message}
+        </div>
+      )}
+
       <div className="rounded-[4px] border border-border bg-card shadow-xs">
         <div className="flex flex-col divide-y divide-border-subtle sm:flex-row sm:divide-x sm:divide-y-0">
+          {readouts.map((item) => (
+            <div key={item.label} className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {item.dot && (
+                  <span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} aria-hidden="true" />
+                )}
+                {item.label}
+              </span>
+              <span
+                className={`font-display text-3xl font-semibold tabular-nums tracking-tight ${item.className}`}
+              >
+                {item.value}
+              </span>
+            </div>
+          ))}
+          <div className="flex flex-1 flex-col justify-center gap-2 px-6 py-5">
+            <span className="text-xs text-muted-foreground">成功率</span>
+            <PassRateBar passed={data.ok_count} total={data.tool_call_count} />
+          </div>
           <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-            <span className="text-xs text-muted-foreground">用例总数</span>
+            <span className="text-xs text-muted-foreground">总耗时</span>
             <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {data.total_cases}
+              {formatDurationMs(data.duration_ms)}
             </span>
           </div>
           <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
-              已通过
+            <span className="text-xs text-muted-foreground">平均工具耗时</span>
+            <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-foreground">
+              {formatDurationMs(data.avg_response_time)}
             </span>
-            <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-success">
-              {data.passed_cases}
-            </span>
-          </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" />
-              已失败
-            </span>
-            <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-destructive">
-              {data.failed_cases}
-            </span>
-          </div>
-          <div className={cn("flex flex-1 flex-col justify-center gap-2 px-6 py-5")}>
-            <span className="text-xs text-muted-foreground">通过率</span>
-            <PassRateBar passed={data.passed_cases} total={data.total_cases} />
           </div>
         </div>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={rows as (CaseRow & Record<string, unknown>)[]}
-        loading={isActive}
-        emptyText="暂无测试用例"
-      />
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-lg font-semibold text-foreground">
+            工具调用留痕（{calls.length || data.tool_call_count}）
+          </h2>
+          <div className="flex items-center gap-2">
+            {!wantBody && (
+              <Button variant="outline" size="sm" onClick={() => setWantBody(true)}>
+                加载全部正文
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                refetchCalls();
+              }}
+            >
+              刷新
+            </Button>
+          </div>
+        </div>
+
+        <ToolCallsTable
+          calls={calls}
+          bodyLoaded={wantBody}
+          loadingBody={callsFetching}
+          onRequestBody={() => setWantBody(true)}
+          emptyText="这轮执行没有调用任何工具"
+        />
+      </div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+/** 气泡提示：Radix Tooltip 的样式封装。 */
 import type { ComponentPropsWithoutRef } from "react";
 import { forwardRef } from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";

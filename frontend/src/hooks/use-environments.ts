@@ -27,4 +27,5 @@ const {
   },
 });
 
+/** 环境的增删改查 hook，由 `createCrudHooks` 按 `/environments` 生成。 */
 export { useEnvironments, useCreateEnvironment, useUpdateEnvironment, useDeleteEnvironment };

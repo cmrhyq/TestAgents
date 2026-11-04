@@ -1,22 +1,13 @@
-"""
-工作流枚举定义
+"""工作流与数据枚举。
 
-定义 API 测试相关的状态、类型等枚举值，包括：
-- DataStatus: 数据状态
-- HttpMethod: HTTP 请求方法
-- Priority: 用例优先级
-- TestStatus: 测试状态
-- ScenarioType: 场景类型
-- AssertOperator: 断言运算符
+覆盖数据状态、HTTP 方法、用例优先级、测试状态、场景类型与断言运算符六类取值。
 """
 
 from enum import Enum
 
 
 class DataStatus(int, Enum):
-    """
-    1=启用，2=禁用，3=已删除, 4=已废弃
-    """
+    """数据状态：1-启用，2-禁用，3-已删除，4-已废弃。"""
 
     ENABLE = 1
     DISABLE = 2
@@ -25,7 +16,7 @@ class DataStatus(int, Enum):
 
 
 class HttpMethod(str, Enum):
-    """HTTP请求方法"""
+    """HTTP 请求方法。"""
 
     GET = "GET"
     POST = "POST"
@@ -37,7 +28,7 @@ class HttpMethod(str, Enum):
 
 
 class Priority(str, Enum):
-    """用例优先级"""
+    """用例优先级。"""
 
     P0 = "P0"  # 冒烟用例
     P1 = "P1"  # 核心用例
@@ -45,7 +36,7 @@ class Priority(str, Enum):
 
 
 class TestStatus(str, Enum):
-    """测试状态"""
+    """测试状态，同时用于执行记录的终态取值。"""
 
     PENDING = "pending"  # 待执行
     RUNNING = "running"  # 执行中
@@ -53,12 +44,12 @@ class TestStatus(str, Enum):
     FAILED = "failed"  # 失败
     SKIPPED = "skipped"  # 跳过
     ERROR = "error"  # 错误
-    COMPLETED = "completed"  # 完成（TestRun 终态）
-    CANCELLED = "cancelled"  # 已取消（TestRun 终态）
+    COMPLETED = "completed"  # 完成，执行记录终态
+    CANCELLED = "cancelled"  # 已取消，执行记录终态，含客户端断流
 
 
 class ScenarioType(str, Enum):
-    """场景类型"""
+    """用例场景类型。"""
 
     NORMAL = "normal"  # 正常场景
     PARAM_MISSING = "param_missing"  # 参数缺失
@@ -69,7 +60,7 @@ class ScenarioType(str, Enum):
 
 
 class AssertOperator(str, Enum):
-    """断言运算符"""
+    """断言运算符。"""
 
     EQ = "=="  # 等于
     NE = "!="  # 不等于

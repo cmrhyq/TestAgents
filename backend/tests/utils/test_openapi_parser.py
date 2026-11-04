@@ -1,7 +1,6 @@
-"""OpenAPIParser 单元测试。
+"""`OpenAPIParser` 的加载、查询、`$ref` 解析与输出。
 
-覆盖：加载方式、版本检测、属性、查询、$ref 解析、
-      魔术方法、格式化输出、server variables、边界场景。
+覆盖 3.0 与 2.0 两种文档、server variables 替换与空 paths 等边界。
 """
 
 import json
@@ -19,7 +18,7 @@ from src.utils.parser.openapi_parser import OpenAPIParser
 
 @pytest.fixture()
 def minimal_v3_spec() -> dict:
-    """最小化的 OpenAPI 3.0 文档。"""
+    """最小化的 OpenAPI 3.0 文档，含两条路径与共享 schema。"""
     return {
         "openapi": "3.0.0",
         "info": {
@@ -127,7 +126,7 @@ def minimal_v3_spec() -> dict:
 
 @pytest.fixture()
 def minimal_v2_spec() -> dict:
-    """最小化的 Swagger 2.0 文档。"""
+    """最小化的 Swagger 2.0 文档，使用 host / basePath 描述服务地址。"""
     return {
         "swagger": "2.0",
         "info": {"title": "Legacy API", "version": "0.9.0"},
@@ -171,7 +170,7 @@ def minimal_v2_spec() -> dict:
 
 @pytest.mark.unit
 class TestOpenAPIParserLoading:
-    """文档加载测试。"""
+    """dict、JSON 字符串与文件三种加载入口。"""
 
     def test_load_from_dict(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -219,7 +218,7 @@ class TestOpenAPIParserLoading:
 
 @pytest.mark.unit
 class TestOpenAPIParserVersion:
-    """版本检测测试。"""
+    """版本字段识别与 `is_v3` / `is_v2` 判定。"""
 
     def test_v3_detection(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -245,7 +244,7 @@ class TestOpenAPIParserVersion:
 
 @pytest.mark.unit
 class TestOpenAPIParserProperties:
-    """属性访问测试。"""
+    """info、servers、tags 等属性的读取结果。"""
 
     def test_info_properties(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -324,7 +323,7 @@ class TestOpenAPIParserProperties:
 
 @pytest.mark.unit
 class TestOpenAPIParserQuery:
-    """查询方法测试。"""
+    """按路径与方法查询接口，含未命中分支。"""
 
     def test_get_endpoint_found(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -401,7 +400,7 @@ class TestOpenAPIParserQuery:
 
 @pytest.mark.unit
 class TestOpenAPIParserRefResolution:
-    """$ref 引用解析测试。"""
+    """`$ref` 展开，含嵌套引用与无效引用、外部引用的回退。"""
 
     def test_simple_ref_resolved(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -469,7 +468,7 @@ class TestOpenAPIParserRefResolution:
 
 @pytest.mark.unit
 class TestOpenAPIParserMagicMethods:
-    """魔术方法测试。"""
+    """`len` / 迭代 / 下标等魔术方法。"""
 
     def test_len(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -522,7 +521,7 @@ class TestOpenAPIParserMagicMethods:
 
 @pytest.mark.unit
 class TestOpenAPIParserOutput:
-    """格式化输出测试。"""
+    """`to_dict` 的结构与统计字段。"""
 
     def test_to_dict(self, minimal_v3_spec):
         parser = OpenAPIParser(minimal_v3_spec)
@@ -585,7 +584,7 @@ class TestOpenAPIParserOutput:
 
 @pytest.mark.unit
 class TestOpenAPIParserServerVariables:
-    """Server variables 解析测试。"""
+    """server URL 中的变量替换。"""
 
     def test_url_with_variables_resolved(self):
         spec = {
@@ -635,7 +634,7 @@ class TestOpenAPIParserServerVariables:
 
 @pytest.mark.unit
 class TestOpenAPIParserV2:
-    """Swagger 2.0 文档特定测试。"""
+    """Swagger 2.0 的接口、schema、安全定义与参数读取。"""
 
     def test_v2_endpoints(self, minimal_v2_spec):
         parser = OpenAPIParser(minimal_v2_spec)
@@ -670,7 +669,7 @@ class TestOpenAPIParserV2:
 
 @pytest.mark.unit
 class TestOpenAPIParserEdgeCases:
-    """边界场景测试。"""
+    """空 paths、缺 info / tags / servers 与 allOf 组合 schema。"""
 
     def test_empty_paths(self):
         spec = {

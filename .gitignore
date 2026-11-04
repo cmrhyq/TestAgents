@@ -49,6 +49,8 @@ coverage.xml
 *.py.cover
 .hypothesis/
 .pytest_cache/
+# pytest --basetemp 的临时目录（内含几千个软链，别入库也别让 safe-delete 去清）
+.pytest_tmp*/
 cover/
 
 # Translations

@@ -5,11 +5,9 @@ import { cn } from "@/lib/utils";
 import type { ToolCallRecord } from "@/hooks/use-chat.ts";
 
 /**
- * 工具调用卡片。
+ * 工具调用卡片：可展开查看入参、结果与错误。
  *
- * 为什么要把 args 和返回内容都露出来：Agent 的「过程」比「结论」更值得审。
- * 用户看到「调了 send_request，打的是 prod 域名，返回 401」才能判断结论是否可信；
- * 只给一句「测试完成」等于要求用户盲信。
+ * 入参与返回内容默认折叠，展开后完整展示，便于核对调用过程。
  */
 export function ToolCallCard({ call }: { call: ToolCallRecord }) {
   const [open, setOpen] = useState(false);

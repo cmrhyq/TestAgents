@@ -1,6 +1,6 @@
 # TestAgents 页面设计准则（工业蓝图 · Blueprint）
 
-> 版本：v0.2.0（对应 v1.0 重构后的前端实现，2026-10-20）
+> 版本：v2.0（对应当前前端实现）
 > 技术栈：Tailwind CSS v4 + shadcn/ui + React 19
 > 设计语言：**工业蓝图（Blueprint）** —— 像一张"活的工程图纸"
 > 令牌来源：[`frontend/src/index.css`](../../frontend/src/index.css)、[
@@ -225,7 +225,7 @@ sans-serif
     - 默认：`border-l-2 border-transparent text-muted-foreground`
     - Hover：`hover:bg-muted hover:text-foreground`
     - 选中：`border-l-2 border-primary bg-surface-primary font-medium text-foreground`
-    - 右侧 mono 编号（`01` ~ `05`，顺序固定：仪表盘 / 测试对话 / 测试空间 / 技能 / 测试报告）
+    - 右侧 mono 编号（`01` ~ `05`，顺序固定：仪表盘 / 测试对话 / 测试空间 / 技能管理 / 测试报告）
     - 布局：`rounded-sm px-3 py-1.5 gap-2 text-sm`
 - 导航分组上方有 mono 注解 `NAV_01`。
 
@@ -360,8 +360,15 @@ Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见�
 | 页面 | 骨架 |
 |:--|:--|
 | 测试对话 `/chat` | 左侧 `ConversationListPanel`（220px，`md` 以下隐藏）+ 右侧对话区（消息流 `max-w-3xl` 居中）+ 底部固定 Composer |
-| 空间详情 `/spaces/:id` | `PageHeader` + 7 个 `TabsContent`（概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 测试运行），每个 tab 内部自带 `space-y-4` |
+| 空间详情 `/spaces/:id` | `PageHeader` + 7 个 `TabsContent`（概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 执行记录），每个 tab 内部自带 `space-y-4` |
 | 技能管理 `/skills` | `PageHeader` + zip 导入按钮 + 技能卡片列表（名称 mono、scope 徽章、启停开关、声明工具数） |
+| 测试报告 `/reports` | `PageHeader` + 筛选条（空间 / 状态）+ `DataTable`（每行一个 `run_id` 的聚合：请求数 / 成功数 / 失败数 / 异常数 / 成功率） |
+| 报告详情 `/reports/:id` | 顶部读数带（成功率 / 请求数 / P95 耗时）+ 逐请求列表；响应正文按需加载，不随列表一次性拉取 |
+| 执行详情 `/runs/:id` | 顶部读数带（工具调用数 / 成功率 / 平均耗时 / token / 成本）+ `TOOL_TRACE` 轨迹列表，每行可展开入参与结果 |
+
+执行详情与报告详情的数据来源不同，不要混用：报告读的是 `send_request` 调用（只统计 HTTP），
+执行详情读的是整轮 `agent_run` 的全部工具调用（含读文件、查记忆等非 HTTP 工具）。
+两者的「成功率」因此可能不一致，页面上应当把口径写清楚。
 
 ---
 
@@ -446,8 +453,8 @@ Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见�
 | UI 基元               | `frontend/src/components/ui/*`                                                                                |
 | 对话组件                | `frontend/src/components/chat/*`                                                                              |
 | Markdown 子系统        | `frontend/src/components/markdown/*`、`frontend/src/styles/markdown.css`                                       |
-| 参考页面                | `frontend/src/pages/dashboard.tsx`（读数带 + 角标）、`frontend/src/pages/chat/chat.tsx`（三选择器 + Composer + 工具轨迹）、`frontend/src/pages/space/space-detail.tsx`（7 tabs） |
-| 类型定义                | `frontend/src/lib/types/*`（按域拆分：conversation / skill / memory / knowledge / space …）                                                     |
+| 参考页面                | `frontend/src/pages/dashboard.tsx`（读数带 + 角标）、`frontend/src/pages/chat/chat.tsx`（三选择器 + Composer + 工具轨迹）、`frontend/src/pages/space/space-detail.tsx`（7 tabs）、`frontend/src/pages/run/run-detail.tsx`（执行轨迹）、`frontend/src/pages/report/report-view.tsx`（逐请求报告） |
+| 类型定义                | `frontend/src/lib/types/*`（按域拆分：conversation / skill / memory / knowledge / space / agent-run / report …）                                                     |
 | 流式协议客户端             | `frontend/src/lib/stream.ts`（三行帧 → `ChatEvent` 判别联合）                                                                              |
 
 ---
@@ -456,3 +463,12 @@ Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见�
 
 本准则随前端实现迭代。调整全局风格时**优先改令牌层**（`index.css`），再改基元组件，最后才改个别页面；单次改版避免同时改动配色、圆角、布局三套体系，便于
 review 与回退。
+
+---
+
+## 十五、修订记录
+
+| 日期 | 说明 |
+|---|---|
+| 2026-11-04 | v2.0：补测试报告、报告详情、执行详情三个页面骨架；空间页签「测试运行」更正为「执行记录」；补报告与执行详情的统计口径差异说明；文件索引补 `agent-run` / `report` 类型与参考页面 |
+| 2026-10-20 | v0.2.0：补模式选择器、技能选择器、工具调用卡片、上下文栏与页面骨架 |

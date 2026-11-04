@@ -1,40 +1,18 @@
 """工作模式策略：默认 / 问答 / 计划。
 
-**模式不是 prompt 里的一句话，是工具白名单。**
-
-这是整个设计里最容易做错的地方。如果 ask 模式下工具列表里还有 ``send_request``，
-那么无论 prompt 怎么写"你只应该回答问题"，模型在遇到"帮我测一下"时仍然会调它——
-因为对模型来说，一个可调用的工具就是被允许的动作。
-
-所以模式落到两道物理约束：
-
-1. 工具列表本身不含被禁用的工具（模型看不到，就调不了）
-2. skill 声明的 ``allowed_tools`` 只能在此基础上**再收窄**，不能放大
-
-第二点是安全关键：skill 是用户导入的第三方内容，不能让它成为提权通道。
+模式以工具白名单实现，而非仅靠提示词约束：被禁用的工具不进入模型工具列表，
+skill 声明的 ``allowed_tools`` 只能在当前模式的基础上进一步收窄。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from langchain_core.tools import BaseTool
 
-# 默认模式的最大工具调用轮次。12 轮足够「拉清单 → 查详情 → 取 token → 发请求 →
-# 断言 → 落盘」这类真实链路，又能兜住模型陷入死循环的情况。
-DEFAULT_MAX_STEPS = 12
-# 计划模式只需要读信息 + 输出计划，轮次更少
-PLAN_MAX_STEPS = 8
-
-
-class Mode(StrEnum):
-    """工作模式。"""
-
-    AGENT = "agent"  # 默认：自动选工具执行测试
-    ASK = "ask"  # 只回答问题，零副作用
-    PLAN = "plan"  # 只出计划，不执行
-
+from agent.prompt.agent import AGENT_MODE_INSTRUCTIONS
+from data.constant.agent import AGENT_PLAN_MAX_STEPS, AGENT_DEFAULT_MAX_STEPS
+from data.enum.agent import Mode
 
 # 有副作用的工具：改动外部状态或持久化数据
 SIDE_EFFECT_TOOL_NAMES = frozenset(
@@ -66,31 +44,9 @@ READ_ONLY_TOOL_NAMES = frozenset(
 )
 
 _MODE_ALIASES = {
-    "run": Mode.AGENT,
     "agent": Mode.AGENT,
-    "default": Mode.AGENT,
     "ask": Mode.ASK,
-    "qa": Mode.ASK,
     "plan": Mode.PLAN,
-}
-
-_MODE_INSTRUCTIONS = {
-    Mode.AGENT: (
-        "当前为【执行模式】。你可以自主选择工具完成测试任务：查接口清单、取接口详情、"
-        "发请求、评估断言、把结果写入 testcases/ 或 artifacts/。"
-        "执行写操作前先确认目标环境不是生产环境；遇到需要业务判断的地方先说明，不要擅自替用户决定。"
-    ),
-    Mode.ASK: (
-        "当前为【问答模式】。你**只回答问题和做分析**，没有任何会改动外部状态的工具。"
-        "不要声称自己执行了测试或调用了接口——如果你需要某个运行时数据但没有工具能拿到，"
-        "就明确告诉用户「这需要切换到执行模式才能完成」。"
-    ),
-    Mode.PLAN: (
-        "当前为【计划模式】。你**只输出计划，不执行**。"
-        "计划必须包含：测试目标、接口范围（具体接口清单）、用例矩阵（场景/入参要点/断言）、"
-        "执行顺序与数据依赖、需要人工确认的风险点。"
-        "不要说「我已经测试完成」这类话——你没有执行任何请求。"
-    ),
 }
 
 _MODE_LABELS = {Mode.AGENT: "执行", Mode.ASK: "问答", Mode.PLAN: "计划"}
@@ -107,31 +63,43 @@ class ModePolicy:
 
     @property
     def label(self) -> str:
+        """模式的中文显示名。"""
         return _MODE_LABELS[self.mode]
 
     @property
     def blocked_tool_names(self) -> frozenset[str]:
+        """当前模式下禁用的工具名；允许副作用时为空集合。"""
         return frozenset() if self.allow_side_effects else SIDE_EFFECT_TOOL_NAMES
 
 
 def normalize_mode(raw: str | None) -> Mode:
-    """把外部传入的 mode 归一化。
+    """把外部传入的 mode 归一化为 ``Mode``。
 
-    容忍历史值（``Run``/``Ask``/``Plan``）与大小写差异——数据库里可能还有
-    迁移不彻底的旧数据，不能让它们把一轮对话直接打成 422。
+    Args:
+        raw: 原始模式字符串，可为 None
+
+    Returns:
+        归一化后的模式
     """
     key = (raw or "").strip().lower()
     return _MODE_ALIASES.get(key, Mode.AGENT)
 
 
 def policy_for(raw: str | Mode | None) -> ModePolicy:
-    """取模式策略。"""
+    """按模式构造执行策略。
+
+    Args:
+        raw: 模式字符串或 ``Mode``；None 视为默认模式
+
+    Returns:
+        该模式的执行策略
+    """
     mode = raw if isinstance(raw, Mode) else normalize_mode(raw)
     return ModePolicy(
         mode=mode,
         allow_side_effects=mode is Mode.AGENT,
-        instruction=_MODE_INSTRUCTIONS[mode],
-        max_steps=PLAN_MAX_STEPS if mode is Mode.PLAN else DEFAULT_MAX_STEPS,
+        instruction=AGENT_MODE_INSTRUCTIONS[mode],
+        max_steps=AGENT_PLAN_MAX_STEPS if mode is Mode.PLAN else AGENT_DEFAULT_MAX_STEPS,
     )
 
 
@@ -142,10 +110,8 @@ def filter_tools(
 ) -> list[BaseTool]:
     """按模式与 skill 声明裁剪工具列表。
 
-    规则按顺序叠加：
-    1. 去掉该模式禁用的副作用工具
-    2. 若 skill 声明了 allowed_tools，则只保留其中列出的工具
-       —— 注意这一步**只能收窄**，因为第 1 步已经先执行了
+    先移除当前模式禁用的副作用工具，再按 skill 声明的 ``allowed_tools`` 过滤，
+    因此 skill 只能收窄范围，无法放开模式已禁用的工具。
 
     Args:
         tools: 全量候选工具
@@ -153,7 +119,7 @@ def filter_tools(
         skill_allowed: 选中 skill 声明的工具名并集；None 表示不额外限制
 
     Returns:
-        裁剪后的工具列表（保持原顺序）
+        裁剪后的工具列表，保持原顺序
     """
     blocked = policy.blocked_tool_names
     result = [tool for tool in tools if tool.name not in blocked]

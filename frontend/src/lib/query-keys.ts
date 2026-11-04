@@ -8,12 +8,26 @@ function createResourceKeys<const TPrefix extends string>(prefix: TPrefix) {
   };
 }
 
+/**
+ * React Query 查询键注册表，按资源前缀集中管理。
+ *
+ * `all` 用于整资源缓存失效；`list` 与 `detail` 是 `createCrudHooks` 依赖的固定成员。
+ */
 export const queryKeys = {
   spaces: createResourceKeys("spaces"),
   endpoints: createResourceKeys("endpoints"),
   environments: createResourceKeys("environments"),
-  testRuns: createResourceKeys("test-runs"),
-  reports: createResourceKeys("reports"),
+  agentRuns: {
+    ...createResourceKeys("agent-runs"),
+    toolCalls: (runId: ResourceId, includeBody: boolean) =>
+      ["agent-runs", "tool-calls", runId, includeBody] as const,
+  },
+  reports: {
+    ...createResourceKeys("reports"),
+    /** 单条请求正文（详情页展开时按需拉） */
+    request: (runId: ResourceId, requestId: ResourceId) =>
+      ["reports", "request", runId, requestId] as const,
+  },
   skills: createResourceKeys("skills"),
   conversations: {
     ...createResourceKeys("conversations"),
@@ -33,8 +47,10 @@ export const queryKeys = {
   },
   workspace: {
     tree: (spaceId: ResourceId | null | undefined) => ["workspace", "tree", spaceId] as const,
-    agentsMd: (spaceId: ResourceId | null | undefined) => ["workspace", "agents-md", spaceId] as const,
+    agentsMd: (spaceId: ResourceId | null | undefined) =>
+      ["workspace", "agents-md", spaceId] as const,
   },
 };
 
+/** 单个资源的查询键集合，供 `createCrudHooks` 使用。 */
 export type ResourceQueryKeys = ReturnType<typeof createResourceKeys>;

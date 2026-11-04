@@ -1,8 +1,6 @@
 """JSON 解析公共工具。
 
-统一空间内的 JSON 字段解析与 LLM 响应 JSON 提取逻辑：
-- ``robust_json_loads`` / ``safe_json_loads``：带 ``json_repair`` 兜底的安全解析
-- ``parse_llm_json_response`` / ``parse_llm_json_object``：从 LLM 文本中提取 JSON
+统一带 ``json_repair`` 兜底的解析入口，以及从 LLM 响应文本中提取 JSON 的辅助函数。
 """
 
 import json
@@ -42,7 +40,15 @@ def robust_json_loads(text: str) -> Any:
 
 
 def safe_json_loads(value: str | None, default: Any) -> Any:
-    """安全解析 JSON 字段，失败时使用 ``json_repair`` 修复，仍失败则返回 default。"""
+    """解析 JSON 字段，失败时返回默认值。
+
+    Args:
+        value: 待解析字符串；空值时直接返回 default
+        default: 解析失败时的返回值
+
+    Returns:
+        解析结果或 default
+    """
     if not value:
         return default
     try:
@@ -52,11 +58,15 @@ def safe_json_loads(value: str | None, default: Any) -> Any:
 
 
 def _extract_json_str(text: str) -> str | None:
-    """从 LLM 文本中提取 JSON 字符串。
+    """从 LLM 文本中定位 JSON 片段。
 
-    优先匹配 markdown code block（```json ... ```），
-    否则回退到首个 ``{`` 到最后一个 ``}`` 之间的内容。
-    无法定位时返回 None。
+    优先取 markdown 代码块内容，其次取首个 ``{`` 到末个 ``}`` 之间的文本。
+
+    Args:
+        text: LLM 原始响应
+
+    Returns:
+        提取出的 JSON 字符串；无法定位时返回 None
     """
     stripped = text.strip()
 
@@ -74,16 +84,21 @@ def _extract_json_str(text: str) -> str | None:
 def parse_llm_json_response(
     response: str,
     *,
-    list_key: str = "test_cases",
+    list_key: str = "items",
     sort_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """从 LLM 响应文本中解析 JSON 列表。
 
-    支持 markdown code block 包裹和纯 JSON 文本。
-    若解析结果为 dict，则取 list_key 对应的子列表；
-    若为 list 则直接使用。可选按 sort_key 排序。
+    结果为 dict 时取 ``list_key`` 对应的子列表，为 list 时直接使用；
+    解析失败或类型不符时返回空列表。
 
-    解析失败时自动使用 ``json_repair`` 进行修复。
+    Args:
+        response: LLM 原始响应
+        list_key: 结果为 dict 时提取子列表所用的键
+        sort_key: 非空时按该字段升序排序，缺失字段按 0 处理
+
+    Returns:
+        元素为 dict 的列表；失败时返回空列表
     """
     if not response:
         return []
@@ -115,17 +130,15 @@ def parse_llm_json_response(
 
 
 def parse_llm_json_object(response: str) -> dict[str, Any]:
-    """从 LLM 响应文本中解析出单个 JSON 对象。
+    """从 LLM 响应文本中解析单个 JSON 对象。
 
-    支持 markdown code block 包裹和纯 JSON 文本。与 ``parse_llm_json_response``
-    返回列表不同，本函数返回单个 dict，适用于结构化对象（如安全审计结果）。
-    解析失败或结果非 dict 时返回空 dict。
+    与 ``parse_llm_json_response`` 的区别是不做列表包装，适用于结构化对象结果。
 
     Args:
-        response: 待解析的 LLM 响应文本
+        response: LLM 原始响应
 
     Returns:
-        解析后的 dict；失败时返回空 dict
+        解析后的 dict；解析失败或结果非 dict 时返回空 dict
     """
     if not response:
         return {}
@@ -144,3 +157,11 @@ def parse_llm_json_object(response: str) -> dict[str, Any]:
     if isinstance(data, dict):
         return data
     return {}
+
+
+def as_object(value: Any) -> Any:
+    """将 JSON 字符串解析为 Python 对象；非字符串或解析失败时原样返回。"""
+    if not isinstance(value, str):
+        return value
+    parsed = safe_json_loads(value, None)
+    return parsed if parsed is not None else value

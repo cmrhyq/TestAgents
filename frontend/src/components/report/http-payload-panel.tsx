@@ -1,12 +1,22 @@
-import type { TestResultDetail } from "@/lib/types.ts";
-import { formatJson } from "@/lib/format";
+import type { AgentToolCall, AgentToolCallDetail } from "@/lib/types.ts";
+import { formatFileSize, formatJson } from "@/lib/format";
 import { cn } from "@/lib/utils.ts";
 
-function JsonBlock({ label, raw, destructive }: { label: string; raw: string | null; destructive?: boolean }) {
+function JsonBlock({
+  label,
+  raw,
+  destructive,
+}: {
+  label: string;
+  raw: string | null | undefined;
+  destructive?: boolean;
+}) {
   if (!raw) return null;
   return (
     <div>
-      <span className={cn("font-medium", destructive ? "text-destructive" : "text-muted-foreground")}>
+      <span
+        className={cn("font-medium", destructive ? "text-destructive" : "text-muted-foreground")}
+      >
         {label}：
       </span>
       <pre
@@ -21,62 +31,106 @@ function JsonBlock({ label, raw, destructive }: { label: string; raw: string | n
   );
 }
 
-/** 请求 / 响应详情面板（可展开行内的两栏内容）。 */
-export function HttpPayloadPanel({ result }: { result: TestResultDetail }) {
+/** 判断调用记录是否带有请求与响应正文字段。 */
+function hasBody(call: AgentToolCall): call is AgentToolCallDetail {
+  return "response_body" in call || "request_body" in call;
+}
+
+interface HttpPayloadPanelProps {
+  call: AgentToolCall | AgentToolCallDetail;
+  /** 请求与响应正文是否已加载；未加载时展示加载入口。 */
+  bodyLoaded: boolean;
+  loadingBody?: boolean;
+  onRequestBody?: () => void;
+}
+
+/**
+ * 单次工具调用的入参、请求与响应面板。
+ *
+ * 非 HTTP 工具（如 `query_db`、`read_file`）的 HTTP 字段为空，只展示入参与结果预览。
+ */
+export function HttpPayloadPanel({
+  call,
+  bodyLoaded,
+  loadingBody = false,
+  onRequestBody,
+}: HttpPayloadPanelProps) {
+  const detail = bodyLoaded && hasBody(call) ? call : null;
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground">请求</h4>
-        <div className="space-y-2 text-sm">
-          <div>
-            <span className="font-medium text-muted-foreground">URL： </span>
-            <code className="break-all rounded bg-muted px-1 py-0.5 text-xs">
-              {result.request_url}
-            </code>
-          </div>
-          {result.request_headers && result.request_headers !== "{}" && (
-            <JsonBlock label="请求头" raw={result.request_headers} />
-          )}
-          {result.query_params && <JsonBlock label="查询参数" raw={result.query_params} />}
-          {result.request_body && <JsonBlock label="请求体" raw={result.request_body} />}
-        </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 font-mono text-[11px] text-muted-foreground">
+        <span>call_id: {call.call_id || "—"}</span>
+        <span>
+          第 {call.step_index} 轮 / 第 {call.seq} 次
+        </span>
+        <span>结果 {call.result_chars} 字符</span>
+        {detail && detail.response_size_bytes > 0 && (
+          <span>响应体 {formatFileSize(detail.response_size_bytes)}</span>
+        )}
+        {detail?.response_body_truncated === 1 && (
+          <span className="text-warning">响应体超 2MB 已截断入库</span>
+        )}
       </div>
 
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-foreground">响应</h4>
-        <div className="space-y-2 text-sm">
-          <div>
-            <span className="font-medium text-muted-foreground">状态码： </span>
-            <span
-              className={cn(
-                "font-mono font-semibold",
-                result.response_status_code && result.response_status_code < 400
-                  ? "text-success"
-                  : "text-destructive"
-              )}
-            >
-              {result.response_status_code ?? "N/A"}
-            </span>
+      {!bodyLoaded && (
+        <div className="flex items-center gap-3 rounded-[3px] border border-dashed border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <span>请求 / 响应正文未加载（单条最大 2MB，默认不拉取）。</span>
+          <button
+            type="button"
+            className="font-medium text-accent hover:underline disabled:opacity-50"
+            onClick={onRequestBody}
+            disabled={loadingBody}
+          >
+            {loadingBody ? "加载中…" : "加载正文"}
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-foreground">请求</h4>
+          <div className="space-y-2 text-sm">
+            <div>
+              <span className="font-medium text-muted-foreground">目标： </span>
+              <code className="break-all rounded bg-muted px-1 py-0.5 text-xs">
+                {call.http_method ? `${call.http_method} ` : ""}
+                {call.http_url ?? "—"}
+              </code>
+            </div>
+            <JsonBlock label="工具入参" raw={detail?.args_json} />
+            <JsonBlock label="请求头" raw={detail?.request_headers} />
+            <JsonBlock label="查询参数" raw={detail?.request_params} />
+            <JsonBlock label="请求体" raw={detail?.request_body} />
           </div>
-          {result.response_headers && result.response_headers !== "{}" && (
-            <JsonBlock label="响应头" raw={result.response_headers} />
-          )}
-          {result.response_body && <JsonBlock label="响应体" raw={result.response_body} />}
-          {result.error_message && <JsonBlock label="错误" raw={result.error_message} destructive />}
-          {result.retry_count > 0 && (
+        </div>
+
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-foreground">响应</h4>
+          <div className="space-y-2 text-sm">
             <div>
-              <span className="font-medium text-muted-foreground">重试次数： </span>
-              <span>{result.retry_count}</span>
-            </div>
-          )}
-          {result.started_at && result.finished_at && (
-            <div>
-              <span className="font-medium text-muted-foreground">时间： </span>
-              <span className="text-xs text-muted-foreground">
-                {result.started_at} ~ {result.finished_at}
+              <span className="font-medium text-muted-foreground">结果： </span>
+              <span
+                className={cn(
+                  "font-mono font-semibold",
+                  call.ok === 1 ? "text-success" : "text-destructive"
+                )}
+              >
+                {call.ok === 1 ? "成功" : "失败"}
               </span>
+              {call.http_status_code !== null && (
+                <span className="ml-2 font-mono text-xs text-muted-foreground">
+                  HTTP {call.http_status_code}
+                </span>
+              )}
             </div>
-          )}
+            <JsonBlock label="响应头" raw={detail?.response_headers} />
+            <JsonBlock label="响应体" raw={detail?.response_body} />
+            {!detail && <JsonBlock label="结果预览" raw={call.result_preview} />}
+            {call.error_type && (
+              <JsonBlock label={`错误 (${call.error_type})`} raw={call.error_message} destructive />
+            )}
+          </div>
         </div>
       </div>
     </div>

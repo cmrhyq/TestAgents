@@ -29,6 +29,7 @@ interface EndpointFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   spaceId: string | number;
+  /** 有值时进入编辑模式，否则为新建。 */
   endpoint?: Endpoint | null;
 }
 
@@ -261,6 +262,7 @@ function EndpointFormContent({ spaceId, endpoint, onClose }: EndpointFormContent
   );
 }
 
+/** 接口表单弹窗：新建与编辑复用，提交成功后关闭。 */
 export function EndpointFormDialog({
   open,
   onOpenChange,

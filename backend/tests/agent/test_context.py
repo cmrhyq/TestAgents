@@ -1,13 +1,12 @@
-"""上下文组装测试。
+"""`build_system_prompt` 的块组成、顺序与超长裁剪。
 
-关注三件事：拼装顺序（行为约束在最前）、超长裁剪顺序（先砍内容、后砍规则）、
-以及每块内容确实出现在它该出现的位置。
+顺序约束：模式指令与 `AGENTS.md` 先于技能块；裁剪时先删技能块与记忆，保留模式规则。
 """
 
 import pytest
 
 from src.agent.context import (
-    MAX_PROMPT_CHARS,
+    AGENT_MAX_PROMPT_CHARS,
     SpaceSnapshot,
     build_system_prompt,
 )
@@ -26,6 +25,8 @@ SNAPSHOT = SpaceSnapshot(
 
 
 class TestBlocks:
+    """各部分内容均出现在 prompt 中。"""
+
     def test_contains_space_identity(self):
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"))
 
@@ -36,7 +37,7 @@ class TestBlocks:
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"))
 
         assert "http://dev.local" in prompt
-        assert "生产" in prompt  # 生产环境必须被标注出来
+        assert "生产" in prompt  # 生产环境需显式标注
 
     def test_contains_agents_md(self):
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"))
@@ -76,6 +77,8 @@ class TestBlocks:
 
 
 class TestOrdering:
+    """块间顺序约束。"""
+
     def test_mode_instruction_before_skills(self):
         prompt = build_system_prompt(
             SNAPSHOT,
@@ -96,13 +99,15 @@ class TestOrdering:
 
 
 class TestTruncation:
+    """超长输入的裁剪顺序与长度上限。"""
+
     def test_long_skills_trimmed_first(self):
-        huge_skill = "<skill name=\"x\">" + "技" * (MAX_PROMPT_CHARS * 2) + "</skill>"
+        huge_skill = "<skill name=\"x\">" + "技" * (AGENT_MAX_PROMPT_CHARS * 2) + "</skill>"
 
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"), skill_blocks=huge_skill)
 
-        assert len(prompt) <= MAX_PROMPT_CHARS + 500
-        # 规则不能被砍掉
+        assert len(prompt) <= AGENT_MAX_PROMPT_CHARS + 500
+        # 规则块不应被裁剪
         assert "计划模式" not in prompt
         assert "问答模式" not in prompt or True
         assert "执行模式" in prompt
@@ -112,7 +117,7 @@ class TestTruncation:
 
         prompt = build_system_prompt(SNAPSHOT, policy_for("ask"), memories=huge_memory)
 
-        assert len(prompt) <= MAX_PROMPT_CHARS + 500
+        assert len(prompt) <= AGENT_MAX_PROMPT_CHARS + 500
         assert "问答模式" in prompt
 
     def test_no_truncation_when_short(self):
@@ -121,6 +126,8 @@ class TestTruncation:
 
 
 class TestEmptyInputs:
+    """空输入下的退化行为。"""
+
     def test_no_memories(self):
         prompt = build_system_prompt(SNAPSHOT, policy_for("agent"), memories=[])
         assert "执行模式" in prompt

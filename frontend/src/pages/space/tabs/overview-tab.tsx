@@ -44,20 +44,17 @@ function TreeNode({ node, depth }: { node: WorkspaceNode; depth: number }) {
 }
 
 /**
- * 概览 tab：工作目录 + 空间约定。
+ * 概览 tab：工作目录树与空间约定（AGENTS.md）。
  *
- * 这两块放在一起是有原因的——目录里有什么文件（如 ``testcases/``、``artifacts/``）
- * 和「这个空间测什么」的约定，是同一件事的两面。用户改完 AGENTS.md 立刻能
- * 知道 Agent 下一轮会怎么理解这个空间。
+ * 两者共同描述「这个空间测什么」，修改 AGENTS.md 后下一轮对话即生效。
  */
 export function OverviewTab({ spaceId }: { spaceId: string }) {
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(spaceId, 3);
   const { data: agentsMd, isLoading: agentsLoading } = useAgentsMd(spaceId);
   const updateAgentsMd = useUpdateAgentsMd(spaceId);
 
-  // ``edited === null`` 表示「用户还没动过」，此时展示服务端内容。
-  // 这样不需要在 effect 里 setState 回填——服务端内容变化会自然反映，
-  // 用户一旦开始编辑就固定住草稿，不会被打字过程中的重取冲掉。
+  // edited 为 null 表示尚未编辑，此时展示服务端内容；一旦开始编辑即固定草稿，
+  // 避免输入过程中后台重取把内容冲掉。
   const [edited, setEdited] = useState<string | null>(null);
 
   const serverContent = agentsMd?.content ?? "";

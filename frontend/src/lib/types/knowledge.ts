@@ -2,9 +2,10 @@ import type { Id } from "./common";
 
 /** 文档索引状态。 */
 export type DocumentStatus = "pending" | "indexed" | "failed";
-/** 索引方式：向量（Chroma 可用）或词法（降级到 SQLite LIKE）。 */
+/** 索引方式：向量检索，或降级到 SQLite LIKE 的词法检索。 */
 export type IndexMode = "vector" | "lexical";
 
+/** 知识库文档的索引信息。 */
 export interface KnowledgeDocument {
   id: Id;
   space_id: Id;
@@ -20,6 +21,7 @@ export interface KnowledgeDocument {
   updated_at: string;
 }
 
+/** 文档列表响应。 */
 export interface DocumentListResponse {
   items: KnowledgeDocument[];
   total: number;
@@ -27,13 +29,14 @@ export interface DocumentListResponse {
   vector_enabled: boolean;
 }
 
+/** 文档切片。 */
 export interface KnowledgeChunk {
   id: Id;
   seq: number;
   content: string;
 }
 
-/** 检索命中项。字段名对齐后端 ``SearchHit.to_dict()``。 */
+/** 检索命中项，字段名对齐后端 `SearchHit.to_dict()`。 */
 export interface SearchHit {
   /** 来源文档名 */
   document: string;
@@ -43,13 +46,14 @@ export interface SearchHit {
   score: number;
 }
 
+/** 检索结果。 */
 export interface SearchResponse {
   query: string;
   vector_enabled: boolean;
   hits: SearchHit[];
 }
 
-/** 工作目录节点（「概览」页展示空间沙箱内容）。 */
+/** 工作目录节点。 */
 export interface WorkspaceNode {
   name: string;
   path: string;
@@ -58,6 +62,7 @@ export interface WorkspaceNode {
   children?: WorkspaceNode[];
 }
 
+/** 工作目录树响应。 */
 export interface WorkspaceTreeResponse {
   space_id: Id;
   root: string;

@@ -1,4 +1,4 @@
-"""Pytest 配置验证 — 确保基本配置和 fixture 正常工作。"""
+"""校验 pytest 配置、项目目录结构与核心模块导入可用性。"""
 
 import pytest
 
@@ -11,7 +11,7 @@ class TestPytestSetup:
         assert (project_root / "pyproject.toml").exists()
 
     def test_source_layout_exists(self, project_root):
-        """重构后的核心包目录应存在。"""
+        """核心包目录应存在。"""
         for pkg in ("src/agent", "src/data", "src/core", "src/api"):
             assert (project_root / pkg).is_dir(), f"缺少包目录: {pkg}"
 
@@ -44,7 +44,7 @@ class TestImports:
         assert OpenAPIParser is not None
 
     def test_import_subsystems(self):
-        """四大子系统都要能独立导入（避免循环依赖）。"""
+        """四大子系统可各自独立导入，用于暴露循环依赖。"""
         from src.memory import get_knowledge_base, get_long_term_memory
         from src.skill.service import get_skill_service
         from src.workspace.manager import get_workspace_manager

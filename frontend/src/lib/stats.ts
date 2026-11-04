@@ -1,5 +1,6 @@
 /** 响应耗时统计。 */
 
+/** 耗时统计结果，单位毫秒。 */
 export interface ResponseStats {
   avg: number;
   min: number;
@@ -7,7 +8,7 @@ export interface ResponseStats {
   p95: number;
 }
 
-/** 计算 avg/min/max/p95（毫秒）；无有效数据时返回 null。 */
+/** 计算耗时统计，单位为毫秒；忽略非正数样本，无有效样本时返回 null。 */
 export function computeResponseStats(times: number[]): ResponseStats | null {
   const valid = times.filter((t) => t > 0);
   if (valid.length === 0) return null;

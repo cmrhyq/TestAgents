@@ -9,10 +9,11 @@ import { useParseOpenAPI } from "@/hooks/use-workflows.ts";
 import { buildEndpointColumns } from "../columns";
 import type { Endpoint } from "@/lib/types.ts";
 
+/** `EndpointsTab` 的属性。 */
 export interface EndpointsTabProps {
-  /** 当前空间 id，用于 OpenAPI 导入接口 */
+  /** 当前空间 id，用于 OpenAPI 导入 */
   spaceId: string | number;
-  /** 搜索关键字（受控，父组件防抖后发往服务端过滤） */
+  /** 搜索关键字，受控，父组件防抖后再发往服务端过滤 */
   keyword: string;
   onKeywordChange(keyword: string): void;
   data: Endpoint[];
@@ -28,6 +29,7 @@ export interface EndpointsTabProps {
   onDelete(endpoint: Endpoint): void;
 }
 
+/** 接口 tab：搜索、导入 OpenAPI 文档与增删改接口。 */
 export function EndpointsTab({
   spaceId,
   keyword,
@@ -46,7 +48,7 @@ export function EndpointsTab({
 }: EndpointsTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<Endpoint | null>(null);
 
-  // 雪花 ID 超过 JS 安全整数范围，必须以 string 透传，禁止 Number() 转换（会丢精度）
+  // 雪花 ID 超出 JS 安全整数范围，必须以 string 透传，禁止 Number() 转换以免丢精度
   const { mutate: importOpenAPI, isPending: isImporting } = useParseOpenAPI(String(spaceId));
   const fileInputRef = useRef<HTMLInputElement>(null);
 

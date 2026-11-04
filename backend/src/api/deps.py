@@ -1,6 +1,6 @@
-"""FastAPI 依赖注入模块。
+"""FastAPI 公共依赖。
 
-提供数据库 Session 和其他公共依赖。
+当前仅提供请求级数据库 Session。
 """
 
 from collections.abc import Generator
@@ -11,10 +11,10 @@ from src.core.database.database_manager import get_db_manager
 
 
 def get_db() -> Generator[Session, None, None]:
-    """获取数据库会话依赖（请求级生命周期）。
+    """提供请求级数据库 Session 依赖。
 
     Yields:
-        SQLAlchemy Session，请求结束后自动提交/回滚并关闭。
+        会话对象；请求正常结束时提交，抛异常时回滚，最终关闭。
     """
     manager = get_db_manager()
     session = manager.create_session()

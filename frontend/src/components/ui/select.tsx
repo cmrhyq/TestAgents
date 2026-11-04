@@ -1,3 +1,4 @@
+/** 下拉选择：Radix Select 的样式封装，含滚动按钮与选中标记。 */
 import type { ComponentPropsWithoutRef, ElementRef } from "react";
 import { forwardRef } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";

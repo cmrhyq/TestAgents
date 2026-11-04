@@ -84,166 +84,94 @@ CREATE INDEX IF NOT EXISTS idx_endpoint_space ON endpoint (space_id);
 CREATE INDEX IF NOT EXISTS idx_endpoint_operation_id ON endpoint (operation_id);
 
 -- ============================================================================
--- 4. 执行批次表 (test_run)
---    每次 CLI 运行产生一个批次，关联输入文件、配置快照和执行环境
+-- 4. Agent 执行记录表 (agent_run)
+--    一轮 ReAct 对话 = 一条记录，含工具调用统计与 LLM 成本归因
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS test_run
+CREATE TABLE IF NOT EXISTS agent_run
 (
     id              INTEGER PRIMARY KEY,
-    space_id      INTEGER NOT NULL,
+    space_id        INTEGER NOT NULL,
     environment_id  INTEGER,
-    name            TEXT             DEFAULT '',
-    status          TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
-    trigger_type    TEXT    NOT NULL DEFAULT 'manual' CHECK (trigger_type IN ('manual', 'scheduled', 'ci')),
-    input_file      TEXT             DEFAULT '',
-    input_snapshot  TEXT             DEFAULT '{}',
-    config_snapshot TEXT             DEFAULT '{}',
-    llm_provider    TEXT             DEFAULT '',
-    llm_model       TEXT             DEFAULT '',
-    total_cases     INTEGER NOT NULL DEFAULT 0,
-    passed_cases    INTEGER NOT NULL DEFAULT 0,
-    failed_cases    INTEGER NOT NULL DEFAULT 0,
-    skipped_cases   INTEGER NOT NULL DEFAULT 0,
-    error_cases     INTEGER NOT NULL DEFAULT 0,
-    pass_rate       REAL    NOT NULL DEFAULT 0.0,
+    -- 刻意不建外键：ensure_conversation 失败时会传 0
+    conversation_id INTEGER          DEFAULT NULL,
+    title           TEXT    NOT NULL DEFAULT '',
+    mode            TEXT    NOT NULL DEFAULT 'agent' CHECK (mode IN ('agent', 'ask', 'plan')),
+    trigger_type    TEXT    NOT NULL DEFAULT 'chat' CHECK (trigger_type IN ('chat', 'manual', 'scheduled', 'ci')),
+    llm_provider    TEXT    NOT NULL DEFAULT '',
+    llm_model       TEXT    NOT NULL DEFAULT '',
+    -- 无 pending：记录在本轮开始时才插入，插入即 running
+    status          TEXT    NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
     started_at      TEXT             DEFAULT NULL,
     finished_at     TEXT             DEFAULT NULL,
-    total_duration  REAL    NOT NULL DEFAULT 0.0,
-    error_message   TEXT             DEFAULT '',
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    ok_count        INTEGER NOT NULL DEFAULT 0,
+    error_count     INTEGER NOT NULL DEFAULT 0,
+    success_rate    REAL    NOT NULL DEFAULT 0.0, -- 0-100
+    avg_response_time REAL  NOT NULL DEFAULT 0.0, -- 毫秒
+    llm_call_count  INTEGER NOT NULL DEFAULT 0,
+    total_tokens    INTEGER NOT NULL DEFAULT 0,
+    cost_usd        REAL    NOT NULL DEFAULT 0.0,
+    error_message   TEXT    NOT NULL DEFAULT '',
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
     updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
     FOREIGN KEY (space_id) REFERENCES space (id) ON DELETE CASCADE,
     FOREIGN KEY (environment_id) REFERENCES environment (id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_run_space ON test_run (space_id);
-CREATE INDEX IF NOT EXISTS idx_run_env ON test_run (environment_id);
+CREATE INDEX IF NOT EXISTS idx_agent_run_space    ON agent_run (space_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_run_conv     ON agent_run (conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_run_status   ON agent_run (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_run_created  ON agent_run (created_at);
 
 -- ============================================================================
--- 5. 测试用例表 (test_case)
---    对应 workflow.py -> TestCase
---    由 LLM 生成或手工创建的用例
+-- 5. 工具调用留痕表 (agent_tool_call)
+--    每次工具调用的入参、结果与完整 HTTP 请求/响应。
+--    通用列必填，HTTP 列可空 —— 一张表容纳所有工具类型。
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS test_case
+CREATE TABLE IF NOT EXISTS agent_tool_call
 (
-    id              INTEGER PRIMARY KEY,
-    run_id          INTEGER NOT NULL,
-    endpoint_id     INTEGER,
-    case_id         TEXT    NOT NULL,
-    case_name       TEXT    NOT NULL,
-    url             TEXT    NOT NULL,
-    method          TEXT    NOT NULL CHECK (method IN ('GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS')),
-    scenario_type   TEXT    NOT NULL DEFAULT 'normal' CHECK (scenario_type IN (
-                                                                               'normal', 'param_missing',
-                                                                               'param_type_error',
-                                                                               'boundary_value', 'permission_error',
-                                                                               'custom'
+    id                      INTEGER PRIMARY KEY,
+    run_id                  INTEGER NOT NULL,
+    step_index              INTEGER NOT NULL DEFAULT 0,
+    seq                     INTEGER NOT NULL DEFAULT 0,
+    call_id                 TEXT    NOT NULL DEFAULT '',
+    tool_name               TEXT    NOT NULL DEFAULT '',
+    tool_type               TEXT    NOT NULL DEFAULT 'other' CHECK (tool_type IN (
+                                                                                  'http', 'db', 'fs', 'exec',
+                                                                                  'memory', 'knowledge', 'skill',
+                                                                                  'search', 'other'
         )),
-    priority        TEXT    NOT NULL DEFAULT 'P1' CHECK (priority IN ('P0', 'P1', 'P2')),
-    headers         TEXT             DEFAULT '{}',
-    body            TEXT             DEFAULT NULL,
-    params          TEXT             DEFAULT NULL,
-    cache_rules     TEXT             DEFAULT NULL,
-    assert_rules    TEXT             DEFAULT '[]',
-    expected_result TEXT             DEFAULT '成功',
-    description     TEXT             DEFAULT '',
-    remark          TEXT             DEFAULT '',
-    unique_hash     TEXT             DEFAULT '',
-    generated_by    TEXT    NOT NULL DEFAULT 'llm' CHECK (generated_by IN ('llm', 'manual', 'import')),
-    status       INTEGER NOT NULL DEFAULT 1, -- 0=未启用，1=已启用
-    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (run_id) REFERENCES test_run (id) ON DELETE CASCADE,
-    FOREIGN KEY (endpoint_id) REFERENCES endpoint (id) ON DELETE SET NULL
+    args_json               TEXT    NOT NULL DEFAULT '{}',
+    ok                      INTEGER NOT NULL DEFAULT 0 CHECK (ok IN (0, 1)),
+    error_type              TEXT    NOT NULL DEFAULT '',
+    error_message           TEXT    NOT NULL DEFAULT '',
+    result_preview          TEXT    NOT NULL DEFAULT '',
+    result_chars            INTEGER NOT NULL DEFAULT 0,
+    duration_ms             INTEGER NOT NULL DEFAULT 0,
+    -- HTTP 列（仅 send_request 填）
+    http_method             TEXT             DEFAULT NULL,
+    http_url                TEXT             DEFAULT NULL,
+    http_status_code        INTEGER          DEFAULT NULL,
+    request_headers         TEXT             DEFAULT NULL,
+    request_params          TEXT             DEFAULT NULL,
+    request_body            TEXT             DEFAULT NULL,
+    response_headers        TEXT             DEFAULT NULL,
+    response_body           TEXT             DEFAULT NULL,
+    response_body_truncated INTEGER NOT NULL DEFAULT 0,
+    response_size_bytes     INTEGER NOT NULL DEFAULT 0,
+    created_at              TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
+    FOREIGN KEY (run_id) REFERENCES agent_run (id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_case_run ON test_case (run_id);
-CREATE INDEX IF NOT EXISTS idx_case_api ON test_case (endpoint_id);
-CREATE INDEX IF NOT EXISTS idx_case_case_id ON test_case (case_id);
+CREATE INDEX IF NOT EXISTS idx_atc_run          ON agent_tool_call (run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_atc_tool_created ON agent_tool_call (tool_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_atc_tool_run     ON agent_tool_call (tool_name, run_id);
+CREATE INDEX IF NOT EXISTS idx_atc_http_url     ON agent_tool_call (http_url);
 
--- ============================================================================
--- 6. 测试结果表 (test_result)
---    对应 workflow.py -> TestResult
---    完整记录每条用例的执行请求/响应/状态
--- ============================================================================
-CREATE TABLE IF NOT EXISTS test_result
-(
-    id                   INTEGER PRIMARY KEY,
-    run_id               INTEGER NOT NULL,
-    test_case_id         INTEGER NOT NULL,
-    case_id              TEXT    NOT NULL,
-    case_name            TEXT    NOT NULL,
-    status               TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN (
-                                                                              'pending', 'running', 'passed', 'failed',
-                                                                              'skipped', 'error'
-        )),
-    request_url          TEXT             DEFAULT '',
-    request_method       TEXT             DEFAULT '',
-    request_headers      TEXT             DEFAULT '{}',
-    request_body         TEXT             DEFAULT NULL,
-    query_params         TEXT             DEFAULT NULL,
-    response_status_code INTEGER          DEFAULT NULL,
-    response_headers     TEXT             DEFAULT '{}',
-    response_body        TEXT             DEFAULT NULL,
-    response_time        REAL    NOT NULL DEFAULT 0.0,
-    error_message        TEXT             DEFAULT '',
-    retry_count          INTEGER NOT NULL DEFAULT 0,
-    started_at           TEXT             DEFAULT NULL,
-    finished_at          TEXT             DEFAULT NULL,
-    created_at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (run_id) REFERENCES test_run (id) ON DELETE CASCADE,
-    FOREIGN KEY (test_case_id) REFERENCES test_case (id) ON DELETE CASCADE
-);
 
-CREATE INDEX IF NOT EXISTS idx_result_run ON test_result (run_id);
-CREATE INDEX IF NOT EXISTS idx_result_case ON test_result (test_case_id);
+-- 测试报告不再建表：报告 = 按 run_id 聚合 agent_tool_call 中 tool_name='send_request' 的行
 
--- ============================================================================
--- 7. 测试摘要表 (test_summary)
---     对应 models.py -> TestSummary
---     每次执行批次聚合一条摘要记录
--- ============================================================================
-CREATE TABLE IF NOT EXISTS test_summary (
-    id                  INTEGER PRIMARY KEY,
-    run_id              INTEGER NOT NULL UNIQUE,
-    total               INTEGER NOT NULL DEFAULT 0,
-    passed              INTEGER NOT NULL DEFAULT 0,
-    failed              INTEGER NOT NULL DEFAULT 0,
-    skipped             INTEGER NOT NULL DEFAULT 0,
-    error               INTEGER NOT NULL DEFAULT 0,
-    pass_rate           REAL    NOT NULL DEFAULT 0.0,
-    avg_response_time   REAL    NOT NULL DEFAULT 0.0,
-    min_response_time   REAL    NOT NULL DEFAULT 0.0,
-    max_response_time   REAL    NOT NULL DEFAULT 0.0,
-    p95_response_time   REAL    NOT NULL DEFAULT 0.0,
-    total_duration      REAL    NOT NULL DEFAULT 0.0,
-    failure_reasons     TEXT    DEFAULT '{}',
-    started_at          TEXT    DEFAULT NULL,
-    finished_at         TEXT    DEFAULT NULL,
-    created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (run_id) REFERENCES test_run(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_summary_run       ON test_summary(run_id);
-CREATE INDEX IF NOT EXISTS idx_summary_pass_rate ON test_summary(pass_rate);
-
--- ============================================================================
--- 8. 报告记录表 (report)
---     记录每次生成的报告文件路径与元信息
--- ============================================================================
-CREATE TABLE IF NOT EXISTS report
-(
-    id           INTEGER PRIMARY KEY,
-    run_id       INTEGER NOT NULL,
-    format       TEXT    NOT NULL CHECK (format IN ('excel', 'html', 'markdown', 'json')),
-    file_path    TEXT    NOT NULL,
-    file_size    INTEGER          DEFAULT 0,
-    generated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (run_id) REFERENCES test_run (id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_report_run ON report (run_id);
-CREATE INDEX IF NOT EXISTS idx_report_format ON report (format);
 
 -- ============================================================================
 -- 9. 会话表 (conversation)
@@ -254,12 +182,16 @@ CREATE TABLE IF NOT EXISTS conversation
     id              INTEGER PRIMARY KEY,
     space_id        INTEGER             DEFAULT NULL,
     title           TEXT    NOT NULL DEFAULT '',
-    mode            TEXT    NOT NULL DEFAULT 'Run' CHECK (mode IN ('Ask', 'Plan', 'Run')),
+    -- v2 起 mode 归一化为小写三值（旧值 Ask/Plan/Run 已由 v2 迁移改写）
+    mode            TEXT    NOT NULL DEFAULT 'agent' CHECK (mode IN ('agent', 'ask', 'plan')),
+    skill_names     TEXT    NOT NULL DEFAULT '[]',
+    environment_id  INTEGER             DEFAULT NULL,
     status          INTEGER NOT NULL DEFAULT 1 CHECK (status IN (0, 1)), -- 0=未启用，1=启用
     last_message_at TEXT                DEFAULT NULL,
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
     updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')),
-    FOREIGN KEY (space_id) REFERENCES space (id) ON DELETE CASCADE
+    FOREIGN KEY (space_id) REFERENCES space (id) ON DELETE CASCADE,
+    FOREIGN KEY (environment_id) REFERENCES environment (id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversation_space ON conversation (space_id);
@@ -333,20 +265,11 @@ BEGIN
     WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS trg_test_run_updated
+CREATE TRIGGER IF NOT EXISTS trg_agent_run_updated
     AFTER UPDATE
-    ON test_run
+    ON agent_run
 BEGIN
-    UPDATE test_run
-    SET updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')
-    WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_test_case_updated
-    AFTER UPDATE
-    ON test_case
-BEGIN
-    UPDATE test_case
+    UPDATE agent_run
     SET updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', 'localtime')
     WHERE id = NEW.id;
 END;
@@ -362,64 +285,63 @@ END;
 
 -- ============================================================================
 -- 常用分析视图
+-- 说明：视图一律 DROP + CREATE，不用 IF NOT EXISTS —— SQLite 不会更新已存在
+-- 的视图定义，语义变更后旧定义会永久留在库里，表现为「查询一个不存在的表」。
 -- ============================================================================
 
--- 视图: 每次执行的概览（关联空间、环境、摘要）
-CREATE VIEW IF NOT EXISTS v_run_overview AS
-SELECT tr.id      AS run_id,
-       p.name     AS space_name,
-       e.name     AS environment_name,
-       tr.status  AS run_status,
-       tr.trigger_type,
-       tr.llm_provider,
-       tr.llm_model,
-       tr.started_at,
-       tr.finished_at,
-       tr.created_at
-FROM test_run tr
-         LEFT JOIN space p ON tr.space_id = p.id
-         LEFT JOIN environment e ON tr.environment_id = e.id;
+DROP VIEW IF EXISTS v_run_overview;
+DROP VIEW IF EXISTS v_api_pass_rate;
+DROP VIEW IF EXISTS v_scenario_distribution;
+DROP VIEW IF EXISTS v_tool_call_stats;
+DROP VIEW IF EXISTS v_http_endpoint_stats;
 
--- 视图: 接口维度聚合（按 API URL 分组统计通过率）
-CREATE VIEW IF NOT EXISTS v_api_pass_rate AS
-SELECT tr.request_url,
-       tr.request_method,
-       COUNT(*)                                              AS total_executions,
-       SUM(CASE WHEN tr.status = 'passed' THEN 1 ELSE 0 END) AS passed_count,
-       SUM(CASE WHEN tr.status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-       ROUND(
-               SUM(CASE WHEN tr.status = 'passed' THEN 1.0 ELSE 0 END)
-                   / NULLIF(COUNT(*), 0) * 100, 2
-       )                                                     AS pass_rate,
-       ROUND(AVG(tr.response_time), 2)                       AS avg_response_time,
-       ROUND(MIN(tr.response_time), 2)                       AS min_response_time,
-       ROUND(MAX(tr.response_time), 2)                       AS max_response_time
-FROM test_result tr
-WHERE tr.status IN ('passed', 'failed')
-GROUP BY tr.request_url, tr.request_method;
+-- 视图: 每次执行的概览（关联空间、环境）
+CREATE VIEW v_run_overview AS
+SELECT r.id AS run_id,
+       s.name AS space_name,
+       e.name AS environment_name,
+       r.status AS run_status,
+       r.mode,
+       r.title,
+       r.tool_call_count,
+       r.ok_count,
+       r.error_count,
+       r.success_rate,
+       r.avg_response_time,
+       r.duration_ms,
+       r.llm_call_count,
+       r.total_tokens,
+       r.cost_usd,
+       r.started_at,
+       r.finished_at,
+       r.created_at
+FROM agent_run r
+         LEFT JOIN space s ON r.space_id = s.id
+         LEFT JOIN environment e ON r.environment_id = e.id;
 
--- 视图: 场景类型分布（统计各场景类型的测试覆盖情况）
-CREATE VIEW IF NOT EXISTS v_scenario_distribution AS
-SELECT tc.scenario_type,
-       COUNT(*)                                              AS total_cases,
-       SUM(CASE WHEN tr.status = 'passed' THEN 1 ELSE 0 END) AS passed,
-       SUM(CASE WHEN tr.status = 'failed' THEN 1 ELSE 0 END) AS failed,
-       SUM(CASE WHEN tr.status = 'error' THEN 1 ELSE 0 END)  AS errors,
-       ROUND(
-               SUM(CASE WHEN tr.status = 'passed' THEN 1.0 ELSE 0 END)
-                   / NULLIF(SUM(CASE WHEN tr.status IN ('passed', 'failed') THEN 1 ELSE 0 END), 0) * 100, 2
-       )                                                     AS pass_rate
-FROM test_case tc
-         LEFT JOIN test_result tr ON tr.test_case_id = tc.id
-GROUP BY tc.scenario_type;
+-- 视图: 工具维度聚合（哪个工具最常失败、哪个最慢）
+CREATE VIEW v_tool_call_stats AS
+SELECT tool_name,
+       tool_type,
+       COUNT(*)                                  AS total_calls,
+       SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)   AS ok_calls,
+       SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)   AS error_calls,
+       ROUND(SUM(CASE WHEN ok = 1 THEN 1.0 ELSE 0 END)
+                 / NULLIF(COUNT(*), 0) * 100, 2) AS success_rate,
+       ROUND(AVG(duration_ms), 2)                AS avg_response_time,
+       MIN(duration_ms)                          AS min_response_time,
+       MAX(duration_ms)                          AS max_response_time
+FROM agent_tool_call
+GROUP BY tool_name, tool_type;
 
--- ============================================================================
--- 初始数据（ID 由应用层雪花算法生成，此处使用固定种子值；OR IGNORE 保证可重复执行）
--- ============================================================================
-INSERT OR IGNORE INTO space (id, name, description, status)
-VALUES (100000000000001, 'HTTP Bin Space', '', 1);
-
-INSERT OR IGNORE INTO environment (id, space_id, name, base_url, description, variables, is_default, status)
-VALUES (200000000000001, 100000000000001, 'httpbin dev', 'https://httpbin.org', 'dev env', '{"name": "alan"}', 1, 1);
-INSERT OR IGNORE INTO environment (id, space_id, name, base_url, description, variables, is_default, status)
-VALUES (200000000000002, 100000000000001, 'httpbin prod', 'https://httpbin.org', 'prod env', '{"name": "anna"}', 0, 1);
+-- 视图: 接口维度聚合（替代旧的 v_api_pass_rate，口径改为 HTTP 状态码）
+CREATE VIEW v_http_endpoint_stats AS
+SELECT http_url,
+       http_method,
+       COUNT(*)                                                                             AS total_executions,
+       SUM(CASE WHEN http_status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END)                AS success_count,
+       SUM(CASE WHEN http_status_code >= 400 OR http_status_code IS NULL THEN 1 ELSE 0 END) AS error_count,
+       ROUND(AVG(duration_ms), 2)                                                           AS avg_response_time
+FROM agent_tool_call
+WHERE http_url IS NOT NULL AND http_url <> ''
+GROUP BY http_url, http_method;

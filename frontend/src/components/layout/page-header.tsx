@@ -9,7 +9,7 @@ interface PageHeaderProps {
   className?: string;
 }
 
-/** 统一页头：图纸标注（mono 编号）+ display 大标题 + 副标题 + 右侧操作区。 */
+/** 页头：可选的标注编号、标题、描述与右侧操作区。 */
 export function PageHeader({
   title,
   annotation,

@@ -3,6 +3,7 @@ import { ArrowLeft, LayoutDashboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button.tsx";
 
+/** 404 页面。 */
 export default function NotFoundPage() {
   const navigate = useNavigate();
 

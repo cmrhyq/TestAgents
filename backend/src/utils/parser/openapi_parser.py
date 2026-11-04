@@ -1,36 +1,7 @@
-"""
-OpenAPI 接口文档解析工具类
+"""OpenAPI / Swagger 文档解析。
 
-支持:
-    - OpenAPI 2.0 (Swagger) / 3.0
-    - JSON / YAML 格式
-    - 本地文件 / URL / 字典 / JSON字符串
-    - $ref 引用递归解析
-
-使用示例:
-    parser = OpenAPIParser("api.json")
-
-    # 获取基本信息
-    print(parser.title, parser.version, parser.base_url)
-
-    # 获取所有接口
-    for ep in parser.endpoints:
-        print(ep["method"], ep["path"], ep["summary"])
-
-    # 搜索接口
-    results = parser.search("user")
-
-    # 按标签筛选
-    user_apis = parser.get_endpoints_by_tag("用户管理")
-
-    # 获取某个接口详情
-    detail = parser.get_endpoint("/users/{id}", "GET")
-
-    # 获取所有数据模型
-    schemas = parser.schemas
-
-    # 统计
-    print(parser.stats)
+支持 2.0 与 3.x、JSON 与 YAML，来源可为文件、URL、dict 或文本；
+``$ref`` 引用递归解析并缓存。
 """
 
 import copy
@@ -58,16 +29,15 @@ except ImportError:
     _HAS_REQUESTS = False
 
 
-# TODO [外部依赖] servers.variables 中的 enum 验证依赖运行时用户输入，当前仅使用 default 值替换
+# TODO [外部依赖] servers.variables 的 enum 校验依赖运行时用户输入，当前只用 default 值替换
 class OpenAPIParser:
-    """
-    OpenAPI / Swagger 接口文档解析工具类
+    """OpenAPI / Swagger 接口文档解析器。
+
+    解析结果按需计算并缓存，实例创建后文档内容视为不可变。
 
     Args:
-        source: 文档来源，支持以下类型:
-            - dict: 已加载的文档字典
-            - str:  文件路径 / URL(http开头) / JSON字符串
-            - Path: 文件路径
+        source: 文档来源。dict 视为已加载文档；str 依次按 URL、文件路径、
+            JSON/YAML 文本尝试；Path 视为文件路径
     """
 
     _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "patch", "head", "options", "trace"})
@@ -77,40 +47,41 @@ class OpenAPIParser:
         self._version: str = self._detect_version()
         self._ref_cache: dict = {}
 
-        # 解析结果缓存(懒加载)
+        # 解析结果缓存
         self._info: dict | None = None
         self._tags: list | None = None
         self._endpoints: list | None = None
         self._schemas: list | None = None
         self._security_schemes: list | None = None
 
-    # ----------------------------------------------------------------
-    #  公开属性 - 基本信息
-    # ----------------------------------------------------------------
+    # 公开属性：基本信息
 
     @property
     def raw(self) -> dict:
-        """原始文档字典"""
+        """返回原始文档字典。"""
         return self._raw
 
     @property
     def openapi_version(self) -> str:
-        """OpenAPI 规范版本, 如 '2.0' / '3.0.0'"""
+        """返回规范版本，如 ``2.0`` / ``3.0.0``。"""
         return self._version
 
     @property
     def is_v2(self) -> bool:
+        """是否为 OpenAPI 2.0（Swagger）。"""
         return self._version.startswith("2")
 
     @property
     def is_v3(self) -> bool:
+        """是否为 OpenAPI 3.x。"""
         return self._version.startswith("3")
 
     @property
     def info(self) -> dict:
-        """
-        API 基本信息
-        返回: {title, description, version, base_url, servers, contact, license}
+        """返回 API 基本信息。
+
+        含 ``title`` / ``description`` / ``version`` / ``base_url`` /
+        ``servers`` / ``contact`` / ``license``。
         """
         if self._info is None:
             self._info = self._parse_info()
@@ -118,35 +89,34 @@ class OpenAPIParser:
 
     @property
     def title(self) -> str:
+        """返回文档标题。"""
         return self.info.get("title", "")
 
     @property
     def description(self) -> str:
+        """返回文档描述。"""
         return self.info.get("description", "")
 
     @property
     def version(self) -> str:
-        """API 业务版本号"""
+        """返回 API 业务版本号。"""
         return self.info.get("version", "")
 
     @property
     def base_url(self) -> str:
+        """返回基础 URL，取自首个 server。"""
         return self.info.get("base_url", "")
 
     @property
     def servers(self) -> list:
+        """返回 server 列表。"""
         return self.info.get("servers", [])
 
-    # ----------------------------------------------------------------
-    #  公开属性 - 核心数据
-    # ----------------------------------------------------------------
+    # 公开属性：核心数据
 
     @property
     def tags(self) -> list:
-        """
-        标签列表
-        返回: [{"name": "xxx", "description": "xxx"}, ...]
-        """
+        """返回标签列表，元素含 ``name`` 与 ``description``。"""
         if self._tags is None:
             self._tags = [
                 {"name": t.get("name", ""), "description": t.get("description", "")} for t in self._raw.get("tags", [])
@@ -155,26 +125,16 @@ class OpenAPIParser:
 
     @property
     def tag_names(self) -> list:
-        """所有标签名"""
+        """返回全部标签名。"""
         return [t["name"] for t in self.tags]
 
     @property
     def endpoints(self) -> list:
-        """
-        所有接口列表，每个接口是一个字典:
-        {
-            "method": "GET",
-            "path": "/users/{id}",
-            "summary": "获取用户",
-            "description": "...",
-            "operation_id": "getUser",
-            "tags": ["用户管理"],
-            "deprecated": False,
-            "parameters": [...],
-            "request_body": {...} or None,
-            "responses": [...],
-            "security": [...]
-        }
+        """返回全部接口，按 path、method 排序。
+
+        每项为 dict，字段包括 ``method`` / ``path`` / ``summary`` / ``description`` /
+        ``operation_id`` / ``tags`` / ``deprecated`` / ``parameters`` /
+        ``request_body`` / ``responses`` / ``security``。
         """
         if self._endpoints is None:
             self._endpoints = self._parse_endpoints()
@@ -182,10 +142,9 @@ class OpenAPIParser:
 
     @property
     def schemas(self) -> list:
-        """
-        所有数据模型
-        返回: [{"name": "User", "type": "object", "description": "...",
-                "required": [...], "properties": {...}}, ...]
+        """返回全部数据模型。
+
+        每项含 ``name`` / ``type`` / ``description`` / ``required`` / ``properties``。
         """
         if self._schemas is None:
             self._schemas = self._parse_schemas()
@@ -193,21 +152,21 @@ class OpenAPIParser:
 
     @property
     def security_schemes(self) -> list:
-        """安全方案列表"""
+        """返回安全方案列表。"""
         if self._security_schemes is None:
             self._security_schemes = self._parse_security_schemes()
         return self._security_schemes
 
     @property
     def paths(self) -> list:
-        """所有接口路径(去重)"""
+        """返回去重并排序后的接口路径。"""
         return sorted(set(ep["path"] for ep in self.endpoints))
 
     @property
     def stats(self) -> dict:
-        """
-        统计信息
-        返回: {total_endpoints, total_schemas, total_tags, methods, deprecated_count}
+        """返回统计信息。
+
+        含接口数、模型数、标签数、各方法数量与已废弃接口数。
         """
         methods: dict = {}
         deprecated = 0
@@ -225,20 +184,17 @@ class OpenAPIParser:
             "deprecated_count": deprecated,
         }
 
-    # ----------------------------------------------------------------
-    #  公开方法 - 查询 & 过滤
-    # ----------------------------------------------------------------
+    # 公开方法：查询与过滤
 
     def get_endpoint(self, path: str, method: str) -> dict | None:
-        """
-        获取指定接口
+        """按路径与方法取单个接口。
 
         Args:
-            path: 接口路径, 如 "/users/{id}"
-            method: HTTP 方法, 如 "GET"
+            path: 接口路径，如 ``/users/{id}``
+            method: HTTP 方法，大小写不敏感
 
         Returns:
-            接口字典 或 None
+            接口 dict；未命中时返回 None
         """
         method = method.upper()
         for ep in self.endpoints:
@@ -247,20 +203,19 @@ class OpenAPIParser:
         return None
 
     def get_endpoints_by_tag(self, tag: str) -> list:
-        """按标签筛选接口"""
+        """按标签筛选接口。"""
         return [ep for ep in self.endpoints if tag in ep["tags"]]
 
     def get_endpoints_by_method(self, method: str) -> list:
-        """按 HTTP 方法筛选接口"""
+        """按 HTTP 方法筛选接口。"""
         method = method.upper()
         return [ep for ep in self.endpoints if ep["method"] == method]
 
     def search(self, keyword: str) -> list:
-        """
-        搜索接口 (匹配 path / summary / description / operation_id)
+        """在 path、summary、description、operation_id 中搜索接口。
 
         Args:
-            keyword: 搜索关键词（不区分大小写）
+            keyword: 关键词，不区分大小写
 
         Returns:
             匹配的接口列表
@@ -278,31 +233,31 @@ class OpenAPIParser:
         return results
 
     def get_schema(self, name: str) -> dict | None:
-        """按名称获取数据模型"""
+        """按名称取数据模型；不存在时返回 None。"""
         for s in self.schemas:
             if s["name"] == name:
                 return s
         return None
 
     def get_endpoint_parameters(self, path: str, method: str) -> list:
-        """获取指定接口的参数列表"""
+        """取接口参数列表；接口不存在时返回空列表。"""
         ep = self.get_endpoint(path, method)
         return ep["parameters"] if ep else []
 
     def get_endpoint_responses(self, path: str, method: str) -> list:
-        """获取指定接口的响应列表"""
+        """取接口响应列表；接口不存在时返回空列表。"""
         ep = self.get_endpoint(path, method)
         return ep["responses"] if ep else []
 
-    # ----------------------------------------------------------------
-    #  公开方法 - 格式化输出
-    # ----------------------------------------------------------------
+    # 公开方法：格式化输出
 
     def print_summary(self, output: TextIO | None = None):
-        """打印文档摘要到终端
+        """打印文档摘要。
+
+        副作用：向输出流写文本。
 
         Args:
-            output: 输出流，默认为 sys.stdout
+            output: 输出流，默认 ``sys.stdout``
         """
         out = output or sys.stdout
         out.write(f"\n{'=' * 60}\n")
@@ -321,12 +276,13 @@ class OpenAPIParser:
         out.write(f"  方法: {s['methods']}\n\n")
 
     def print_endpoints(self, tag: str | None = None, output: TextIO | None = None):
-        """
-        打印接口列表
+        """打印接口列表。
+
+        副作用：向输出流写文本。
 
         Args:
-            tag: 可选, 只打印指定标签下的接口
-            output: 输出流，默认为 sys.stdout
+            tag: 仅打印该标签下的接口；None 时打印全部
+            output: 输出流，默认 ``sys.stdout``
         """
         out = output or sys.stdout
         eps = self.get_endpoints_by_tag(tag) if tag else self.endpoints
@@ -335,12 +291,14 @@ class OpenAPIParser:
             out.write(f"  {ep['method']:7s} {ep['path']:40s} {ep['summary']}{dep}\n")
 
     def print_endpoint_detail(self, path: str, method: str, output: TextIO | None = None):
-        """打印单个接口详情
+        """打印单个接口的参数、请求体与响应详情。
+
+        副作用：向输出流写文本。
 
         Args:
             path: 接口路径
             method: HTTP 方法
-            output: 输出流，默认为 sys.stdout
+            output: 输出流，默认 ``sys.stdout``
         """
         out = output or sys.stdout
         ep = self.get_endpoint(path, method)
@@ -384,7 +342,11 @@ class OpenAPIParser:
         out.write("\n")
 
     def to_dict(self) -> dict:
-        """导出为结构化字典"""
+        """导出为结构化字典。
+
+        Returns:
+            含 ``info`` / ``stats`` / ``tags`` / ``endpoints`` / ``schemas`` 的 dict
+        """
         return {
             "info": self.info,
             "stats": self.stats,
@@ -394,16 +356,33 @@ class OpenAPIParser:
         }
 
     def to_json(self, indent: int = 2) -> str:
-        """导出为 JSON 字符串"""
+        """导出为 JSON 字符串，中文不转义。
+
+        Args:
+            indent: 缩进空格数
+
+        Returns:
+            JSON 文本
+        """
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
-    # ================================================================
-    #  内部方法 - 加载文档
-    # ================================================================
+    # 内部方法：加载文档
 
     @staticmethod
     def _load(source: str | dict | Path) -> dict:
-        """加载文档"""
+        """按来源类型加载文档。
+
+        str 依次尝试 URL、存在的文件路径、JSON/YAML 文本。
+
+        Args:
+            source: 文档来源
+
+        Returns:
+            文档字典
+
+        Raises:
+            ValueError: 来源类型不支持
+        """
         if isinstance(source, dict):
             return source
 
@@ -418,13 +397,25 @@ class OpenAPIParser:
             if path.exists():
                 return OpenAPIParser._load_file(path)
 
-            # 当作 JSON/YAML 字符串
+            # 既不是 URL 也不是存在的文件，按文本处理
             return OpenAPIParser._load_string(source)
 
         raise ValueError(f"不支持的 source 类型: {type(source)}")
 
     @staticmethod
     def _load_file(filepath: Path) -> dict:
+        """按扩展名读取本地文档，未知扩展名按内容解析。
+
+        Args:
+            filepath: 文件路径，固定以 UTF-8 读取
+
+        Returns:
+            文档字典
+
+        Raises:
+            ImportError: 文件为 YAML 且未安装 pyyaml
+            ValueError: 内容既非合法 JSON 也非 YAML
+        """
         content = filepath.read_text(encoding="utf-8")
         if filepath.suffix.lower() in (".yaml", ".yml"):
             if not _HAS_YAML:
@@ -436,6 +427,21 @@ class OpenAPIParser:
 
     @staticmethod
     def _load_url(url: str) -> dict:
+        """通过 HTTP 拉取文档。
+
+        副作用：发起网络请求，超时 30 秒。
+
+        Args:
+            url: 文档地址
+
+        Returns:
+            文档字典
+
+        Raises:
+            ImportError: 未安装 requests
+            requests.HTTPError: 响应状态码非 2xx
+            ValueError: 响应内容无法解析
+        """
         if not _HAS_REQUESTS:
             raise ImportError("远程加载需要安装 requests: pip install requests")
         resp = _requests.get(url, timeout=30)
@@ -444,6 +450,17 @@ class OpenAPIParser:
 
     @staticmethod
     def _load_string(text: str) -> dict:
+        """依次按 JSON、YAML 解析文本。
+
+        Args:
+            text: 文档文本
+
+        Returns:
+            文档字典
+
+        Raises:
+            ValueError: 两种格式都无法解析
+        """
         try:
             return json.loads(text)
         except (json.JSONDecodeError, ValueError):
@@ -457,11 +474,17 @@ class OpenAPIParser:
                 pass
         raise ValueError("无法解析文档, 请确认是合法的 JSON 或 YAML")
 
-    # ================================================================
-    #  内部方法 - 版本检测 & $ref 解析
-    # ================================================================
+    # 内部方法：版本检测与 $ref 解析
 
     def _detect_version(self) -> str:
+        """读取 ``swagger`` 或 ``openapi`` 字段确定规范版本。
+
+        Returns:
+            版本号字符串
+
+        Raises:
+            ValueError: 两个字段都不存在
+        """
         if "swagger" in self._raw:
             return str(self._raw["swagger"])
         if "openapi" in self._raw:
@@ -469,7 +492,14 @@ class OpenAPIParser:
         raise ValueError("无法识别 OpenAPI 版本, 文档缺少 'swagger' 或 'openapi' 字段")
 
     def _resolve_ref(self, ref: str) -> dict:
-        """解析 $ref 引用, 如 '#/definitions/User'"""
+        """解析文档内 ``$ref`` 引用并缓存结果。
+
+        Args:
+            ref: 形如 ``#/definitions/User`` 的本地引用
+
+        Returns:
+            引用指向的内容；非本地引用或路径不存在时返回空 dict
+        """
         if ref in self._ref_cache:
             return self._ref_cache[ref]
 
@@ -488,7 +518,17 @@ class OpenAPIParser:
         return resolved
 
     def _deep_resolve(self, obj: Any, depth: int = 0) -> Any:
-        """递归解析所有 $ref"""
+        """递归展开对象中的全部 ``$ref``。
+
+        深度超过 30 层时原样返回，避免循环引用导致无限递归。
+
+        Args:
+            obj: 待展开的对象
+            depth: 当前递归深度
+
+        Returns:
+            展开后的对象
+        """
         if depth > 30:
             return obj
         if isinstance(obj, dict):
@@ -500,7 +540,13 @@ class OpenAPIParser:
         return obj
 
     def _type_str(self, schema: dict) -> str:
-        """将 schema 转为可读的类型字符串"""
+        """把 schema 转为可读类型字符串。
+
+        组合类型用 ``&`` / ``|`` 连接，数组写作 ``array[元素类型]``。
+
+        Returns:
+            类型字符串；无法判断时返回 ``object``
+        """
         if "$ref" in schema:
             return schema["$ref"].rsplit("/", 1)[-1]
 
@@ -518,11 +564,17 @@ class OpenAPIParser:
         fmt = schema.get("format", "")
         return f"{t}({fmt})" if fmt else (t or "object")
 
-    # ================================================================
-    #  内部方法 - 解析各部分
-    # ================================================================
+    # 内部方法：解析各部分
 
     def _parse_info(self) -> dict:
+        """解析 ``info`` 与 server 配置。
+
+        v2 由 ``host`` / ``basePath`` / ``schemes`` 拼出 base_url，
+        v3 取 ``servers`` 首个地址。
+
+        Returns:
+            基本信息 dict，含 base_url 与 servers
+        """
         raw_info = self._raw.get("info", {})
         contact = raw_info.get("contact", {})
         lic = raw_info.get("license", {})
@@ -573,20 +625,13 @@ class OpenAPIParser:
 
     @staticmethod
     def _parse_server_variables(raw_variables: dict) -> dict:
-        """解析 servers.variables 定义。
+        """解析 ``servers[].variables`` 定义。
 
         Args:
-            raw_variables: OpenAPI 3.x servers[].variables 原始字典
+            raw_variables: v3 的原始变量字典；非 dict 时按空处理
 
         Returns:
-            解析后的变量字典，格式:
-            {
-                "var_name": {
-                    "default": "default_value",
-                    "enum": ["val1", "val2"],
-                    "description": "..."
-                }
-            }
+            变量名字典，每项含 ``default`` / ``enum`` / ``description``
         """
         if not raw_variables or not isinstance(raw_variables, dict):
             return {}
@@ -604,14 +649,14 @@ class OpenAPIParser:
 
     @staticmethod
     def _resolve_server_url(url: str, variables: dict) -> str:
-        """用 variables 的 default 值替换 server URL 中的 {variable} 占位符。
+        """用变量默认值替换 server URL 中的 ``{variable}`` 占位符。
 
         Args:
-            url: 含 {variable} 占位符的 server URL
-            variables: 已解析的 variables 字典
+            url: 含占位符的 server URL
+            variables: 已解析的变量字典
 
         Returns:
-            替换占位符后的完整 URL
+            替换后的 URL；无变量时原样返回
         """
         if not variables:
             return url
@@ -624,6 +669,12 @@ class OpenAPIParser:
         return resolved
 
     def _parse_security_schemes(self) -> list:
+        """解析安全方案定义，兼容 v2 的 ``securityDefinitions`` 与 v3 的组件。
+
+        Returns:
+            方案列表，每项含 ``name`` / ``type`` / ``description`` / ``in`` /
+            ``scheme`` / ``bearer_format``
+        """
         if self.is_v2:
             defs = self._raw.get("securityDefinitions", {})
         else:
@@ -644,6 +695,14 @@ class OpenAPIParser:
         return result
 
     def _parse_schemas(self) -> list:
+        """解析数据模型定义，兼容 v2 的 ``definitions`` 与 v3 的组件。
+
+        每个模型与其属性都会展开 ``$ref``。
+
+        Returns:
+            模型列表，每项含 ``name`` / ``type`` / ``description`` /
+            ``required`` / ``properties``
+        """
         if self.is_v2:
             defs = self._raw.get("definitions", {})
         else:
@@ -679,6 +738,13 @@ class OpenAPIParser:
         return result
 
     def _parse_endpoints(self) -> list:
+        """遍历 ``paths`` 生成接口列表。
+
+        path 级参数会并入每个操作的参数，结果按 path、method 排序。
+
+        Returns:
+            接口 dict 列表
+        """
         endpoints = []
         for path, path_item in self._raw.get("paths", {}).items():
             if not isinstance(path_item, dict):
@@ -698,6 +764,17 @@ class OpenAPIParser:
         return endpoints
 
     def _parse_operation(self, path: str, method: str, op: dict, path_params: list) -> dict:
+        """把单个 operation 解析为接口 dict。
+
+        Args:
+            path: 接口路径
+            method: 小写 HTTP 方法
+            op: operation 原始字典
+            path_params: path 级参数定义
+
+        Returns:
+            接口 dict
+        """
         endpoint = {
             "method": method.upper(),
             "path": path,
@@ -712,17 +789,14 @@ class OpenAPIParser:
             "responses": [],
         }
 
-        # ---------- 参数 ----------
         all_params = path_params + op.get("parameters", [])
         for raw_p in all_params:
             raw_p = self._deep_resolve(raw_p)
             endpoint["parameters"].append(self._parse_parameter(raw_p))
 
-        # ---------- 请求体 (v3) ----------
         if self.is_v3 and "requestBody" in op:
             endpoint["request_body"] = self._parse_request_body(op["requestBody"])
 
-        # ---------- 响应 ----------
         for code, raw_resp in op.get("responses", {}).items():
             raw_resp = self._deep_resolve(raw_resp)
             endpoint["responses"].append(self._parse_response(str(code), raw_resp))
@@ -730,7 +804,17 @@ class OpenAPIParser:
         return endpoint
 
     def _parse_parameter(self, raw: dict) -> dict:
-        # v2 body 参数
+        """解析单个参数定义。
+
+        v2 的 ``in: body`` 参数单独处理，其余参数优先取 schema 类型。
+
+        Args:
+            raw: 已展开 ``$ref`` 的参数定义
+
+        Returns:
+            参数 dict，含 ``name`` / ``in`` / ``type`` / ``required`` /
+            ``description`` / ``default`` / ``enum`` / ``schema``
+        """
         if raw.get("in") == "body":
             schema = self._deep_resolve(raw.get("schema", {}))
             return {
@@ -766,6 +850,16 @@ class OpenAPIParser:
         }
 
     def _parse_request_body(self, raw: dict) -> dict:
+        """解析 v3 的 requestBody。
+
+        每个 media type 单独保留 schema 与类型字符串。
+
+        Args:
+            raw: requestBody 原始定义
+
+        Returns:
+            含 ``description`` / ``required`` / ``content`` 的 dict
+        """
         raw = self._deep_resolve(raw)
         rb = {
             "description": raw.get("description", ""),
@@ -781,6 +875,17 @@ class OpenAPIParser:
         return rb
 
     def _parse_response(self, code: str, raw: dict) -> dict:
+        """解析单个响应定义。
+
+        v2 的响应 schema 归入 ``content["default"]``，v3 按 media type 拆分。
+
+        Args:
+            code: 状态码，已转为字符串
+            raw: 响应原始定义
+
+        Returns:
+            含 ``status_code`` / ``description`` / ``content`` 的 dict
+        """
         resp = {
             "status_code": code,
             "description": raw.get("description", ""),
@@ -806,7 +911,15 @@ class OpenAPIParser:
         return resp
 
     def _print_schema_props(self, schema: dict, indent: int = 4, output: TextIO | None = None):
-        """辅助: 打印 schema 属性"""
+        """打印 schema 的属性，必填字段前加 ``*``。
+
+        副作用：向输出流写文本。
+
+        Args:
+            schema: 含 ``properties`` 的 schema
+            indent: 左侧缩进空格数
+            output: 输出流，默认 ``sys.stdout``
+        """
         out = output or sys.stdout
         props = schema.get("properties", {})
         required = schema.get("required", [])
@@ -817,31 +930,35 @@ class OpenAPIParser:
             desc = prop.get("description", "")
             out.write(f"{prefix}{req} {name}: {ptype}  {desc}\n")
 
-    # ================================================================
-    #  魔术方法
-    # ================================================================
+    # 魔术方法
 
     def __repr__(self):
         return f"OpenAPIParser(title='{self.title}', version='{self.version}', endpoints={len(self.endpoints)})"
 
     def __len__(self):
-        """返回接口数量"""
+        """返回接口数量。"""
         return len(self.endpoints)
 
     def __iter__(self):
-        """迭代所有接口"""
+        """迭代全部接口。"""
         return iter(self.endpoints)
 
     def __contains__(self, path: str):
-        """判断路径是否存在"""
+        """判断路径是否存在。"""
         return path in self.paths
 
     def __getitem__(self, key):
-        """
-        支持:
-            parser[0]             -> 按索引取接口
-            parser["/users"]      -> 取路径下所有接口
-            parser["/users:GET"]  -> 取特定接口
+        """按索引或路径取接口。
+
+        Args:
+            key: 整数按索引取接口；``"/users"`` 取该路径下全部接口；
+                ``"/users:GET"`` 取指定方法与路径的接口
+
+        Returns:
+            接口 dict、接口列表或 None
+
+        Raises:
+            KeyError: key 既不是 int 也不是 str
         """
         if isinstance(key, int):
             return self.endpoints[key]

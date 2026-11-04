@@ -11,17 +11,17 @@ import { cn } from "@/lib/utils";
 import type { Id, Space } from "@/lib/types";
 
 interface SpaceSelectorProps {
-  /** 当前选中的空间 id；为 null/undefined 时显示占位符。 */
+  /** 当前选中的空间 id；为 null 时显示占位文案 */
   value: Id | null;
-  /** 用户从下拉列表选中某项时回调，传入空间 id。 */
+  /** 选中项变化时回调，参数为空间 id */
   onChange(spaceId: Id): void;
-  /** 未选中时的占位文案，默认 "选择工作空间"。 */
+  /** 未选中时的占位文案，默认「选择工作空间」 */
   placeholder?: string;
-  /** 是否禁用（由父组件控制）。 */
+  /** 是否禁用 */
   disabled?: boolean;
 }
 
-/** 把不同类型 id 规范成字符串后再比较，避免 number/string 不一致。 */
+/** 把 ID 统一转换为字符串再比较，避免 string 与 number 不一致。 */
 function toIdString(id: Id | null | undefined): string | null {
   if (id === null || id === undefined) return null;
   return String(id);
@@ -34,10 +34,9 @@ function findCurrentSpace(spaces: Space[], value: Id | null): Space | undefined 
 }
 
 /**
- * 工作空间选择器（蓝图标注式）。
+ * 空间选择器：下拉切换当前空间。
  *
- * 视觉语言对齐「工业蓝图」：直角描边 chip + mono ``SPACE`` 标注前缀，
- * 与 Composer 的墨线风格统一；下拉项展示空间名 + base_url（mono 副行）。
+ * 空间列表为空或请求失败时自动禁用。
  */
 export function SpaceSelector({
   value,
@@ -65,7 +64,6 @@ export function SpaceSelector({
             "disabled:cursor-not-allowed disabled:opacity-40"
           )}
         >
-          {/* mono 标注前缀：SPACE */}
           <span className="hidden items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground sm:flex">
             <Briefcase className="h-3.5 w-3.5 text-primary" />
             Space

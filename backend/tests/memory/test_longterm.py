@@ -1,7 +1,6 @@
-"""LongTermMemory 单元测试。
+"""`LongTermMemory` 的增删改查、关键词召回与 `MEMORY.md` 镜像同步。
 
-覆盖：增删改查、软删过滤、空间隔离、关键词召回、MEMORY.md 镜像同步。
-使用临时 SQLite，不依赖全局数据库单例。
+使用临时 SQLite 与临时工作区，不依赖全局数据库单例。
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ SPACE_B = 1002
 
 @pytest.fixture()
 def session_scope(tmp_path):
+    """构造临时 SQLite 库，产出提交/回滚受控的 session 上下文管理器。"""
     engine = create_engine(f"sqlite:///{tmp_path / 'mem.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -45,6 +45,7 @@ def session_scope(tmp_path):
 
 @pytest.fixture()
 def memory(tmp_path, session_scope) -> LongTermMemory:
+    """基于临时工作区与临时库的记忆实例。"""
     return LongTermMemory(
         workspace=WorkspaceManager(root=tmp_path / "workspaces"),
         session_scope=session_scope,
@@ -52,6 +53,8 @@ def memory(tmp_path, session_scope) -> LongTermMemory:
 
 
 class TestAdd:
+    """新增与类别校验。"""
+
     def test_add_returns_entity(self, memory):
         entry = memory.add(SPACE_A, "登录用 v2", "v1 已废弃，token 2h 过期", category="decision", tags=["auth"])
 
@@ -68,6 +71,8 @@ class TestAdd:
 
 
 class TestList:
+    """列举：空间隔离、类别过滤、关键词匹配、排序与软删过滤。"""
+
     def test_lists_only_own_space(self, memory):
         memory.add(SPACE_A, "A 的记忆", "内容")
         memory.add(SPACE_B, "B 的记忆", "内容")
@@ -96,7 +101,7 @@ class TestList:
 
         ids = [m.id for m in memory.list(SPACE_A)]
 
-        # 时间戳精度可能相同，用插入顺序兜底：后写的应排在前面
+        # 时间戳精度可能相同，因此比较插入顺序
         assert ids.index(second.id) <= ids.index(first.id)
 
     def test_soft_deleted_excluded(self, memory):
@@ -107,6 +112,8 @@ class TestList:
 
 
 class TestRecall:
+    """关键词召回：标题与标签命中、空查询、未命中与条数上限。"""
+
     def test_matches_title(self, memory):
         memory.add(SPACE_A, "鉴权方式", "Bearer token")
         memory.add(SPACE_A, "分页约定", "page/page_size")
@@ -135,6 +142,8 @@ class TestRecall:
 
 
 class TestUpdate:
+    """更新字段与时间戳，未知 id 报错。"""
+
     def test_updates_fields(self, memory):
         entry = memory.add(SPACE_A, "旧标题", "旧内容")
 
@@ -157,6 +166,8 @@ class TestUpdate:
 
 
 class TestDelete:
+    """软删保留行并将状态置 0，硬删移除行。"""
+
     def test_soft_delete_keeps_row(self, memory, session_scope):
         entry = memory.add(SPACE_A, "t", "c")
 
@@ -180,6 +191,8 @@ class TestDelete:
 
 
 class TestMarkdownSync:
+    """`MEMORY.md` 镜像的内容分组、占位与路径。"""
+
     def test_creates_mirror_file(self, memory, tmp_path):
         entry = memory.add(SPACE_A, "登录用 v2", "v1 已废弃", category="decision", tags=["auth"])
         path = memory.sync_markdown(SPACE_A)

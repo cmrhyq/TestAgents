@@ -9,6 +9,44 @@
 
 ---
 
+## [2.0.0] - 2026-11-04 · 文档体系重整（`Implemented`）
+
+以当前代码为准做了一次文档审计：先判定哪些文档仍有存在价值，再逐篇对齐实现。
+判定标准是「这份文档是否还在描述当前系统」以及「它是否与其他文档重复」。
+
+### Removed
+
+- **`design/Refactor-Design.md`** —— v1.0 重构的目标态设计。重构已完成，其结论已并入
+  [Architecture.md](./design/Architecture.md)，保留会与实现文档形成第二套「应该是什么样」的说法。
+- **`design/Refactor-Plan.md`** —— P0–P5 实施计划。任务全部完成或已失效，引用的文件多数已删除。
+- **`design/Mode-System-Gap-Analysis.md`** —— v0.1 破损状态的差距扫描，文档自身已标注「已归档」，
+  四项缺失全部落地。
+- **`doc/images/`** —— 三份 `.puml` 源与三份 `.svg` 导出。这些图描述的是已删除的 `test_run` 等表，
+  环境内也没有可用的 PlantUML 渲染器，无法随文档一起更新。图改为在 Markdown 内嵌 Mermaid，
+  与正文同一次修改，不会再出现「图是旧的、文字是新的」。
+
+三份被删除的设计文档可在 `git log` 中查到原文（最后一次出现在提交 `2616de3` 之前）。
+
+### Changed
+
+- **Architecture.md v2.0** —— 五段式流水线（新增执行记录阶段）；模式步数上限 12/8 → 100/80；
+  工具与路由清单按代码重建；新增执行记录、成本账本、截断三档、已知限制六条；表数量 15 → 12。
+- **DatabaseDesign.md v2.0** —— 全量重写。删除 `test_run` / `test_case` / `test_result` /
+  `test_summary` / `report` 五章（已由 v3 / v4 迁移删除），新增 `agent_run` / `agent_tool_call`；
+  补「`space.base_url` 已移除」的说明；`llm_log` 补 `run_id` 与 `idx_llm_log_run`。
+- **ER.md v2.0** —— 按 12 张表重绘；新增「逻辑引用为什么不建外键」与四域拓扑；
+  补「一次对话会写入哪些表」的写入顺序表。
+- **SystemFlowchart.md v2.0** —— 补时序图、失败与中断对照表；`start` 事件载荷更正为
+  `skills` + `run_id`。
+- **Mode-System-Design.md v2.0** —— 改为实现优先的写法，删除与实际端点不符的示例代码；
+  补三项行为差异与四项缺口。
+- **Testing-Agent-Roadmap.md v2.0** —— 由「从零设计」改为「现状 + 缺口 + 阶段」，
+  逐层标注实现状态；原文档假设的 `engine/` 目标结构与五层计划与当前方向不符，已重写。
+- **UI-Design-Guidelines.md v2.0** —— 补测试报告、报告详情、执行详情三个页面骨架；
+  空间页签「测试运行」更正为「执行记录」。
+
+---
+
 ## [1.0.2] - 2026-10-20 · LLM 成本账本闭环（`Implemented`）
 
 修复「对话链路不产生 token 统计」：runner 走 `get_model()` 拿到裸 `BaseChatModel` 自行 `bind_tools().astream()`，
@@ -94,7 +132,7 @@
 
 ## [1.0.0] - 2026-10-20 · Agent 运行时重构（`Implemented`）
 
-按 [Refactor-Design.md](./design/Refactor-Design.md) / [Refactor-Plan.md](./design/Refactor-Plan.md) 完成 P0–P5 全量重构。核心变化是**删掉 LangGraph 工作流，换成手写 ReAct 循环**，并把「模式」从 prompt 建议变成工具白名单硬约束。
+按 `Refactor-Design.md` / `Refactor-Plan.md` 完成 P0–P5 全量重构（两份计划文档已在 2026-11-04 的文档重整中删除，需要时查 `git log`）。核心变化是**删掉 LangGraph 工作流，换成手写 ReAct 循环**，并把「模式」从 prompt 建议变成工具白名单硬约束。
 
 ### Added
 
@@ -168,7 +206,7 @@
 ### Proposed
 
 - **ADR-001**：引入 Project 工作空间模型（每个 Project = 一个 Codex 式 workspace）
-  - 文档：`adr/ADR_001_project-workspace-ask-plan-chroma.md`（文件已删除，内容由 [Refactor-Design.md](./design/Refactor-Design.md) 承接）
+  - 文档：`adr/ADR_001_project-workspace-ask-plan-chroma.md`（文件已删除；相关决策已并入 [Architecture.md](./design/Architecture.md) 与 [Mode-System-Design.md](./design/Mode-System-Design.md)）
   - 状态：`Proposed`
 - **对话模式 Ask / Plan / Run**：三种 `conversation_mode`，由 API 显式指定，不纳入意图 LLM 分类
   - Ask：RAG 问答，不执行 HTTP
@@ -190,7 +228,7 @@
 - `doc/` 目录结构重组：
   - 设计文档迁入 `doc/design/`（系统流程图、数据库设计、ER 图）
   - 架构决策记录迁入 `doc/adr/`
-  - 图示资源集中于 `doc/images/`
+  - 图示资源集中于 `doc/images/`（该目录已于 2026-11-04 移除，图改为文档内嵌 Mermaid）
 
 ### Open Questions
 
@@ -240,7 +278,7 @@
   - SQLite 3 + SQLAlchemy 2.0
   - 核心实体：Project、Environment、Endpoint、TestRun、TestCase、TestResult、Report
   - Project 作为接口与测试运行的顶层容器
-- **ER 拓扑图**（[design/ER.md](./design/ER.md) + `images/`）
+- **ER 拓扑图**（[design/ER.md](./design/ER.md)）
 - **流式对话设计**（安全审计 + API 测试问答）：
   - `POST /api/v1/chat/stream`
   - 前置 `security_audit_node` 拦截非测试内容与安全风险
