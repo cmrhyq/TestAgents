@@ -5,7 +5,7 @@ const APP_VERSION = "v0.0.1";
 
 const TITLES: Array<{ pattern: RegExp; title: string }> = [
   { pattern: /^\/dashboard$/, title: "仪表盘" },
-  { pattern: /^\/workflows\/chat/, title: "AI 对话" },
+  { pattern: /^\/spaces\/[^/]+\/chat$/, title: "AI 对话" },
   { pattern: /^\/reports\/[^/]+$/, title: "报告详情" },
   { pattern: /^\/reports$/, title: "测试报告" },
   { pattern: /^\/runs\/[^/]+$/, title: "测试运行" },

@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   FileText,
   Folder,
-  MessageSquare,
   PanelLeftClose,
   Sparkles,
 } from "lucide-react";
@@ -99,20 +98,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             icon={<LayoutDashboard className="h-4 w-4" />}
             label="仪表盘"
           />
-          <NavItem
-            to="/chat"
-            index="02"
-            icon={<MessageSquare className="h-4 w-4" />}
-            label="测试对话"
-          />
-          <NavItem to="/spaces" index="03" icon={<Folder className="h-4 w-4" />} label="测试空间" />
+          <NavItem to="/spaces" index="02" icon={<Folder className="h-4 w-4" />} label="测试空间" />
           <NavItem
             to="/skills"
-            index="04"
+            index="03"
             icon={<Sparkles className="h-4 w-4" />}
             label="技能管理"
           />
-          <NavItem to="/reports" index="05" icon={<FileText className="h-4 w-4" />} label="测试报告" />
+          <NavItem to="/reports" index="04" icon={<FileText className="h-4 w-4" />} label="测试报告" />
         </nav>
 
         <div className="mt-auto flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border">

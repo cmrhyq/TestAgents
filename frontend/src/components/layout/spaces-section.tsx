@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, Folder, PlusCircle, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useSpaces } from "@/hooks/use-spaces";
 import {
@@ -93,6 +93,7 @@ interface SpaceAccordionItemProps {
 
 function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, isLoading } = useConversations({
     space_id: spaceId,
     status: 1,
@@ -106,12 +107,20 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
 
   const conversations = data?.items ?? [];
 
+  // 当前路由处于本空间的对话页时，从 URL 解析出正在查看的会话，用于高亮与删除跳转判断
+  const chatMatch = location.pathname.match(/^\/spaces\/([^/]+)\/chat$/);
+  const isSpaceChat = chatMatch?.[1] === String(spaceId);
+  const activeConversationId = isSpaceChat
+    ? new URLSearchParams(location.search).get("conversation_id")
+    : null;
+  const isNewChatState = isSpaceChat && !activeConversationId;
+
   const handleNewConversation = () => {
-    navigate(`/workflows/chat?space_id=${spaceId}`);
+    navigate(`/spaces/${spaceId}/chat`);
   };
 
   const handleOpen = (id: string | number) => {
-    navigate(`/workflows/chat?conversation_id=${id}`);
+    navigate(`/spaces/${spaceId}/chat?conversation_id=${id}`);
   };
 
   return (
@@ -133,7 +142,12 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
             <button
               type="button"
               aria-label="新建对话"
-              className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+              className={cn(
+                "rounded p-0.5 transition-colors",
+                isNewChatState
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:bg-background hover:text-foreground"
+              )}
               onClick={(e) => {
                 e.stopPropagation();
                 handleNewConversation();
@@ -157,7 +171,14 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
           <ul className="space-y-0.5 pl-6">
             {conversations.map((item) => (
               <li key={item.id} className="group/item">
-                <div className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
+                <div
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md border-l-2 px-2 py-1 text-sm transition-colors",
+                    String(item.id) === activeConversationId
+                      ? "border-primary bg-surface-primary font-medium text-foreground"
+                      : "border-transparent text-foreground/80 hover:bg-muted hover:text-foreground"
+                  )}
+                >
                   <button
                     type="button"
                     className="min-w-0 flex-1 truncate text-left"
@@ -218,7 +239,13 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
         }}
         onConfirm={() => {
           if (deleteTarget) {
-            deleteConversation.mutate(deleteTarget.id);
+            const wasActive = String(deleteTarget.id) === activeConversationId;
+            deleteConversation.mutate(deleteTarget.id, {
+              // 删除的是正在查看的会话时，主动跳回该空间的新建态，避免停在失效会话上
+              onSettled: () => {
+                if (wasActive) navigate(`/spaces/${spaceId}/chat`);
+              },
+            });
             setDeleteTarget(null);
           }
         }}

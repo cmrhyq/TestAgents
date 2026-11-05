@@ -48,7 +48,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
         description="在对话页选择本空间后开始第一次测试对话。"
         action={
           <Button asChild size="sm">
-            <Link to={`/chat?space_id=${spaceId}`}>开始对话</Link>
+            <Link to={`/spaces/${spaceId}/chat`}>开始对话</Link>
           </Button>
         }
       />
@@ -60,7 +60,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 个会话</p>
         <Button asChild size="sm">
-          <Link to={`/chat?space_id=${spaceId}`}>新建对话</Link>
+          <Link to={`/spaces/${spaceId}/chat`}>新建对话</Link>
         </Button>
       </div>
 
@@ -77,7 +77,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
               <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
 
               <Link
-                to={`/chat?space_id=${spaceId}&conversation_id=${conversation.id}`}
+                to={`/spaces/${spaceId}/chat?conversation_id=${conversation.id}`}
                 className="min-w-0 flex-1 no-underline"
               >
                 <span className="block truncate text-sm text-foreground">

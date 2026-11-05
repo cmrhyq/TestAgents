@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Folder, Globe, CheckCircle, MessageSquare, Activity } from "lucide-react";
+import { Folder, Globe, CheckCircle, Activity } from "lucide-react";
 
 import { useSpaces } from "@/hooks/use-spaces";
 import { useAgentRuns } from "@/hooks/use-agent-runs";
@@ -71,12 +71,6 @@ export default function DashboardPage() {
                   <Link to="/spaces">
                     <Folder className="h-4 w-4" />
                     空间
-                  </Link>
-                </Button>
-                <Button asChild variant="outline">
-                  <Link to="/workflows/chat">
-                    <MessageSquare className="h-4 w-4" />
-                    新建对话
                   </Link>
                 </Button>
               </div>

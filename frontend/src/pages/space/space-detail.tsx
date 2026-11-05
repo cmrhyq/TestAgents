@@ -125,7 +125,7 @@ export default function SpaceDetailPage() {
             </div>
 
             <Button asChild size="sm">
-              <Link to={`/chat?space_id=${space.id}`}>
+              <Link to={`/spaces/${space.id}/chat`}>
                 <MessageSquare className="mr-2 h-3.5 w-3.5" />
                 开始对话
               </Link>
