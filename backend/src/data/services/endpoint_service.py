@@ -105,7 +105,7 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
         if "path" in fields or "method" in fields:
             current = self.get_or_raise(endpoint_id, "接口不存在")
             new_path = fields.get("path", current.path)
-            new_method = str(fields.get("method", current.method)).upper()
+            new_method = self._normalize_method(fields.get("method", current.method))
             duplicates = self.repo.find_by_identity(current.space_id, new_path, new_method)
             if any(dup.id != endpoint_id for dup in duplicates):
                 raise ConflictError(f"接口已存在: {new_method} {new_path}")
@@ -113,8 +113,23 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
             if isinstance(fields.get(field), (list, dict)):
                 fields[field] = json.dumps(fields[field], ensure_ascii=False)
         if fields.get("method"):
-            fields["method"] = str(fields["method"]).upper()
+            fields["method"] = self._normalize_method(fields["method"])
         return self.update(endpoint_id, **fields)
+
+    @staticmethod
+    def _normalize_method(value) -> str:
+        """把 HTTP 方法统一为入库用的大写字符串。
+
+        ``fields`` 中的 method 可能来自枚举 ``HttpMethod``，直接 ``str()`` 会得到
+        ``"HttpMethod.GET"`` 这类非法值，需先取 ``value``。
+
+        Args:
+            value: HTTP 方法，字符串或 ``HttpMethod`` 枚举
+
+        Returns:
+            大写的 HTTP 方法字符串
+        """
+        return str(getattr(value, "value", value)).upper()
 
     def get_active_by_ids(self, endpoint_ids: list[int]) -> list[Endpoint]:
         """按主键列表取启用接口。

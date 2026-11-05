@@ -75,14 +75,28 @@ class EndpointUpdate(BaseModel):
     tags: list[str] | None = Field(default=None, description="标签列表")
     summary: str | None = Field(default=None, description="接口摘要")
     description: str | None = Field(default=None, description="接口描述")
-    params: dict | None = Field(default=None, description="请求参数定义")
-    headers: dict | None = Field(default=None, description="请求头定义")
-    body: dict | None = Field(default=None, description="请求体定义")
-    responses: list | None = Field(default=None, description="响应定义")
-    security: list | None = Field(default=None, description="接口级认证方案")
+    # 结构类字段按 OpenAPI 实际形态放宽：参数/请求头为数组，请求体可为对象或数组
+    params: dict | list | None = Field(default=None, description="请求参数定义，JSON 对象或数组")
+    headers: dict | list | None = Field(default=None, description="请求头定义，JSON 对象或数组")
+    body: dict | list | None = Field(default=None, description="请求体定义，JSON 对象或数组")
+    responses: dict | list | None = Field(default=None, description="响应定义，JSON 对象或数组")
+    security: dict | list | None = Field(default=None, description="接口级认证方案，JSON 对象或数组")
     content_type: str | None = Field(default=None, description="请求体 Content-Type")
     deprecated: int | None = Field(default=None, description="是否已废弃：0-正常，1-已废弃")
     status: int | None = Field(default=None, description="状态：1-启用，2-禁用，3-已删除，4-已废弃")
+
+    @field_validator("method", mode="before")
+    @classmethod
+    def upper_method(cls, v):
+        """把 HTTP 方法先转大写再做枚举校验，兼容 ``post`` 这类小写写法。
+
+        Args:
+            v: 方法原值
+
+        Returns:
+            大写后的字符串，非字符串原样返回
+        """
+        return v.upper() if isinstance(v, str) else v
 
     @field_validator("tags", "params", "headers", "body", "responses", "security", mode="before")
     @classmethod
@@ -93,9 +107,17 @@ class EndpointUpdate(BaseModel):
             v: 字段原值，可能是 JSON 字符串或已解析对象
 
         Returns:
-            解析后的对象；无法解析时为 None，非字符串原样返回
+            解析后的对象；空字符串视为未填返回 None，非字符串原样返回
+
+        Raises:
+            ValueError: 字符串不是合法 JSON，交由 FastAPI 返回 422 并提示原因
         """
-        return parse_json_field(v)
+        if isinstance(v, str) and not v.strip():
+            return None
+        parsed = parse_json_field(v)
+        if parsed is None and isinstance(v, str):
+            raise ValueError("必须是合法 JSON 字符串")
+        return parsed
 
 
 # ==================== 响应 Schema ====================
