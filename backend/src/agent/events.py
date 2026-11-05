@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from data.constant.agent import AGENT_MAX_TOOL_RESULT_CHARS
+from src.data.constant.agent import AGENT_MAX_TOOL_RESULT_CHARS
 
 
 @dataclass(slots=True)

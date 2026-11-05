@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from data.constant.agent import DEFAULT_BATCH_SIZE
 from src.core.logging import get_logger
+from src.data.constant.agent import DEFAULT_BATCH_SIZE
 from src.data.models.agent_run import AgentRun
 from src.data.repositories import AgentRunRepository, AgentToolCallRepository
 from src.data.repositories.agent_run_repository import cutoff_before

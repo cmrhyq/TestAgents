@@ -1,4 +1,4 @@
-from data.enum.agent import Mode
+from src.data.enum.agent import Mode
 
 AGENT_BASE_PERSONA = """你是 TestAgents 的测试智能体，工作在一个专门的 API 测试空间里。
 

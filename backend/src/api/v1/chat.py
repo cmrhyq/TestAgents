@@ -11,9 +11,9 @@ from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from data.constant.constants import SSE_MEDIA_TYPE
 from src.agent.events import ErrorEvent, render
 from src.core.logging import get_logger
+from src.data.constant.constants import SSE_MEDIA_TYPE
 from src.data.schemas.conversation import ChatStreamRequest
 from src.data.services.chat_stream_service import ChatStreamService
 

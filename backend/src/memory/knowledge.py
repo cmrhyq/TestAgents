@@ -18,8 +18,8 @@ from typing import Any, Protocol
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from data.constant.memory import TEXT_SUFFIXES, MAX_DOCUMENT_BYTES, CHUNK_SIZE, CHUNK_OVERLAP
 from src.core.logging import get_logger
+from src.data.constant.memory import CHUNK_OVERLAP, CHUNK_SIZE, MAX_DOCUMENT_BYTES, TEXT_SUFFIXES
 from src.data.models.base import local_now
 from src.data.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from src.utils.id import next_id

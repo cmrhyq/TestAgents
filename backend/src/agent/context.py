@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
-from data.constant.agent import AGENT_MAX_PROMPT_CHARS, AGENT_MAX_MEMORY_CHARS
 from src.agent.modes import ModePolicy
+from src.agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
+from src.data.constant.agent import AGENT_MAX_MEMORY_CHARS, AGENT_MAX_PROMPT_CHARS
 
 
 @dataclass(slots=True)

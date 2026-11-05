@@ -13,12 +13,13 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from data.constant.agent import MAX_HISTORY_MESSAGES, AGENTS_FILE
-from src.agent.events import FinalEvent, ErrorEvent, render
+from src.agent.events import ErrorEvent, FinalEvent, render
 from src.agent.modes import normalize_mode
-from src.agent.runner import RunRequest, run as run_agent
+from src.agent.runner import RunRequest
+from src.agent.runner import run as run_agent
 from src.core.database.database_manager import get_db_manager
 from src.core.logging import get_logger
+from src.data.constant.agent import AGENTS_FILE, MAX_HISTORY_MESSAGES
 from src.data.models.space import Space
 from src.data.recording import AgentRunRecorder
 from src.data.schemas.conversation import ConversationCreate

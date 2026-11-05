@@ -144,7 +144,7 @@ known-first-party = ["src"]          # 项目自身模块，排序时归入第�
 # ----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]                # 测试文件搜索路径
-pythonpath = [".", "src"]            # 项目根目录与 src 均加入 sys.path（代码同时使用 src. 前缀与裸 data. 导入）
+pythonpath = ["."]                  # 项目根目录与 src 均加入 sys.path（代码同时使用 src. 前缀与裸 data. 导入）
 asyncio_mode = "auto"               # 自动识别异步测试函数
 addopts = [
     "-v",                            # 详细输出
