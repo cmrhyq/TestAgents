@@ -218,13 +218,24 @@ def _do_request(
         except ValueError:
             resp_body = response.text
 
+        response_headers = {k: v for k, v in response.headers.items() if k.lower() != "set-cookie"}
+
+        logger.info(f"向{url}发送请求，"
+                    f"\n请求方法：{method}，"
+                    f"\n请求头：{headers}，"
+                    f"\n请求参数：{params}，"
+                    f"\n请求体：{body},"
+                    f"\n超时时间：{timeout},"
+                    f"\n响应头：{response_headers}"
+                    f"\n响应体：{resp_body}")
+
         # 不做长度截断：截断由下游按用途分层（给模型 8000 字符、落库 2MB），
         # 工具层再截一次会让完整留痕拿不到全量；set-cookie 必须剔除，它是凭证。
         return json.dumps(
             {
                 "status_code": response.status_code,
                 "response_time_ms": round(response.elapsed.total_seconds() * 1000, 2),
-                "headers": {k: v for k, v in response.headers.items() if k.lower() != "set-cookie"},
+                "headers": response_headers,
                 "body": resp_body,
                 "env": environment.name if environment is not None else "",
                 "url": url,
