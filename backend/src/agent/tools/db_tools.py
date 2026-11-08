@@ -92,14 +92,15 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
             "name": endpoint.name,
             "path": endpoint.path,
             "method": endpoint.method,
+            "tags": as_object(endpoint.tags),
             "summary": endpoint.summary or "",
             "description": endpoint.description or "",
-            "content_type": endpoint.content_type,
-            "tags": as_object(endpoint.tags),
             "params": as_object(endpoint.params),
+            "headers": as_object(endpoint.headers),
             "body": as_object(endpoint.body),
             "responses": _build_response_digest(endpoint.responses),
             "security": as_object(endpoint.security),
+            "content_type": endpoint.content_type,
             "deprecated": bool(endpoint.deprecated),
         }
         return json.dumps(detail, ensure_ascii=False)
