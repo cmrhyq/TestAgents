@@ -28,22 +28,34 @@ export function buildEndpointColumns({
 }: EndpointRowHandlers): Column<Endpoint>[] {
   return [
     {
+      key: "name",
+      header: "名称",
+      render: (_, row) => <span className="font-medium text-foreground">{row.name}</span>,
+    },
+    {
+      key: "summary",
+      header: "摘要",
+      render: (_, row) => <span className="text-xs text-foreground">{row.summary}</span>,
+    },
+    {
+      key: "path",
+      header: "路径",
+      render: (_, row) => (
+        <span className="text-xs text-muted-foreground">{row.path}</span>
+      ),
+    },
+    {
       key: "method",
       header: "方法",
       className: "w-20",
       render: (_, row) => <HttpMethodBadge method={row.method} />,
     },
     {
-      key: "path",
-      header: "路径",
+      key: "tags",
+      header: "标签",
       render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.path}</span>
+        <span className="text-xs text-muted-foreground">{row.tags ? "" : row.tags}</span>
       ),
-    },
-    {
-      key: "name",
-      header: "名称",
-      render: (_, row) => <span className="font-medium text-foreground">{row.name}</span>,
     },
     {
       key: "status",
