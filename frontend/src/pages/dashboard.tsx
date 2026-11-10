@@ -1,11 +1,9 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
 import { Folder, Globe, CheckCircle, Activity } from "lucide-react";
 
 import { useSpaces } from "@/hooks/use-spaces";
 import { useAgentRuns } from "@/hooks/use-agent-runs";
 import { useEndpoints } from "@/hooks/use-endpoints";
-import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { cn } from "@/lib/utils";
 
@@ -65,16 +63,16 @@ export default function DashboardPage() {
             title="仪表盘"
             annotation="FIG.01 — OVERVIEW"
             description="API 测试空间概览。"
-            actions={
-              <div className="flex items-center gap-2">
-                <Button asChild variant="outline">
-                  <Link to="/spaces">
-                    <Folder className="h-4 w-4" />
-                    空间
-                  </Link>
-                </Button>
-              </div>
-            }
+            // actions={
+            //   <div className="flex items-center gap-2">
+            //     <Button asChild variant="outline">
+            //       <Link to="/spaces">
+            //         <Folder className="h-4 w-4" />
+            //         空间
+            //       </Link>
+            //     </Button>
+            //   </div>
+            // }
           />
         </div>
       </div>

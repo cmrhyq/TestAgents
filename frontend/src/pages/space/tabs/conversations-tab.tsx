@@ -2,11 +2,10 @@ import { Link } from "react-router-dom";
 import { MessageSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { EmptyState } from "@/components/shared/empty-state.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { useDeleteConversation, useSpaceConversations } from "@/hooks/use-conversations.ts";
-import { MODE_LABELS, type ConversationMode } from "@/lib/types";
+import { AgentModeBadge } from "@/components/shared/agent-mode-badge.tsx";
 
 /**
  * 会话 tab：空间下开过的全部对话。
@@ -66,9 +65,6 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
 
       <ul className="divide-y divide-border rounded-[3px] border border-border">
         {conversations.map((conversation) => {
-          const mode = (MODE_LABELS[conversation.mode as ConversationMode] ??
-            conversation.mode) as string;
-
           return (
             <li
               key={conversation.id}
@@ -90,9 +86,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
                 </span>
               </Link>
 
-              <Badge variant="outline" className="shrink-0 text-[10px]">
-                {mode}
-              </Badge>
+              <AgentModeBadge mode={conversation.mode}></AgentModeBadge>
 
               {conversation.skill_names.length > 0 && (
                 <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/70 sm:block">

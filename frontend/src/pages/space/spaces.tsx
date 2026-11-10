@@ -54,7 +54,12 @@ export default function SpacesPage() {
     setPage(1);
   }, [debouncedKeyword, status]);
 
-  const { data: spacesData, isLoading, isError, refetch } = useSpaces({
+  const {
+    data: spacesData,
+    isLoading,
+    isError,
+    refetch,
+  } = useSpaces({
     keyword: debouncedKeyword || undefined,
     status,
     page,
@@ -138,17 +143,17 @@ export default function SpacesPage() {
         title="测试空间"
         annotation="FIG.02 — SPACES"
         description="管理 API 测试空间。"
-        actions={
-          <Button
-            onClick={() => {
-              setEditingSpace(null);
-              setFormOpen(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            创建空间
-          </Button>
-        }
+        // actions={
+        //   <Button
+        //     onClick={() => {
+        //       setEditingSpace(null);
+        //       setFormOpen(true);
+        //     }}
+        //   >
+        //     <Plus className="mr-2 h-4 w-4" />
+        //     创建空间
+        //   </Button>
+        // }
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -185,6 +190,18 @@ export default function SpacesPage() {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            onClick={() => {
+              setEditingSpace(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            创建空间
+          </Button>
+        </div>
       </div>
 
       <DataTable
@@ -202,11 +219,7 @@ export default function SpacesPage() {
         }}
       />
 
-      <SpaceFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        space={editingSpace}
-      />
+      <SpaceFormDialog open={formOpen} onOpenChange={setFormOpen} space={editingSpace} />
 
       <ConfirmDeleteDialog
         open={deleteTarget !== null}

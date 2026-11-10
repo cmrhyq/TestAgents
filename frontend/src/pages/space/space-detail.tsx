@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { MessageSquare } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
 import { useEndpoints, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
@@ -123,13 +122,6 @@ export default function SpaceDetailPage() {
                 <p className="mt-2 text-sm text-muted-foreground">{space.description}</p>
               )}
             </div>
-
-            <Button asChild size="sm">
-              <Link to={`/spaces/${space.id}/chat`}>
-                <MessageSquare className="mr-2 h-3.5 w-3.5" />
-                开始对话
-              </Link>
-            </Button>
           </div>
         </CardContent>
       </Card>
