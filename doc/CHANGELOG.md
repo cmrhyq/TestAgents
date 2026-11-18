@@ -9,7 +9,32 @@
 
 ---
 
-## [2.0.0] - 2026-11-04 · 文档体系重整（`Implemented`）
+## [2.1.0] - 2026-11-18 · 接口标签（`Implemented`）
+
+把 `endpoint.tags` 从一个「库里躺着、没人用」的字段变成可用维度。设计上做了三个决定。
+
+**一、不建标签字典表。** 标签随接口定义一起导入导出，没有独立生命周期；
+筛选走 `LIKE` 已足够（原理见
+[DatabaseDesign.md §4.1](./design/DatabaseDesign.md)）。代价是标签不能单独重命名。
+
+**二、API 上一律是字符串数组。** 库内存 JSON 字符串，进出各转换一次。
+此前创建接口要传 JSON 字符串、更新接口却传数组，同一字段两种形态，这是必须修掉的。
+
+**三、`LIKE` 用引号做边界，替代 `json_each`。** 实测项目的 SQLite 未编译 JSON1
+（`json_each` 报 `no such function`），无法在 SQL 层展开数组。`%"用户"%` 不命中
+`"用户管理"`，语义上是精确匹配；代价是标签禁止双引号，写入时直接拒绝。
+
+### Added
+
+- [UI-Design-Guidelines.md §7.7](./design/UI-Design-Guidelines.md)：标签的展示、编辑、筛选三套规则
+- [DatabaseDesign.md §4.1](./design/DatabaseDesign.md)：`tags` 的存取与匹配口径
+
+### Changed
+
+- 标签聚合在 Python 侧完成（无 JSON1 就做不了 `GROUP BY`），按空间隔离、排除已删除接口、
+  按接口数降序
+
+## [2.0.0] - 2026-11-04 · 文档体系重整（`Implemented`）（`Implemented`）
 
 以当前代码为准做了一次文档审计：先判定哪些文档仍有存在价值，再逐篇对齐实现。
 判定标准是「这份文档是否还在描述当前系统」以及「它是否与其他文档重复」。

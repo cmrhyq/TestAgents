@@ -282,7 +282,8 @@ Import a zip via `POST /api/v1/skills/import` (≤20MB, path escape rejected).
 | Module | Path Prefix | Function |
 |---|---|---|
 | Spaces | `/api/v1/spaces` | CRUD, workspace tree, `AGENTS.md`, memories, documents |
-| Endpoints | `/api/v1/endpoints` | Endpoint definition CRUD |
+| Endpoints | `/api/v1/endpoints` | Endpoint CRUD; `GET /tags?space_id=` returns tag facets |
+| Endpoint filter | `GET /api/v1/endpoints/` | `?tags=用户,鉴权&tags_mode=any\|all` filters by label |
 | Environments | `/api/v1/environments` | Environment CRUD (incl. `is_production`) |
 | Test Runs | `/api/v1/agent/runs` | Execution history, tool-call traces, cleanup |
 | Reports | `/api/v1/reports` | Per-run HTTP report aggregated from `send_request` calls |

@@ -283,7 +283,8 @@ allowed_tools: [get_space_endpoints, read_file]
 | 模块 | 前缀 | 功能 |
 |---|---|---|
 | 空间 | `/api/v1/spaces` | CRUD、目录树、`AGENTS.md`、记忆、文档 |
-| 接口 | `/api/v1/endpoints` | 接口定义 CRUD |
+| 接口 | `/api/v1/endpoints` | 接口定义 CRUD；`GET /tags?space_id=` 返回标签聚合 |
+| 接口筛选 | `GET /api/v1/endpoints/` | `?tags=用户,鉴权&tags_mode=any\|all` 按标签过滤 |
 | 环境 | `/api/v1/environments` | 环境 CRUD（含 `is_production`） |
 | 测试运行 | `/api/v1/agent/runs` | 执行历史、工具调用留痕、清理 |
 | 报告 | `/api/v1/reports` | 按 run 聚合 `send_request` 的接口调用报告 |

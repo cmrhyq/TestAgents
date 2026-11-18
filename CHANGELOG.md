@@ -3,6 +3,31 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-11-18
+
+### Added
+
+- 接口标签（tags）全链路：
+  - 列表展示（超过 2 个折叠为 `+N`，点击即按该标签筛选）
+  - 新增与修改（表单标签输入，支持回车添加、本空间已有标签联想、即时校验）
+  - 筛选（多选勾选，支持「命中任一」与「需同时满足全部标签」两种模式）
+  - `GET /api/v1/endpoints/tags?space_id=`：按空间返回标签聚合（标签名 + 接口数）
+- `GET /api/v1/endpoints/` 新增 `tags` / `tags_mode` / `status` 查询参数；关键字搜索覆盖标签
+- Agent 的 `get_space_endpoints` 新增 `tag` 参数，可按标签取接口子集；system prompt 注入标签分布
+
+### Changed
+
+- **`tags` 的 API 形态由 JSON 字符串改为字符串数组**，库内仍是 JSON 数组字符串，转换在
+  schema 层完成。此前 `EndpointCreate.tags` 是 `str`、`EndpointUpdate.tags` 是 `list[str]`，
+  同一字段两种类型，前端无法用同一份逻辑处理
+- 批量创建与单条创建统一走同一套序列化，`method` 在批量路径也统一转大写
+  （此前批量路径要求调用方预先序列化，改类型后会直接把 list 写进 Text 列）
+
+### Fixed
+
+- 接口列表的标签列恒为空：渲染时三元条件写反（`row.tags ? "" : row.tags`）
+- 删除从未被路由使用的 `EndpointQuery`：它的 `tags` 字段与实际查询参数长期不一致
+
 ## [1.3.0] - 2026-11-04
 
 ### Changed

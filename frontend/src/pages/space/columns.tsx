@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { HttpMethodBadge } from "@/components/shared/http-method-badge.tsx";
+import { EndpointTagList } from "@/components/shared/endpoint-tag-list.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import type { Column } from "@/components/shared/data-table.tsx";
 import type { AgentRun, Endpoint } from "@/lib/types.ts";
@@ -19,12 +20,15 @@ import { formatDate, formatDurationMs } from "@/lib/format";
 export interface EndpointRowHandlers {
   onEdit(endpoint: Endpoint): void;
   onDelete(endpoint: Endpoint): void;
+  /** 点击标签时按该标签筛选列表；不传则标签只读 */
+  onTagClick?(tag: string): void;
 }
 
 /** 构建接口表格的列定义。 */
 export function buildEndpointColumns({
   onEdit,
   onDelete,
+  onTagClick,
 }: EndpointRowHandlers): Column<Endpoint>[] {
   return [
     {
@@ -53,9 +57,9 @@ export function buildEndpointColumns({
     {
       key: "tags",
       header: "标签",
-      render: (_, row) => (
-        <span className="text-xs text-muted-foreground">{row.tags ? "" : row.tags}</span>
-      ),
+      // 宽度按「两个 84px 标签 + 折叠角标」预算，避免 +N 被裁掉
+      className: "w-[210px]",
+      render: (_, row) => <EndpointTagList tags={row.tags} onSelect={onTagClick} />,
     },
     {
       key: "status",

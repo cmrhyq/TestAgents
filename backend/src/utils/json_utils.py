@@ -165,3 +165,45 @@ def as_object(value: Any) -> Any:
         return value
     parsed = safe_json_loads(value, None)
     return parsed if parsed is not None else value
+
+
+def as_str_list(value: Any) -> list[str]:
+    """把多种形态的取值归一化为字符串列表。
+
+    用于标签这类「库内存 JSON 数组字符串、对外是数组、历史数据可能写成逗号分隔」
+    的字段。刻意不走 ``robust_json_loads``：``json_repair`` 会把 ``"a,b"`` 修成
+    奇怪的结构，而这里需要的是明确的「JSON 优先、失败退化为逗号切分」语义。
+
+    接受 ``None``、JSON 数组字符串（``'["a","b"]'``）、逗号分隔字符串（``"a,b"``）
+    以及 ``list`` / ``tuple`` / ``set``。元素统一转字符串并去首尾空白，空值被丢弃。
+
+    Args:
+        value: 原始取值
+
+    Returns:
+        字符串列表；``None`` 或无法识别时返回空列表
+    """
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return [part.strip() for part in text.split(",") if part.strip()]
+        return as_str_list(parsed)
+
+    if isinstance(value, (list, tuple, set)):
+        result = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                result.append(text)
+        return result
+
+    return []

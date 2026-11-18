@@ -35,8 +35,8 @@ from src.data.schemas.endpoint import (
     EndpointCreate,
     EndpointDetail,
     EndpointListResponse,
-    EndpointQuery,
     EndpointResponse,
+    EndpointTagFacet,
     EndpointUpdate,
 )
 from src.data.schemas.environment import (
@@ -56,6 +56,12 @@ from src.data.schemas.message import (
     MessageListResponse,
     MessageResponse,
 )
+from src.data.schemas.report import (
+    ReportDetailResponse,
+    ReportListResponse,
+    ReportResponse,
+    ReportStat,
+)
 from src.data.schemas.space import (
     SpaceBase,
     SpaceBatchDelete,
@@ -66,12 +72,6 @@ from src.data.schemas.space import (
     SpaceQuery,
     SpaceResponse,
     SpaceUpdate,
-)
-from src.data.schemas.report import (
-    ReportDetailResponse,
-    ReportListResponse,
-    ReportResponse,
-    ReportStat,
 )
 
 __all__ = [
@@ -93,7 +93,7 @@ __all__ = [
     "EndpointResponse",
     "EndpointDetail",
     "EndpointListResponse",
-    "EndpointQuery",
+    "EndpointTagFacet",
     "EndpointBatchDelete",
     "EndpointBatchUpdateStatus",
     "EnvironmentBase",

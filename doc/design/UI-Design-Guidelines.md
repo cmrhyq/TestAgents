@@ -297,16 +297,47 @@ sans-serif
 - HTTP 方法：`HttpMethodBadge` — 描边印章式，色来自 `--color-method-*`。
 - 空间启用状态：shadcn `Badge`（`default` 启用 / `secondary` 未启用）。
 
-### 7.7 Tabs
+### 7.7 接口标签（`shared/endpoint-tag-list.tsx`、`endpoint/tag-input.tsx`）
+
+标签是接口的分类维度，展示与编辑分别有两套组件，规则如下。
+
+**只读展示**（表格列）
+
+- 方角描边小签：`rounded-[2px] border border-border bg-muted/40 px-1.5 py-0.5`，
+  `font-mono text-[11px]`，与 `HttpMethodBadge` 同族但更轻，避免和状态徽章抢注意力。
+- 默认最多显示 2 个，其余折叠为 `+N`，悬停显示完整列表；空数组显示 `—`，
+  不要留空白单元格（空白会被误读为加载失败）。
+- 传入 `onSelect` 时变可点击，点击即把该标签加入筛选；hover 变为 `border-accent/60 text-accent`。
+
+**编辑**（表单）
+
+- 单行输入框 + 已选标签内联排列，回车或逗号提交，空输入退格删除最后一个，
+  失焦自动提交草稿——避免用户输完直接点「保存」时丢掉未确认的标签。
+- 输入时在下方列出本空间已有标签作联想，回填的候选项用虚线边框区分「建议」与「已选」。
+- 校验即时反馈：超长、超数量、含双引号、重复都在输入框下方给出 `text-xs text-destructive`；
+  服务端仍会兜底校验，前端提示只是把一次往返提前。
+- 上限与后端 `src/data/constant/endpoint.py` 保持一致（单标签 32 字符 / 单接口 10 个），
+  修改时必须同步两侧，否则会出现「前端放行、后端 422」。
+
+**筛选**
+
+- 触发按钮为描边 `Button`，选中数量以 `bg-primary` 小方块悬挂在文案右侧。
+- 多选下拉用 `DropdownMenuCheckboxItem` 并在 `onSelect` 里 `preventDefault()`，
+  保持菜单展开以便连续勾选。
+- 已选条件在列表上方以可删除的 chip 呈现（`border-accent/40 bg-accent/5 text-accent`），
+  末尾提供「清除全部」；仅当选中 2 个及以上时才出现「需同时满足全部标签」开关，
+  单个标签时该开关没有意义。
+
+### 7.8 Tabs
 
 下划线式：`border-b border-border` 列表 + 激活项 `border-b-2 border-primary` + mono 大写宽字距标签。
 
-### 7.8 链接
+### 7.9 链接
 
 - 全局 `<a>` 默认 `color: accent`；表格内链接 `font-medium text-accent hover:text-accent/80`。
 - 导航使用 `NavLink`，不依赖全局下划线。
 
-### 7.9 模式选择器（`chat/mode-selector.tsx`）
+### 7.10 模式选择器（`chat/mode-selector.tsx`）
 
 分段控件，不是下拉——三个模式要**同时可见可比**。选中态工程蓝底白字，容器 `rounded-[3px]` + 1px 边框 + `p-0.5`。
 
@@ -319,13 +350,13 @@ sans-serif
 > **文案纪律**：`ask` / `plan` 的「不会执行」是后端工具白名单保证的事实，不是营销措辞。
 > 任何新模式上线，`hint` 必须描述**该模式的真实权限边界**，不允许写「尽量不执行」这类模糊承诺。
 
-### 7.10 技能选择器（`chat/skill-selector.tsx`）
+### 7.11 技能选择器（`chat/skill-selector.tsx`）
 
 `DropdownMenu` + 多选，触发器为胶囊按钮（`Sparkles` 图标 + 已选数量 + `ChevronDown`），
 面板宽 `w-72` + `shadow-popover`。每项：`font-mono` 技能名 + 一行截断描述 + 选中 `Check`。
 未选中任何技能时显示「未选择技能（使用内置能力）」，**不要**默认勾选——默认勾选会让用户失去「到底用了什么」的判断。
 
-### 7.11 工具调用卡片（`chat/tool-call-card.tsx`）
+### 7.12 工具调用卡片（`chat/tool-call-card.tsx`）
 
 Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见：
 
@@ -349,13 +380,13 @@ Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见�
 - 参数与结果都用 `<pre max-h-40 overflow-auto font-mono text-[11px]>`，长内容靠滚动而非换行撑高页面。
 - 一轮多个调用时，上方加一条 `TOOL_TRACE · {n}` 的 `annotation` 汇总条。
 
-### 7.12 上下文栏与空间选择器
+### 7.13 上下文栏与空间选择器
 
 对话页顶部固定一行 `border-b border-border px-4 py-2`，左侧 `SpaceSelector`，右侧 `annotation`
 （`Context · Space`）——等宽大写仅作装饰性标注，不承载信息。未选空间时整页替换为空态，
 **不要**让用户先输入再提示「请选择空间」。
 
-### 7.13 页面骨架模板
+### 7.14 页面骨架模板
 
 | 页面 | 骨架 |
 |:--|:--|
@@ -421,7 +452,7 @@ Agent 的执行轨迹必须**默认折叠但可展开**，标题行永远可见�
 - [ ] 链接与状态色使用语义令牌（`accent` / `primary` / `destructive` / `success`）
 - [ ] 新文本沿用 mono 大写标注规范（`.annotation`）
 - [ ] Agent 执行过程可见：工具调用必须有卡片，不允许「只显示最终答案」
-- [ ] 模式/技能说明文案与后端真实权限边界一致（见 §7.9 文案纪律）
+- [ ] 模式/技能说明文案与后端真实权限边界一致（见 §7.10 文案纪律）
 - [ ] 长内容（工具参数、响应体、目录树）使用滚动容器，不撑高页面
 - [ ] 亮色图纸与暗色夜图两种模式下均验证可读性
 - [ ] 通过 `tsc --noEmit` 与 `npm run build`

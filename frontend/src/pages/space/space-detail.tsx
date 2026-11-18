@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
-import { useEndpoints, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
+import { useEndpoints, useEndpointTags, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
 import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
 import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
@@ -15,6 +15,7 @@ import { DetailPageSkeleton } from "@/components/shared/detail-page-skeleton.tsx
 import { EndpointFormDialog } from "@/components/endpoint/endpoint-form-dialog.tsx";
 import { EnvironmentFormDialog } from "@/components/environment/environment-form-dialog.tsx";
 import type { Endpoint, Environment } from "@/lib/types.ts";
+import { toTagsParam } from "@/lib/endpoint-tags.ts";
 import { EndpointsTab } from "./tabs/endpoints-tab";
 import { EnvironmentsTab } from "./tabs/environments-tab";
 import { AgentRunsTab } from "./tabs/agent-runs-tab";
@@ -41,11 +42,28 @@ export default function SpaceDetailPage() {
   const [endpointPage, setEndpointPage] = useState(1);
   const [agentRunPage, setAgentRunPage] = useState(1);
   const [endpointKeyword, setEndpointKeyword] = useState("");
+  const [endpointTags, setEndpointTags] = useState<string[]>([]);
+  const [endpointTagsMode, setEndpointTagsMode] = useState<"any" | "all">("any");
   const debouncedEndpointKeyword = useDebouncedValue(endpointKeyword, 300);
 
-  useEffect(() => {
+  // 拼成逗号分隔的查询参数；空数组得到 undefined 表示不过滤
+  const endpointTagsParam = toTagsParam(endpointTags);
+
+  // 筛选条件变化时回到第 1 页。放在事件回调里而不是 effect 中，避免级联渲染
+  const handleKeywordChange = (value: string) => {
+    setEndpointKeyword(value);
     setEndpointPage(1);
-  }, [debouncedEndpointKeyword]);
+  };
+  const handleTagsChange = (tags: string[]) => {
+    setEndpointTags(tags);
+    setEndpointPage(1);
+  };
+  const handleTagsModeChange = (mode: "any" | "all") => {
+    setEndpointTagsMode(mode);
+    setEndpointPage(1);
+  };
+
+  const { data: endpointTagFacets = [] } = useEndpointTags(spaceId);
 
   const {
     data: endpointsData,
@@ -55,6 +73,8 @@ export default function SpaceDetailPage() {
   } = useEndpoints({
     space_id: spaceId,
     keyword: debouncedEndpointKeyword || undefined,
+    tags: endpointTagsParam,
+    tags_mode: endpointTagsMode,
     page: endpointPage,
     page_size: PAGE_SIZE,
   });
@@ -149,7 +169,12 @@ export default function SpaceDetailPage() {
           <EndpointsTab
             spaceId={spaceId}
             keyword={endpointKeyword}
-            onKeywordChange={setEndpointKeyword}
+            onKeywordChange={handleKeywordChange}
+            tagOptions={endpointTagFacets}
+            selectedTags={endpointTags}
+            onSelectedTagsChange={handleTagsChange}
+            tagsMode={endpointTagsMode}
+            onTagsModeChange={handleTagsModeChange}
             data={endpointsData?.items ?? []}
             total={endpointsData?.total ?? 0}
             loading={endpointsLoading}

@@ -11,8 +11,8 @@ from pathlib import Path
 from src.core.database.database_manager import init_database_from_config
 from src.core.errors import ConflictError, ValidationError
 from src.core.logging import get_logger
-from src.data.schemas import EnvironmentCreate, EndpointCreate
-from src.data.services import EnvironmentService, EndpointService
+from src.data.schemas import EndpointCreate, EnvironmentCreate
+from src.data.services import EndpointService, EnvironmentService
 from src.utils.parser import OpenAPIParser
 
 logger = get_logger(__name__)
@@ -52,8 +52,10 @@ class WorkflowService:
     def _build_endpoints(space_id: int, parser: OpenAPIParser) -> list[EndpointCreate]:
         """把 OpenAPI 接口定义转为接口创建参数。
 
-        结构字段预序列化为 JSON 字符串，``header`` 参数单独存一份，``content_type``
-        取请求体的首个 media type，缺省为 ``application/json``。
+        ``tags`` 直接传字符串数组，由服务层统一序列化；其余结构字段（``params`` /
+        ``headers`` / ``body`` / ``responses`` / ``security``）在此预序列化为 JSON 字符串，
+        因为它们在 schema 中是字符串类型。``content_type`` 取请求体的首个 media type，
+        缺省为 ``application/json``。
 
         Args:
             space_id: 目标空间主键
@@ -80,7 +82,7 @@ class WorkflowService:
                     name=ep.get("summary", ""),
                     path=ep.get("path", ""),
                     method=ep.get("method", ""),
-                    tags=json.dumps(ep.get("tags", []), ensure_ascii=False),
+                    tags=ep.get("tags", []),
                     summary=ep.get("summary", ""),
                     description=ep.get("description", ""),
                     params=json.dumps(ep.get("parameters", []), ensure_ascii=False),

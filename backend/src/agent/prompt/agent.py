@@ -22,7 +22,9 @@ AGENT_TOOL_RULES = """## 工作目录与工具约定
 - 有价值的产物要**落盘**到 `testcases/` 或 `artifacts/`，不要只留在对话里——
   文件才是可复用的资产。
 - 发送请求前先 `list_environments` 确认打的是哪个环境；生产环境会被拦截，
-  遇到拦截要如实告知用户，不要尝试绕过。"""
+  遇到拦截要如实告知用户，不要尝试绕过。
+- `get_space_endpoints` 支持按 `tag` 过滤：空间接口较多时先按标签取子集，
+  不要一次把整个空间的接口读进上下文。"""
 
 
 AGENT_MODE_INSTRUCTIONS = {

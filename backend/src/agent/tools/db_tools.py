@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.core.logging import get_logger
 from src.data.services import EndpointService, SpaceService
-from src.utils.json_utils import as_object
+from src.utils.json_utils import as_object, as_str_list
 
 logger = get_logger(__name__)
 
@@ -39,14 +39,24 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
     scope = session_scope or _default_session_scope()
 
     @tool
-    def get_space_endpoints() -> str:
-        """获取当前空间下所有启用的 API 接口清单。
+    def get_space_endpoints(tag: str = "") -> str:
+        """获取当前空间下启用的 API 接口清单。
 
         返回 JSON 数组，每项含 id、name、path、method、summary、tags、response_summary。
         response_summary 是成功响应的顶层字段摘要，用于判断接口间的数据依赖。
+        传 ``tag`` 时只返回该标签下的接口，可用它缩小范围、避免一次读入整个空间。
+
+        Args:
+            tag: 标签名，大小写不敏感，需完全匹配；留空返回全部接口。无匹配时返回空数组
         """
         with scope() as session:
             endpoints = EndpointService(session).list_active(int(space_id))
+
+        if tag:
+            keyword = tag.strip().lower()
+            endpoints = [
+                ep for ep in endpoints if keyword in {item.lower() for item in as_str_list(ep.tags)}
+            ]
 
         payload = [
             {
@@ -55,7 +65,7 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
                 "path": ep.path,
                 "method": ep.method,
                 "summary": ep.summary or "",
-                "tags": as_object(ep.tags),
+                "tags": as_str_list(ep.tags),
                 "response_summary": _build_response_summary(ep.responses),
             }
             for ep in endpoints
@@ -92,7 +102,7 @@ def make_db_tools(space_id: int | str, session_scope: SessionScope | None = None
             "name": endpoint.name,
             "path": endpoint.path,
             "method": endpoint.method,
-            "tags": as_object(endpoint.tags),
+            "tags": as_str_list(endpoint.tags),
             "summary": endpoint.summary or "",
             "description": endpoint.description or "",
             "params": as_object(endpoint.params),

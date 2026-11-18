@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import AsyncIterator
 from time import perf_counter
 from typing import Any
@@ -19,12 +20,14 @@ from src.agent.runner import RunRequest
 from src.agent.runner import run as run_agent
 from src.core.database.database_manager import get_db_manager
 from src.core.logging import get_logger
-from src.data.constant.agent import AGENTS_FILE, MAX_HISTORY_MESSAGES
+from src.data.constant.agent import AGENT_MAX_PROMPT_TAGS, AGENTS_FILE, MAX_HISTORY_MESSAGES
+from src.data.enum.workflow import DataStatus
 from src.data.models.space import Space
 from src.data.recording import AgentRunRecorder
 from src.data.schemas.conversation import ConversationCreate
 from src.data.services.conversation_service import ConversationService
 from src.data.services.environment_service import EnvironmentService
+from src.utils.json_utils import as_str_list
 
 logger = get_logger(__name__)
 
@@ -147,7 +150,7 @@ class ChatStreamService:
         mode = normalize_mode(body.mode).value
         skill_names = list(getattr(body, "skill_names", None) or [])
 
-        space_name, endpoint_count, environments = self._load_space(space_id)
+        space_name, endpoint_count, environments, tag_counts = self._load_space(space_id)
         agents_md = self._read_space_file(space_id, AGENTS_FILE)
         memories = self._load_memories(space_id, body.instruction)
         skill_blocks = self._load_skill_blocks(skill_names, space_id)
@@ -161,6 +164,7 @@ class ChatStreamService:
             skill_names=skill_names,
             environment_id=getattr(body, "environment_id", None),
             endpoint_count=endpoint_count,
+            tag_counts=tag_counts,
             environments=environments,
             agents_md=agents_md,
             memories=memories,
@@ -168,23 +172,28 @@ class ChatStreamService:
             history=self.load_history(conversation_id, exclude_trailing_user=True),
         )
 
-    def _load_space(self, space_id: int) -> tuple[str, int, list[dict[str, Any]]]:
-        """读取空间名、接口数与环境清单。
+    def _load_space(
+        self, space_id: int
+    ) -> tuple[str, int, list[dict[str, Any]], list[tuple[str, int]]]:
+        """读取空间名、接口数、环境清单与接口标签分布。
+
+        标签分布取自已加载的接口对象，不额外发查询。已删除接口不参与统计，
+        只保留常用标签，避免挤占 prompt 预算。
 
         Args:
             space_id: 空间主键，0 或空表示未指定空间
 
         Returns:
-            ``(空间名, 接口数, 环境字典列表)``；空间不存在或读取失败时返回空值
+            ``(空间名, 接口数, 环境字典列表, 标签分布)``；空间不存在或读取失败时返回空值
         """
         if not space_id:
-            return "", 0, []
+            return "", 0, [], []
 
         try:
             with get_db_manager().get_session() as session:
                 space = session.get(Space, space_id)
                 if space is None:
-                    return "", 0, []
+                    return "", 0, [], []
                 name = space.name or ""
                 endpoints = len(space.endpoints) if space.endpoints is not None else 0
                 environments = [
@@ -196,10 +205,18 @@ class ChatStreamService:
                     }
                     for env in EnvironmentService(session).list_by_space(space_id)
                 ]
-            return name, endpoints, environments
+
+                tag_counter: Counter[str] = Counter()
+                for endpoint in space.endpoints or []:
+                    if endpoint.status == DataStatus.DELETED.value:
+                        continue
+                    # 同一接口内的重复标签只计一次
+                    tag_counter.update(set(as_str_list(endpoint.tags)))
+                tag_counts = tag_counter.most_common(AGENT_MAX_PROMPT_TAGS)
+            return name, endpoints, environments, tag_counts
         except Exception as exc:
             logger.warning("空间上下文读取失败，按空空间处理", space_id=str(space_id), error=str(exc))
-            return "", 0, []
+            return "", 0, [], []
 
     def _read_space_file(self, space_id: int, relative: str) -> str:
         """读取空间目录下的文本文件。

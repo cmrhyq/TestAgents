@@ -1,10 +1,11 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useCreateEndpoint, useUpdateEndpoint } from "@/hooks/use-endpoints";
+import { useCreateEndpoint, useEndpointTags, useUpdateEndpoint } from "@/hooks/use-endpoints";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { TagInput } from "@/components/endpoint/tag-input";
 import {
   Select,
   SelectContent,
@@ -44,6 +45,7 @@ const endpointSchema = z.object({
   method: z.string().min(1, "请选择方法"),
   path: z.string().trim().min(1, "请输入接口路径"),
   summary: z.string().max(200, "摘要不能超过 200 字").optional(),
+  tags: z.array(z.string()),
   content_type: z.string().trim().min(1, "请输入内容类型"),
   params: z.string().refine(isValidJson, "参数必须是合法 JSON"),
   headers: z.string().refine(isValidJson, "请求头必须是合法 JSON"),
@@ -68,6 +70,7 @@ function EndpointFormContent({ spaceId, endpoint, onClose }: EndpointFormContent
       method: endpoint?.method ?? "GET",
       path: endpoint?.path ?? "",
       summary: endpoint?.summary ?? "",
+      tags: endpoint?.tags ?? [],
       content_type: endpoint?.content_type ?? "application/json",
       params: endpoint?.params ?? "",
       headers: endpoint?.headers ?? "",
@@ -76,6 +79,10 @@ function EndpointFormContent({ spaceId, endpoint, onClose }: EndpointFormContent
   });
 
   const method = watch("method");
+  const tags = watch("tags") ?? [];
+
+  // 复用列表页已缓存的标签聚合，避免弹窗再发一次请求
+  const { data: tagFacets = [] } = useEndpointTags(spaceId);
 
   const createEndpoint = useCreateEndpoint();
   const updateEndpoint = useUpdateEndpoint();
@@ -172,6 +179,21 @@ function EndpointFormContent({ spaceId, endpoint, onClose }: EndpointFormContent
             {errors.summary.message}
           </p>
         )}
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="ep-tags" className="text-sm font-medium">
+          标签
+        </label>
+        <TagInput
+          id="ep-tags"
+          value={tags}
+          onChange={(next) => setValue("tags", next, { shouldValidate: true })}
+          suggestions={tagFacets.map((facet) => facet.name)}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          用于分类与筛选，最多 10 个；输入时会联想本空间已有标签。
+        </p>
       </div>
 
       <div className="space-y-2">

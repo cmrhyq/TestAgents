@@ -68,6 +68,8 @@ class RunRequest:
     skill_names: list[str] = field(default_factory=list)
     environment_id: int | None = None
     endpoint_count: int = 0
+    # 接口标签分布，形如 [("用户管理", 12)]；进 prompt，供模型按标签取子集
+    tag_counts: list[tuple[str, int]] = field(default_factory=list)
     environments: list[dict[str, Any]] = field(default_factory=list)
     agents_md: str = ""
     memories: list[dict[str, Any]] = field(default_factory=list)
@@ -204,6 +206,7 @@ def _system_prompt(request: RunRequest, tools: ToolBundle) -> str:
         endpoint_count=request.endpoint_count,
         environments=list(request.environments),
         agents_md=request.agents_md,
+        tag_counts=list(request.tag_counts),
     )
     return build_system_prompt(
         snapshot,
