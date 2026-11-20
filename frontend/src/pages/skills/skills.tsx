@@ -109,7 +109,7 @@ export default function SkillsPage() {
                 <CardHeader className="gap-1.5">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="truncate font-mono text-[13px]">{skill.name}</CardTitle>
-                    <Badge variant="outline" className="shrink-0">
+                    <Badge variant="info" className="shrink-0">
                       {skill.scope === "builtin" ? "内置" : "空间"}
                     </Badge>
                   </div>

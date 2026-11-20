@@ -67,12 +67,13 @@
   --border-subtle: rgba(0, 0, 0, 0.04);
   --border-strong: #dedede;
   --input: #ffffff;
-  --ring: rgba(0, 0, 0, 0.28);
+  /* 焦点环跟随 accent，让键盘焦点能被一眼识别 */
+  --ring: rgba(20, 112, 180, 0.45);
 
-  /* 交互面 */
-  --hover: rgba(0, 0, 0, 0.05);
-  --hover-strong: rgba(0, 0, 0, 0.08);
-  --selected: rgba(0, 0, 0, 0.06);
+  /* 交互面：浅蓝调（accent 的极低不透明度）。画布与卡片保持中性，只在此处显蓝 */
+  --hover: rgba(20, 112, 180, 0.055);
+  --hover-strong: rgba(20, 112, 180, 0.095);
+  --selected: rgba(20, 112, 180, 0.1);
 
   /* 状态色（可读文字色） */
   --success: #0b8a4d;
@@ -127,11 +128,11 @@ html.dark {
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-strong: #3d3d3d;
   --input: #242424;
-  --ring: rgba(255, 255, 255, 0.4);
+  --ring: rgba(107, 170, 248, 0.55);
 
-  --hover: rgba(255, 255, 255, 0.06);
-  --hover-strong: rgba(255, 255, 255, 0.1);
-  --selected: rgba(255, 255, 255, 0.08);
+  --hover: rgba(107, 170, 248, 0.1);
+  --hover-strong: rgba(107, 170, 248, 0.16);
+  --selected: rgba(107, 170, 248, 0.15);
 
   --success: #3ecf8e;
   --warning: #e6b84d;
@@ -168,8 +169,7 @@ html.dark {
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-popover:
-    0 6px 24px -4px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.06);
+  --shadow-popover: 0 6px 24px -4px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.06);
   --shadow-dialog: 0 8px 48px -4px rgba(0, 0, 0, 0.12), 0 6px 12px -4px rgba(0, 0, 0, 0.06);
   --shadow-input: 0 0 0 3px rgba(20, 112, 180, 0.12);
 }
@@ -178,8 +178,7 @@ html.dark {
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-popover:
-    0 6px 24px -4px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 6px 24px -4px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
   --shadow-dialog: 0 8px 48px -4px rgba(0, 0, 0, 0.7), 0 6px 12px -4px rgba(0, 0, 0, 0.4);
   --shadow-input: 0 0 0 3px rgba(107, 170, 248, 0.18);
 }
@@ -220,7 +219,9 @@ html.dark {
 
   /* 轻底色：用于状态胶囊、图标容器 */
   --color-surface-primary: var(--selected);
-  --color-surface-accent: color-mix(in srgb, var(--accent) 10%, transparent);
+  --color-surface-accent: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* 图标容器、进度条槽这类需要稍强一点的浅蓝 */
+  --color-surface-accent-strong: color-mix(in srgb, var(--accent) 18%, transparent);
   --color-surface-success: color-mix(in srgb, var(--success) 12%, transparent);
   --color-surface-warning: color-mix(in srgb, var(--warning) 12%, transparent);
   --color-surface-destructive: color-mix(in srgb, var(--destructive) 12%, transparent);

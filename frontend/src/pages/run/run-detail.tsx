@@ -76,8 +76,8 @@ export default function RunDetailPage() {
         meta={
           <>
             <StatusBadge status={data.status} />
-            <Badge variant="secondary">{data.mode}</Badge>
-            <Badge variant="secondary">{data.trigger_type}</Badge>
+            <Badge variant="info">{data.mode}</Badge>
+            <Badge variant="info">{data.trigger_type}</Badge>
             {isActive && <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />}
           </>
         }
@@ -114,7 +114,7 @@ export default function RunDetailPage() {
       )}
 
       <ReadoutBand>
-        <Readout label="工具调用" value={String(data.tool_call_count)} />
+        <Readout label="工具调用" value={String(data.tool_call_count)} tone="accent" />
         <Readout label="成功" value={String(data.ok_count)} tone="success" dot />
         <Readout label="失败" value={String(data.error_count)} tone="danger" dot />
         <div className="flex flex-col justify-center gap-1.5 px-4 py-3">

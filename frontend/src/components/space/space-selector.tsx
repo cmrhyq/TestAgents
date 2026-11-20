@@ -65,7 +65,7 @@ export function SpaceSelector({
           )}
         >
           <span className="hidden items-center gap-1 text-xs font-medium text-muted-foreground sm:flex">
-            <Briefcase className="h-3.5 w-3.5 text-primary" />
+            <Briefcase className="h-3.5 w-3.5 text-accent" />
             空间
           </span>
 
@@ -111,7 +111,7 @@ export function SpaceSelector({
                     {space.description || "—"}
                   </span>
                 </span>
-                {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
               </DropdownMenuItem>
             );
           })

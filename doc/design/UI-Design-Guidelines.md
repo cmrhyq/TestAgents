@@ -22,13 +22,13 @@
 | `border` | `rgba(0,0,0,.08)` | `rgba(255,255,255,.14)` | 容器描边 |
 | `border-subtle` | `rgba(0,0,0,.04)` | `rgba(255,255,255,.06)` | 表格行分隔、侧栏分区 |
 | `border-strong` | `#dedede` | `#3d3d3d` | 输入框 hover |
-| `hover` | `rgba(0,0,0,.05)` | `rgba(255,255,255,.06)` | 行与菜单项 hover |
-| `hover-strong` | `rgba(0,0,0,.08)` | `rgba(255,255,255,.10)` | 小图标按钮 hover |
-| `selected` | `rgba(0,0,0,.06)` | `rgba(255,255,255,.08)` | 导航激活、会话激活 |
+| `hover` | `rgba(20,112,180,.055)` | `rgba(107,170,248,.10)` | 行与菜单项 hover |
+| `hover-strong` | `rgba(20,112,180,.095)` | `rgba(107,170,248,.16)` | 小图标按钮 hover |
+| `selected` | `rgba(20,112,180,.10)` | `rgba(107,170,248,.15)` | 导航激活、会话激活、用户消息底 |
 | `primary` | `#1a1a1a` | `#f5f5f5` | 主按钮底、Tooltip 底 |
 | `primary-foreground` | `#ffffff` | `#141414` | 主按钮字 |
 | `accent` | `#1470b4` | `#6baaf8` | 链接、focus 描边、运行中 |
-| `ring` | `rgba(0,0,0,.28)` | `rgba(255,255,255,.40)` | 焦点环 |
+| `ring` | `rgba(20,112,180,.45)` | `rgba(107,170,248,.55)` | 焦点环 |
 
 `muted-foreground` 是 12px 小字的最低可用值，不要再调浅。
 
@@ -53,15 +53,31 @@
 
 ### 1.4 轻底色
 
-`surface-primary` 取 `selected`，其余由状态色混 10~12% 得到：
+`surface-primary` 取 `selected`，其余由状态色混 10~18% 得到：
 
 ```css
 --color-surface-success: color-mix(in srgb, var(--success) 12%, transparent);
+--color-surface-accent-strong: color-mix(in srgb, var(--accent) 18%, transparent);
 ```
 
-只用于状态胶囊、错误提示条、图标底，不整块铺页面。
+只用于状态胶囊、错误提示条、图标底、进度条槽，不整块铺页面。
 
-### 1.5 规则
+### 1.5 浅蓝的落点
+
+浅蓝是调和色，只出现在三个层面。画布、卡片、侧栏、面板一律保持中性。
+
+| 层面 | 落点 | 写法 |
+|---|---|---|
+| 交互态 | 行 hover、菜单项、导航激活、会话激活、用户消息底、焦点环 | `bg-hover` / `bg-hover-strong` / `bg-selected` / `ring` |
+| 强调元素 | 链接、激活导航的图标、指标卡图标底、运行中转圈、选中勾、空间图标 | `text-accent` + `bg-surface-accent` |
+| 数据与标签 | 读数带首列主指标、信息类 Badge、进度条槽 | `tone="accent"`、`variant="info"`、`bg-surface-accent-strong` |
+
+两条边界：
+
+- 状态数据不上蓝。成功、失败、异常、通过率填色仍用 `success` / `warning` / `destructive`，蓝色只给没有成败语义的读数和标签。红绿在这个产品里是功能信息，不是装饰。
+- 蓝色不铺面。出现面积上限是图标容器、Badge、进度条槽、hover 底这一级；卡片头、表头、侧栏、读数带容器都不加浅蓝底。
+
+### 1.6 规则
 
 - 页面与业务组件不写 hex，不写 Tailwind 默认调色板。
 - 主按钮用单色实心，不用彩色。彩色只给状态、链接、focus。
@@ -168,7 +184,7 @@
 
 **侧栏**四段：品牌区 56px（24px 图标 + 产品名 13px 半粗 + 副标题 11px 灰）；主导航（分组名 11px 灰 + 仪表盘 / 测试空间 / 测试报告 / 技能管理）；空间会话区（可折叠，用 `.spaces-scroll` 细滚动条）；底部 44px（版本号 + 主题切换）。
 
-导航项 `h-8 rounded-md px-2.5 text-[13px]`，激活 `bg-selected font-medium text-foreground`。不用左边色条，不用彩色底。
+导航项 `h-8 rounded-md px-2.5 text-[13px]`，激活 `bg-selected font-medium text-foreground`，激活态图标 `text-accent`。不用左边色条，不用实色底。
 
 顶栏只有面包屑 `TestAgents / 当前页`，不设全局搜索、通知、头像。
 
@@ -183,14 +199,14 @@
 | `Button` | `rounded-md text-[13px] gap-1.5`；`default` 单色实心，`secondary` 灰底描边，`outline` 白底描边，`ghost` 仅 hover 出底，`destructive` 红底，`link` accent 色 |
 | `Input` / `Textarea` / `Select` | `h-8 rounded-md border bg-card px-2.5 text-[13px]`；hover `border-strong`，focus `accent/60` + `shadow-input`，禁用 `bg-muted opacity-60` |
 | `Card` | `rounded-lg border bg-card`，无阴影；`CardHeader` `gap-1 p-4`，`CardContent` `p-4 pt-0` |
-| `Badge` | `rounded-md px-1.5 text-[12px]`，surface 底 + 语义字色，无描边 |
+| `Badge` | `rounded-md px-1.5 text-[12px]`，surface 底 + 语义字色，无描边；中性信息标签（模式、触发方式、内置/空间）用 `variant="info"` |
 | `StatusBadge` | 同 Badge；`running` 带 `animate-pulse` 圆点；数值状态 1 启用 / 2 未启用 / 3 删除 / 4 废弃 |
 | `HttpMethodBadge` | `h-5 w-14 rounded font-mono text-[11px] font-semibold`，定宽对齐 |
 | `Tabs` | 分段控件：List `h-9 rounded-lg bg-muted p-0.5`，Trigger `h-8 rounded-md`，激活 `bg-card shadow-xs` |
 | `DataTable` | `rounded-lg border bg-card`；表头 `bg-muted` 12px 灰；单元格 `px-3 py-2.5` 13px；行分隔 `border-subtle`，hover `bg-hover` |
-| `Readout` | 标签 12px 灰 + 数值 24px 半粗 `tabular-nums`，`tone` 决定颜色与圆点 |
+| `Readout` | 标签 12px 灰 + 数值 24px 半粗 `tabular-nums`；`tone` 取 `default` / `accent` / `success` / `warning` / `danger`，无成败语义的指标用 `accent`，且只给读数带首列 |
 | `ReadoutBand` | `grid-cols-2`，`sm` 三列，`lg` 六列 + `divide-x divide-border-subtle` |
-| `PassRateBar` | 20×6 圆角条；≥80% 绿，≥50% 琥珀，其余红；总数 0 显示 `—` |
+| `PassRateBar` | 20×6 圆角条，槽 `bg-surface-accent-strong`；填充 ≥80% 绿，≥50% 琥珀，其余红；总数 0 显示 `—` |
 | `ToolCallCard` | `rounded-md border-subtle bg-card`；默认折叠；参数 `pre max-h-40`，结果 `max-h-60` |
 | `Composer` | `rounded-xl border bg-card p-2.5`，`focus-within:border-accent/50` + `shadow-input`；发送按钮 32×32 |
 | `Dialog` | 遮罩 `bg-black/30 backdrop-blur-[2px]`（深色 `/55`），面板 `rounded-xl border bg-card p-5 shadow-dialog` |
@@ -262,6 +278,7 @@
 - [ ] 页头用 `PageHeader`，返回按钮 `variant="ghost" size="sm"` 放 `actions` 第一位
 - [ ] 统计区用 `ReadoutBand`，不是卡片套卡片
 - [ ] 状态用 `StatusBadge`，方法用 `HttpMethodBadge`
+- [ ] 浅蓝只落在交互态、强调元素、数据与标签；画布、卡片、侧栏、面板没有浅蓝底
 - [ ] 数字加 `tabular-nums`
 - [ ] 表格用 `DataTable`，整行可点时补了键盘支持
 - [ ] 长内容在滚动容器里
@@ -276,6 +293,7 @@
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-20 | v3.1：浅蓝作为调和色，落在交互态、强调元素、数据与标签三处；画布与卡片保持中性 |
 | 2026-11-20 | v3.0：改为浅色 / 深色双主题令牌体系；单色主行动按钮；圆角 4/6/8/12；补尺寸、间距、组件与页面骨架规范 |
 | 2026-11-04 | v2.0：补报告、报告详情、执行详情页面骨架与口径差异 |
 | 2026-10-20 | v0.2.0：补模式选择器、技能选择器、工具调用卡片、上下文栏 |

@@ -13,8 +13,7 @@ export function PassRateBar({ passed, total }: PassRateBarProps) {
 
   const percentage = Math.round((passed / total) * 100);
 
-  const tone =
-    percentage >= 80 ? "bg-success" : percentage >= 50 ? "bg-warning" : "bg-destructive";
+  const tone = percentage >= 80 ? "bg-success" : percentage >= 50 ? "bg-warning" : "bg-destructive";
 
   const textColor =
     percentage >= 80 ? "text-success" : percentage >= 50 ? "text-warning" : "text-destructive";
@@ -24,7 +23,7 @@ export function PassRateBar({ passed, total }: PassRateBarProps) {
       <span className={cn("text-[13px] font-medium leading-5 tabular-nums", textColor)}>
         {percentage}%
       </span>
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-accent-strong">
         <div
           className={cn("h-full rounded-full transition-all duration-300 ease-out-expo", tone)}
           style={{ width: `${percentage}%` }}

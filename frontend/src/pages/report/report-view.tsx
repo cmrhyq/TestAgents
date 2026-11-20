@@ -91,7 +91,7 @@ export default function ReportViewPage() {
 
       {/* 汇总读数带：成功口径是 HTTP 2xx */}
       <ReadoutBand>
-        <Readout label="请求数" value={String(stat.request_count)} />
+        <Readout label="请求数" value={String(stat.request_count)} tone="accent" />
         <Readout label="2xx 成功" value={String(stat.success_count)} tone="success" dot />
         <Readout label="失败（非 2xx）" value={String(stat.error_count)} tone="danger" dot />
         <Readout label="异常（无响应）" value={String(stat.exception_count)} tone="warning" dot />

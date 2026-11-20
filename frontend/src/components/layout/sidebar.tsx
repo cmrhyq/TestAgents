@@ -40,8 +40,8 @@ function NavItem({ to, icon: Icon, label }: NavItemProps) {
         <>
           <Icon
             className={cn(
-              "h-4 w-4 shrink-0",
-              isActive ? "text-foreground" : "text-muted-foreground group-hover:text-foreground"
+              "h-4 w-4 shrink-0 transition-colors",
+              isActive ? "text-accent" : "text-muted-foreground group-hover:text-foreground"
             )}
             strokeWidth={1.75}
           />

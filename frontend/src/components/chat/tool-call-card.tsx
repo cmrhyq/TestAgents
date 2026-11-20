@@ -14,7 +14,7 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
 
   const statusIcon =
     call.status === "running" ? (
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
     ) : call.status === "ok" ? (
       <Check className="h-3.5 w-3.5 text-success" />
     ) : (

@@ -33,7 +33,9 @@ function StatCard({ label, value, unit, icon: Icon, hint }: StatCardProps) {
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[12px] leading-4 text-muted-foreground">{label}</span>
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} />
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface-accent text-accent">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+        </span>
       </div>
       <div className="mt-2 flex items-baseline gap-1">
         <span className="text-[24px] font-semibold leading-8 tracking-[-0.02em] tabular-nums text-foreground">

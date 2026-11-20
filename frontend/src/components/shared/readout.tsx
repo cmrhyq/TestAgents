@@ -5,14 +5,15 @@ import { cn } from "@/lib/utils";
 interface ReadoutProps {
   label: string;
   value: ReactNode;
-  /** 数值配色，默认主文字色 */
-  tone?: "default" | "success" | "warning" | "danger";
+  /** 数值配色：accent 给无成败语义的读数，其余按状态取色 */
+  tone?: "default" | "accent" | "success" | "warning" | "danger";
   /** 是否在标签前显示状态点 */
   dot?: boolean;
 }
 
 const TONE_TEXT: Record<NonNullable<ReadoutProps["tone"]>, string> = {
   default: "text-foreground",
+  accent: "text-accent",
   success: "text-success",
   warning: "text-warning",
   danger: "text-destructive",
@@ -20,6 +21,7 @@ const TONE_TEXT: Record<NonNullable<ReadoutProps["tone"]>, string> = {
 
 const TONE_DOT: Record<NonNullable<ReadoutProps["tone"]>, string> = {
   default: "bg-muted-foreground/50",
+  accent: "bg-accent",
   success: "bg-success",
   warning: "bg-warning",
   danger: "bg-destructive",
