@@ -65,34 +65,32 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
-            Space
-          </span>
-          <span className="truncate font-medium">{space?.name ?? "…"}</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle pb-2.5">
+        <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-5">
+          <span className="shrink-0 text-muted-foreground">空间</span>
+          <span className="truncate font-medium text-foreground">{space?.name ?? "…"}</span>
         </span>
-        <span className="hidden font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70 sm:block">
-          Context · Space
+        <span className="hidden shrink-0 text-[12px] text-muted-foreground sm:block">
+          上下文已绑定当前空间
         </span>
       </div>
 
       <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
         {showWelcome ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="text-center">
-              <h1 className="mt-4 font-display text-3xl font-semibold tracking-tight text-foreground">
+            <div className="max-w-md text-center">
+              <h1 className="text-[24px] font-semibold leading-8 tracking-[-0.02em] text-foreground">
                 你想测试什么？
               </h1>
-              <p className="mt-2 text-muted-foreground">
-                选好模式与技能，用自然语言下达测试指令
+              <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">
+                选好模式与技能，用自然语言下达测试指令。接口、环境与知识库都来自当前空间。
               </p>
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-5">
             {messagesLoading && conversationId && (
-              <div className="flex items-center gap-2 font-mono text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
@@ -122,7 +120,7 @@ export default function ChatPage() {
         )}
       </div>
 
-      <div className="shrink-0 px-4 pb-6">
+      <div className="shrink-0 pb-1 pt-2">
         <ChatInput
           instruction={instruction}
           onInstructionChange={handleInstructionChange}

@@ -64,6 +64,7 @@ export function buildEndpointColumns({
     {
       key: "status",
       header: "状态",
+      className: "w-30",
       render: (_, row) => <StatusBadge status={row.status === 1 ? "active" : "inactive"} />,
     },
     {

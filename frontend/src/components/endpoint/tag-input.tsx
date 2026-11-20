@@ -71,14 +71,14 @@ export function TagInput({
     <div className="space-y-1.5">
       <div
         className={cn(
-          "flex min-h-10 flex-wrap items-center gap-1.5 rounded-[2px] border border-border bg-input px-2 py-1.5 shadow-xs transition-shadow duration-200 ease-out-expo focus-within:border-primary/60 focus-within:shadow-input",
+          "flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border bg-input px-2 py-1.5 shadow-xs transition-shadow duration-200 ease-out-expo focus-within:border-primary/60 focus-within:shadow-input",
           (invalid || error) && "border-destructive"
         )}
       >
         {value.map((tag, index) => (
           <span
             key={`${tag}-${index}`}
-            className="inline-flex items-center gap-1 rounded-[2px] border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-muted-foreground"
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-muted-foreground"
           >
             {tag}
             <button
@@ -133,7 +133,7 @@ export function TagInput({
                 setDraft("");
                 setError(null);
               }}
-              className="rounded-[2px] border border-dashed border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-accent/60 hover:text-accent"
+              className="rounded-md border border-dashed border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-accent/60 hover:text-accent"
             >
               {item}
             </button>

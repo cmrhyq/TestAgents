@@ -49,7 +49,7 @@ export function ModeSelector({ value, onChange, disabled }: ModeSelectorProps) {
     <div
       role="radiogroup"
       aria-label="工作模式"
-      className="inline-flex items-center rounded-[3px] border border-border bg-background p-0.5"
+      className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
     >
       {MODES.map((option) => {
         const active = value === option.value;
@@ -63,11 +63,11 @@ export function ModeSelector({ value, onChange, disabled }: ModeSelectorProps) {
             disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex items-center gap-1.5 rounded-[2px] px-2.5 py-1 text-xs font-medium transition-colors duration-150 ease-out-expo",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+              "flex h-6 items-center gap-1.5 rounded px-2 text-[12px] font-medium leading-4 transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
               active
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ? "bg-card text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
               disabled && "cursor-not-allowed opacity-40"
             )}
           >

@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
 import { useEndpoints, useEndpointTags, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
 import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
 import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
-import { Card, CardContent } from "@/components/ui/card.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { PageHeader } from "@/components/layout/page-header.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.tsx";
 import { EmptyState } from "@/components/shared/empty-state.tsx";
@@ -124,27 +125,25 @@ export default function SpaceDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="bg-surface-primary/50">
-        <CardContent className="pt-6">
-          <div className="flex items-start justify-between">
-            <div className="min-w-0">
-              <div className="annotation mb-1.5 text-primary">SPACE_{space.id}</div>
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-                {space.name}
-              </h1>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <Badge variant={space.status === 1 ? "success" : "secondary"}>
-                  {SPACE_STATUS_MAP[space.status] ?? "未知"}
-                </Badge>
-              </div>
-              {space.description && (
-                <p className="mt-2 text-sm text-muted-foreground">{space.description}</p>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title={space.name}
+        annotation={`空间 ${String(space.id)}`}
+        meta={
+          <Badge variant={space.status === 1 ? "success" : "secondary"}>
+            {SPACE_STATUS_MAP[space.status] ?? "未知"}
+          </Badge>
+        }
+        description={space.description || undefined}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/spaces/${spaceId}/chat`}>
+              <Sparkles className="h-3.5 w-3.5" />
+              开始对话
+            </Link>
+          </Button>
+        }
+      />
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>

@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import { useReports } from "@/hooks/use-reports.ts";
 import { useSpaces } from "@/hooks/use-spaces.ts";
-import { Button } from "@/components/ui/button.tsx";
 import { DataTable } from "@/components/shared/data-table.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
@@ -18,6 +17,7 @@ import {
 import type { Column } from "@/components/shared/data-table.tsx";
 import type { Report } from "@/lib/types.ts";
 import { formatDurationMs, formatRelativeTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 type ReportRow = Report & Record<string, unknown>;
 
@@ -40,8 +40,9 @@ const columns: Column<ReportRow>[] = [
   {
     key: "run_id",
     header: "RUN",
+    className: "w-[88px]",
     render: (val) => (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">{String(val)}</span>
+      <span className="tabular-nums text-[12px] text-muted-foreground">{String(val)}</span>
     ),
   },
   {
@@ -51,7 +52,7 @@ const columns: Column<ReportRow>[] = [
     render: (val) => {
       const title = (val as string) || "—";
       return (
-        <span className="block max-w-[24rem] truncate font-medium" title={title}>
+        <span className="block max-w-[26rem] truncate font-medium text-foreground" title={title}>
           {title}
         </span>
       );
@@ -65,15 +66,19 @@ const columns: Column<ReportRow>[] = [
   {
     key: "request_count",
     header: "请求数",
-    render: (val) => <span className="font-mono text-sm tabular-nums">{String(val ?? 0)}</span>,
+    className: "text-right",
+    render: (val) => (
+      <span className="tabular-nums text-[13px] text-foreground">{String(val ?? 0)}</span>
+    ),
   },
   {
     key: "success_count",
-    header: "2xx / 非2xx",
+    header: "2xx / 非 2xx",
+    className: "text-right",
     render: (_, row) => (
-      <span className="font-mono text-xs tabular-nums">
+      <span className="tabular-nums text-[12px]">
         <span className="text-success">{row.success_count}</span>
-        <span className="mx-1 text-muted-foreground">/</span>
+        <span className="mx-0.5 text-muted-foreground">/</span>
         <span className={row.error_count > 0 ? "text-destructive" : "text-muted-foreground"}>
           {row.error_count}
         </span>
@@ -83,13 +88,13 @@ const columns: Column<ReportRow>[] = [
   {
     key: "exception_count",
     header: "异常",
+    className: "text-right",
     render: (val) => (
       <span
-        className={
-          (val as number) > 0
-            ? "font-mono text-xs tabular-nums text-warning"
-            : "font-mono text-xs tabular-nums text-muted-foreground"
-        }
+        className={cn(
+          "tabular-nums text-[12px]",
+          (val as number) > 0 ? "text-warning" : "text-muted-foreground"
+        )}
       >
         {String(val ?? 0)}
       </span>
@@ -98,10 +103,11 @@ const columns: Column<ReportRow>[] = [
   {
     key: "success_rate",
     header: "成功率",
+    className: "text-right",
     render: (val) => {
       const rate = Number(val ?? 0);
       return (
-        <span className={`font-mono text-sm font-medium tabular-nums ${rateClass(rate)}`}>
+        <span className={cn("tabular-nums text-[13px] font-medium", rateClass(rate))}>
           {rate.toFixed(1)}%
         </span>
       );
@@ -110,8 +116,9 @@ const columns: Column<ReportRow>[] = [
   {
     key: "avg_duration_ms",
     header: "平均耗时",
+    className: "text-right",
     render: (val) => (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="tabular-nums text-[12px] text-muted-foreground">
         {formatDurationMs(val as number)}
       </span>
     ),
@@ -121,16 +128,22 @@ const columns: Column<ReportRow>[] = [
     header: "最后请求",
     render: (val) =>
       val ? (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="text-[12px] text-muted-foreground">
           {formatRelativeTime(val as string)}
         </span>
       ) : (
-        <span className="text-muted-foreground">—</span>
+        <span className="text-[12px] text-muted-foreground">—</span>
       ),
+  },
+  {
+    key: "_enter",
+    header: "",
+    className: "w-8",
+    render: () => <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />,
   },
 ];
 
-/** 报告列表页：查看与下载已生成的报告。 */
+/** 报告列表页：一行一次执行，点击进入逐条请求详情。 */
 export default function ReportsPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
@@ -154,31 +167,15 @@ export default function ReportsPage() {
 
   const rows: ReportRow[] = (data?.items ?? []) as ReportRow[];
 
-  const actionsColumn: Column<ReportRow> = {
-    key: "_actions",
-    header: "操作",
-    render: (_, row) => (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => navigate(`/reports/${String(row.run_id)}`)}
-      >
-        <Eye className="h-3.5 w-3.5" />
-        查看
-      </Button>
-    ),
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="测试报告"
-        annotation="FIG.03 — REPORTS"
         description="按执行（run）汇总的接口调用记录：一行一次执行，点进去看逐条请求与响应。"
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="w-[200px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-[180px]">
           <Select
             value={spaceId}
             onValueChange={(value) => {
@@ -200,7 +197,7 @@ export default function ReportsPage() {
           </Select>
         </div>
 
-        <div className="w-[160px]">
+        <div className="w-[140px]">
           <Select
             value={status}
             onValueChange={(value) => {
@@ -222,18 +219,19 @@ export default function ReportsPage() {
           </Select>
         </div>
 
-        <span className="font-mono text-xs text-muted-foreground">
-          成功率按 HTTP 2xx 计算；「异常」指未拿到响应（网络错误/参数不合法/被拦截）
+        <span className="ml-auto text-[12px] leading-5 text-muted-foreground">
+          成功率按 HTTP 2xx 计算；「异常」指未拿到响应（网络错误 / 参数不合法 / 被拦截）
         </span>
       </div>
 
       <DataTable
-        columns={[...columns, actionsColumn]}
+        columns={columns}
         data={rows}
         loading={isLoading}
         error={isError}
         onRetry={() => refetch()}
         emptyText="暂无报告：还没有执行发过 HTTP 请求"
+        onRowClick={(row) => navigate(`/reports/${String(row.run_id)}`)}
         pagination={
           data
             ? {

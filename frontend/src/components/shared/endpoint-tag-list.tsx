@@ -18,7 +18,7 @@ interface EndpointTagListProps {
 }
 
 const CHIP_CLASS =
-  "inline-flex max-w-[84px] items-center rounded-[2px] border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-muted-foreground";
+  "inline-flex max-w-[84px] items-center rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-muted-foreground";
 
 /** 标签徽章列表：空数组显示占位符，超长折叠，可选可点击。 */
 export function EndpointTagList({ tags, max = 2, onSelect, className }: EndpointTagListProps) {

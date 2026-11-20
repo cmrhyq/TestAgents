@@ -1,22 +1,25 @@
 import { Moon, Sun } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 
-/** 主题切换按钮：亮色与暗色之间切换。 */
+/** 主题切换：浅色 / 深色两态互切。 */
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
+  const label = isDark ? "切换到浅色模式" : "切换到深色模式";
+
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      size="icon"
       onClick={toggleTheme}
-      aria-label={isDark ? "切换到亮色图纸" : "切换到暗色夜图"}
-      title={isDark ? "切换到亮色图纸" : "切换到暗色夜图"}
-      className="text-muted-foreground transition-colors hover:text-foreground"
+      aria-label={label}
+      title={label}
+      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
-      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-    </Button>
+      {isDark ? (
+        <Sun className="h-4 w-4" strokeWidth={1.75} />
+      ) : (
+        <Moon className="h-4 w-4" strokeWidth={1.75} />
+      )}
+    </button>
   );
 }

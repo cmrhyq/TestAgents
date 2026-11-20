@@ -3,120 +3,188 @@
 @plugin "@tailwindcss/typography";
 @import "./styles/markdown.css";
 
+/* 主题切换基于 html.dark（由 useTheme 写入），不是系统媒体查询 */
+@custom-variant dark (&:where(html.dark, html.dark *));
+
 /*
- * LLMTestAgent — 「工业蓝图 / Blueprint」设计令牌
- * 亮色图纸为默认主题，暗色「夜图」通过 html.dark 类覆盖。
- * 气质：工程图纸 —— 浅蓝纸底 + 工程蓝墨线 + 等宽标注 + 印章式徽章。
+ * TestAgents 设计系统 — 对齐 WorkBuddy 主题
+ *
+ * 令牌来源：WorkBuddy 桌面端的 --wb-* 设计变量（palette / semantic / font / radius / shadow）。
+ * 浅色：纯白画布 + #f7f7f7 侧栏 + 黑 8% 描边 + 单色主行动按钮。
+ * 深色：#1a1a1a 画布 + #1f1f1f 侧栏 + 白 14% 描边。
+ * 原则：分层靠底色与描边，不靠重阴影；字重克制；圆角 4/6/8/12。
  */
 
-/* ── 色彩值（普通 CSS 变量，供 @theme inline 映射）──────────── */
+/* ── 调色板（原样取自 WorkBuddy --wb-palette-*）──────────────── */
 :root {
-  /* 亮色图纸（默认） */
-  --background: oklch(0.955 0.012 235);
-  --foreground: oklch(0.3 0.05 250);
-  --card: oklch(0.985 0.006 230);
-  --card-foreground: oklch(0.3 0.05 250);
-  --popover: oklch(0.985 0.006 230);
-  --popover-foreground: oklch(0.3 0.05 250);
-  --sidebar: oklch(0.93 0.015 235);
-  --sidebar-foreground: oklch(0.3 0.05 250);
-  --primary: oklch(0.5 0.13 255);
-  --primary-foreground: oklch(0.985 0.005 250);
-  --secondary: oklch(0.9 0.015 235);
-  --secondary-foreground: oklch(0.3 0.05 250);
-  --muted: oklch(0.93 0.012 235);
-  /* 0.5 保证 11px 等宽小字（annotation/表头）对比度 ≥ 4.5:1（WCAG AA） */
-  --muted-foreground: oklch(0.5 0.05 245);
-  --accent: oklch(0.5 0.13 255);
-  --accent-foreground: oklch(0.985 0.005 250);
-  --destructive: oklch(0.52 0.17 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.78 0.035 240);
-  --border-subtle: oklch(0.87 0.022 240);
-  --input: oklch(0.985 0.006 230);
-  --ring: oklch(0.5 0.13 255 / 0.45);
+  --white: #ffffff;
+  --black: #000000;
 
-  --success: oklch(0.55 0.11 150);
-  --warning: oklch(0.62 0.13 75);
-  --info: oklch(0.55 0.1 250);
+  /* 中性灰阶 */
+  --gray-1: #fafafa;
+  --gray-2: #f7f7f7;
+  --gray-3: #f2f2f2;
+  --gray-4: #ebebeb;
+  --gray-5: #e6e6e6;
 
-  --method-get: oklch(0.52 0.11 150);
-  --method-post: oklch(0.52 0.12 250);
-  --method-put: oklch(0.6 0.13 75);
-  --method-delete: oklch(0.52 0.17 25);
-  --method-patch: oklch(0.55 0.12 300);
+  /* 语义基色（浅色） */
+  --success-base: #0cbf5b;
+  --warning-base: #ff7800;
+  --error-base: #f64041;
+  --info-base: #2563eb;
+  --purple-base: #7c3aed;
+
+  /* ── 语义令牌 · 浅色 ─────────────────────────────────────── */
+  --background: #ffffff;
+  --foreground: #000000;
+
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+
+  --sidebar: #f7f7f7;
+  --sidebar-foreground: #000000;
+
+  /* 主行动色：WorkBuddy 用单色实心按钮，不用彩色 */
+  --primary: #1a1a1a;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f2f2f2;
+  --secondary-foreground: #1a1a1a;
+
+  --muted: #f2f2f2;
+  /* 次级文字压到 #5d5d5d，保证 12px 小字也过 WCAG AA */
+  --muted-foreground: #5d5d5d;
+
+  --accent: #1470b4;
+  --accent-foreground: #ffffff;
+
+  --destructive: #c9302f;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-strong: #dedede;
+  --input: #ffffff;
+  --ring: rgba(0, 0, 0, 0.28);
+
+  /* 交互面 */
+  --hover: rgba(0, 0, 0, 0.05);
+  --hover-strong: rgba(0, 0, 0, 0.08);
+  --selected: rgba(0, 0, 0, 0.06);
+
+  /* 状态色（可读文字色） */
+  --success: #0b8a4d;
+  --warning: #9a6700;
+  --info: #2563eb;
+
+  /* HTTP 方法 */
+  --method-get: #0b8a4d;
+  --method-post: #2563eb;
+  --method-put: #9a6700;
+  --method-delete: #c9302f;
+
+  --method-patch: #7c3aed;
 }
 
 html.dark {
-  /* 暗色夜图 */
-  --background: oklch(0.18 0.025 250);
-  --foreground: oklch(0.9 0.02 230);
-  --card: oklch(0.22 0.028 250);
-  --card-foreground: oklch(0.9 0.02 230);
-  --popover: oklch(0.25 0.03 250);
-  --popover-foreground: oklch(0.9 0.02 230);
-  --sidebar: oklch(0.15 0.02 250);
-  --sidebar-foreground: oklch(0.9 0.02 230);
-  --primary: oklch(0.72 0.12 240);
-  --primary-foreground: oklch(0.16 0.03 250);
-  --secondary: oklch(0.27 0.03 250);
-  --secondary-foreground: oklch(0.88 0.02 235);
-  --muted: oklch(0.24 0.025 250);
-  --muted-foreground: oklch(0.66 0.04 245);
-  --accent: oklch(0.72 0.12 240);
-  --accent-foreground: oklch(0.16 0.03 250);
-  --destructive: oklch(0.63 0.17 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.34 0.04 245);
-  --border-subtle: oklch(0.28 0.03 245);
-  --input: oklch(0.22 0.028 250);
-  --ring: oklch(0.72 0.12 240 / 0.45);
+  --gray-1: #141414;
+  --gray-2: #292929;
+  --gray-3: #1f1f1f;
+  --gray-4: #242424;
+  --gray-5: #3a3a3a;
 
-  --success: oklch(0.72 0.11 150);
-  --warning: oklch(0.76 0.13 80);
-  --info: oklch(0.7 0.1 240);
+  /* ── 语义令牌 · 深色 ─────────────────────────────────────── */
+  --background: #1a1a1a;
+  --foreground: #ffffff;
 
-  --method-get: oklch(0.7 0.11 150);
-  --method-post: oklch(0.7 0.11 240);
-  --method-put: oklch(0.75 0.13 80);
-  --method-delete: oklch(0.63 0.17 25);
-  --method-patch: oklch(0.72 0.11 300);
+  --card: #242424;
+  --card-foreground: #ffffff;
+  --popover: #242424;
+  --popover-foreground: #ffffff;
+
+  --sidebar: #1f1f1f;
+  --sidebar-foreground: #ffffff;
+
+  /* 深色下主行动色反转为浅色实心 */
+  --primary: #f5f5f5;
+  --primary-foreground: #141414;
+
+  --secondary: #292929;
+  --secondary-foreground: #ffffffcc;
+
+  --muted: #242424;
+  --muted-foreground: #a6a6a6;
+
+  --accent: #6baaf8;
+  --accent-foreground: #0f172a;
+
+  --destructive: #f07178;
+  --destructive-foreground: #1a1010;
+
+  --border: rgba(255, 255, 255, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: #3d3d3d;
+  --input: #242424;
+  --ring: rgba(255, 255, 255, 0.4);
+
+  --hover: rgba(255, 255, 255, 0.06);
+  --hover-strong: rgba(255, 255, 255, 0.1);
+  --selected: rgba(255, 255, 255, 0.08);
+
+  --success: #3ecf8e;
+  --warning: #e6b84d;
+  --info: #6baaf8;
+
+  --method-get: #3ecf8e;
+  --method-post: #6baaf8;
+  --method-put: #e6b84d;
+  --method-delete: #f07178;
+
+  --method-patch: #c792ea;
 }
 
-/* ── Tailwind 主题令牌 ─────────────────────────────────────── */
+/* ── 字体、圆角、阴影、动效 ─────────────────────────────────── */
 @theme {
+  /* 中英文混排：macOS 走 PingFang，Windows 落到微软雅黑 UI */
   --font-sans:
-    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC",
+    "Source Han Sans SC", sans-serif;
   --font-mono:
-    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --font-display: "Space Grotesk", "Inter", -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-display: var(--font-sans);
 
-  /* 图纸工具感：锐利小圆角 */
-  --radius-sm: 0;
-  --radius-md: 2px;
-  --radius-lg: 4px;
-  --radius-xl: 6px;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* 蓝图以墨线分层，阴影仅作轻微提示 */
-  --shadow-xs: 0 1px 2px 0 rgb(16 52 95 / 0.06);
-  --shadow-card: 0 1px 2px 0 rgb(16 52 95 / 0.05);
-  --shadow-elevated: 0 2px 8px -2px rgb(16 52 95 / 0.08);
-  --shadow-popover: 0 8px 24px -8px rgb(16 52 95 / 0.18), 0 0 0 1px var(--color-border);
-  --shadow-input: 0 0 0 3px oklch(0.5 0.13 255 / 0.12);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-popover:
+    0 6px 24px -4px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.06);
+  --shadow-dialog: 0 8px 48px -4px rgba(0, 0, 0, 0.12), 0 6px 12px -4px rgba(0, 0, 0, 0.06);
+  --shadow-input: 0 0 0 3px rgba(20, 112, 180, 0.12);
 }
 
 html.dark {
-  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-  --shadow-elevated: 0 2px 8px -2px rgb(0 0 0 / 0.4);
-  --shadow-popover: 0 8px 24px -8px rgb(0 0 0 / 0.5), 0 0 0 1px var(--color-border);
-  --shadow-input: 0 0 0 3px oklch(0.72 0.12 240 / 0.15);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-popover:
+    0 6px 24px -4px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 8px 48px -4px rgba(0, 0, 0, 0.7), 0 6px 12px -4px rgba(0, 0, 0, 0.4);
+  --shadow-input: 0 0 0 3px rgba(107, 170, 248, 0.18);
 }
 
-/* 颜色工具类映射 */
+/* ── 颜色工具类映射 ─────────────────────────────────────────── */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -138,17 +206,24 @@ html.dark {
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-hover: var(--hover);
+  --color-hover-strong: var(--hover-strong);
+  --color-selected: var(--selected);
 
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
 
-  --color-surface-primary: color-mix(in oklab, var(--primary) 8%, transparent);
-  --color-surface-accent: color-mix(in oklab, var(--primary) 8%, transparent);
-  --color-surface-success: color-mix(in oklab, var(--success) 8%, transparent);
-  --color-surface-warning: color-mix(in oklab, var(--warning) 8%, transparent);
+  /* 轻底色：用于状态胶囊、图标容器 */
+  --color-surface-primary: var(--selected);
+  --color-surface-accent: color-mix(in srgb, var(--accent) 10%, transparent);
+  --color-surface-success: color-mix(in srgb, var(--success) 12%, transparent);
+  --color-surface-warning: color-mix(in srgb, var(--warning) 12%, transparent);
+  --color-surface-destructive: color-mix(in srgb, var(--destructive) 12%, transparent);
 
   --color-method-get: var(--method-get);
   --color-method-post: var(--method-post);
@@ -157,6 +232,7 @@ html.dark {
   --color-method-patch: var(--method-patch);
 }
 
+/* ── 基础样式 ───────────────────────────────────────────────── */
 @layer base {
   :root {
     color-scheme: light;
@@ -170,32 +246,45 @@ html.dark {
     @apply border-border;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background font-sans text-foreground antialiased;
     margin: 0;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    /* 全站图纸网格（极淡） */
-    background-image:
-      linear-gradient(
-        to right,
-        color-mix(in oklab, var(--color-primary) 4%, transparent) 1px,
-        transparent 1px
-      ),
-      linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--color-primary) 4%, transparent) 1px,
-        transparent 1px
-      );
-    background-size: 16px 16px;
+    font-size: 14px;
+    line-height: 22px;
+    font-feature-settings: "tnum" 0;
+  }
+
+  /* 中文标题不用负字距过度收紧，只做轻微光学修正 */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
   a {
-    color: var(--color-accent);
+    color: inherit;
     text-decoration: none;
   }
 
   a:hover {
-    text-decoration: underline;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  /* 焦点可见性：细描边 + 柔光环，不抢视觉 */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
   }
 
   /* 等宽数字对齐 */
@@ -203,42 +292,31 @@ html.dark {
     font-variant-numeric: tabular-nums;
   }
 
-  /* 工程标注：mono 大写 + 宽字距 */
+  /* 次级小字 */
   .annotation {
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--font-sans);
+    font-size: 12px;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    line-height: 18px;
+    text-transform: none;
+    letter-spacing: 0;
   }
 
-  /* 流式大标题：display 字体 + clamp 流体字号 */
+  /* 大号读数 */
   .text-display {
     font-family: var(--font-display);
-    font-size: clamp(1.4rem, 1rem + 1.4vw, 1.9rem);
-    line-height: 1.15;
-    letter-spacing: -0.015em;
+    font-size: clamp(1.375rem, 1rem + 1vw, 1.75rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
     font-weight: 600;
   }
 
-  /* 图纸网格纹理（hero 区，24px） */
+  /* 已废弃类名，保留避免历史引用报错 */
   .bg-blueprint-grid {
-    background-image:
-      linear-gradient(
-        to right,
-        color-mix(in oklab, var(--color-primary) 5%, transparent) 1px,
-        transparent 1px
-      ),
-      linear-gradient(
-        to bottom,
-        color-mix(in oklab, var(--color-primary) 5%, transparent) 1px,
-        transparent 1px
-      );
-    background-size: 24px 24px;
-    background-position: center;
+    display: none;
   }
 
-  /* 全局细滚动条（蓝墨色） */
+  /* ── 滚动条：中性细条，与 WorkBuddy 一致 ── */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -249,14 +327,22 @@ html.dark {
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--color-primary) 25%, transparent);
+    background-color: rgba(0, 0, 0, 0.18);
     border-radius: 9999px;
-    border: 2px solid transparent;
+    border: 3px solid transparent;
     background-clip: content-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--color-primary) 40%, transparent);
+    background-color: rgba(0, 0, 0, 0.3);
+  }
+
+  html.dark ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.18);
+  }
+
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
   }
 
   .spaces-scroll {
@@ -264,7 +350,11 @@ html.dark {
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent) transparent;
+    scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+  }
+
+  html.dark .spaces-scroll {
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
   }
 
   .spaces-scroll::-webkit-scrollbar {
@@ -276,18 +366,26 @@ html.dark {
   }
 
   .spaces-scroll::-webkit-scrollbar-thumb {
-    background-color: color-mix(in oklab, var(--color-muted-foreground) 35%, transparent);
+    background-color: rgba(0, 0, 0, 0.16);
     border-radius: 9999px;
     border: none;
     background-clip: initial;
   }
 
   .spaces-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in oklab, var(--color-muted-foreground) 55%, transparent);
+    background-color: rgba(0, 0, 0, 0.28);
+  }
+
+  html.dark .spaces-scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.16);
+  }
+
+  html.dark .spaces-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.28);
   }
 }
 
-/* 尊重系统"减弱动效"偏好：关闭动画与过渡，避免眩晕（UX #9 Reduced Motion） */
+/* 尊重系统"减弱动效"偏好 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

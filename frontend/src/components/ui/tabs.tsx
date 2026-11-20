@@ -1,4 +1,4 @@
-/** 标签页：Radix Tabs 的样式封装。 */
+/** 标签页：WorkBuddy 风格的分段控件（segmented control）。 */
 import type { ComponentPropsWithoutRef } from "react";
 import { forwardRef } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
@@ -12,7 +12,7 @@ const TabsList = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Tabs
     <TabsPrimitive.List
       ref={ref}
       className={cn(
-        "inline-flex h-10 items-center gap-1 border-b border-border bg-transparent p-0 text-muted-foreground",
+        "spaces-scroll inline-flex h-9 max-w-full items-center gap-0.5 rounded-lg bg-muted p-0.5 text-muted-foreground",
         className
       )}
       {...props}
@@ -28,7 +28,12 @@ const TabsTrigger = forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap border-b-2 border-transparent px-3 py-2 font-mono text-xs font-medium uppercase tracking-wider ring-offset-background transition-colors duration-200 ease-out-expo focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:border-primary data-[state=active]:text-foreground hover:text-foreground",
+      "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-md px-3 text-[13px] font-medium leading-5",
+      "transition-[background-color,color,box-shadow] duration-150",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+      "disabled:pointer-events-none disabled:opacity-50",
+      "hover:text-foreground",
+      "data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs",
       className
     )}
     {...props}
@@ -43,7 +48,7 @@ const TabsContent = forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "mt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
       className
     )}
     {...props}

@@ -31,6 +31,8 @@ interface DataTableProps<T extends object> {
   onRetry?: () => void;
   emptyText?: string;
   pagination?: PaginationConfig;
+  /** 整行可点击（如进入详情）；触发时同时支持键盘 Enter */
+  onRowClick?: (row: T) => void;
 }
 
 function getNestedValue(obj: unknown, path: string): unknown {
@@ -42,6 +44,9 @@ function getNestedValue(obj: unknown, path: string): unknown {
   }, obj);
 }
 
+const pageButtonClass =
+  "inline-flex h-7 items-center rounded-md border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-card";
+
 /** 通用表格：加载骨架、错误态、空态与分页。 */
 export function DataTable<T extends object>({
   columns,
@@ -52,24 +57,25 @@ export function DataTable<T extends object>({
   onRetry,
   emptyText = "暂无数据",
   pagination,
+  onRowClick,
 }: DataTableProps<T>) {
   const totalPages = pagination
     ? Math.max(1, Math.ceil(pagination.total / pagination.pageSize))
     : 1;
 
-  const SKELETON_ROWS = 5;
+  const SKELETON_ROWS = 6;
 
   return (
-    <div className="w-full overflow-hidden rounded-[4px] border border-border bg-card shadow-xs">
+    <div className="w-full overflow-hidden rounded-lg border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b border-border bg-muted/50">
-            <tr>
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border bg-muted">
               {columns.map((col) => (
                 <th
                   key={col.key}
                   className={cn(
-                    "px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-wider text-muted-foreground",
+                    "whitespace-nowrap px-3 py-2 text-left text-[12px] font-medium leading-5 text-muted-foreground",
                     col.className
                   )}
                 >
@@ -83,8 +89,8 @@ export function DataTable<T extends object>({
               Array.from({ length: SKELETON_ROWS }).map((_, rowIdx) => (
                 <tr key={`skeleton-${rowIdx.toString()}`} className="border-b border-border-subtle">
                   {columns.map((col) => (
-                    <td key={col.key} className="px-4 py-3">
-                      <Skeleton className="h-4 w-3/4" />
+                    <td key={col.key} className="px-3 py-2.5">
+                      <Skeleton className="h-3.5 w-3/4" />
                     </td>
                   ))}
                 </tr>
@@ -92,18 +98,11 @@ export function DataTable<T extends object>({
 
             {!loading && error && (
               <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-4 py-12 text-center text-sm text-destructive"
-                >
+                <td colSpan={columns.length} className="px-3 py-14 text-center">
                   <div className="flex flex-col items-center gap-3">
-                    <span>{errorText}</span>
+                    <span className="text-[13px] text-destructive">{errorText}</span>
                     {onRetry && (
-                      <button
-                        type="button"
-                        onClick={onRetry}
-                        className="rounded-[2px] border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
+                      <button type="button" onClick={onRetry} className={pageButtonClass}>
                         重试
                       </button>
                     )}
@@ -116,7 +115,7 @@ export function DataTable<T extends object>({
               <tr>
                 <td
                   colSpan={columns.length}
-                  className="px-4 py-12 text-center text-muted-foreground"
+                  className="px-3 py-14 text-center text-[13px] text-muted-foreground"
                 >
                   {emptyText}
                 </td>
@@ -127,12 +126,31 @@ export function DataTable<T extends object>({
               data.map((row, rowIdx) => (
                 <tr
                   key={rowIdx.toString()}
-                  className="border-b border-border-subtle transition-colors hover:bg-muted/50 last:border-b-0"
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  className={cn(
+                    "border-b border-border-subtle transition-colors last:border-b-0 hover:bg-hover",
+                    onRowClick &&
+                      "cursor-pointer focus-visible:bg-hover focus-visible:outline-none"
+                  )}
                 >
                   {columns.map((col) => {
                     const value = getNestedValue(row, col.key);
                     return (
-                      <td key={col.key} className={cn("px-4 py-3", col.className)}>
+                      <td
+                        key={col.key}
+                        className={cn("px-3 py-2.5 leading-5", col.className)}
+                      >
                         {col.render ? col.render(value, row) : String(value ?? "")}
                       </td>
                     );
@@ -144,19 +162,16 @@ export function DataTable<T extends object>({
       </div>
 
       {pagination && totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border px-4 py-3">
-          <span className="font-mono text-xs text-muted-foreground">
-            PAGE {pagination.page} / {totalPages}
+        <div className="flex items-center justify-between border-t border-border px-3 py-2">
+          <span className="text-[12px] leading-5 text-muted-foreground">
+            第 {pagination.page} / {totalPages} 页 · 共 {pagination.total} 条
           </span>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={pagination.page <= 1}
               onClick={() => pagination.onChange(pagination.page - 1)}
-              className={cn(
-                "rounded-sm border border-border bg-card px-3 py-1.5 text-sm font-medium transition-colors",
-                pagination.page <= 1 ? "cursor-not-allowed opacity-50" : "hover:bg-muted"
-              )}
+              className={pageButtonClass}
             >
               上一页
             </button>
@@ -164,10 +179,7 @@ export function DataTable<T extends object>({
               type="button"
               disabled={pagination.page >= totalPages}
               onClick={() => pagination.onChange(pagination.page + 1)}
-              className={cn(
-                "rounded-sm border border-border bg-card px-3 py-1.5 text-sm font-medium transition-colors",
-                pagination.page >= totalPages ? "cursor-not-allowed opacity-50" : "hover:bg-muted"
-              )}
+              className={pageButtonClass}
             >
               下一页
             </button>

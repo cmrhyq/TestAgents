@@ -37,9 +37,7 @@ function ExpandableRow({ call, bodyLoaded, loadingBody, onRequestBody }: Expanda
         <td className="px-4 py-3">
           <div className="flex flex-col">
             <span className="font-medium">{call.tool_name || "—"}</span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {call.tool_type}
-            </span>
+            <span className="text-xs text-muted-foreground">{call.tool_type}</span>
           </div>
         </td>
         <td className="px-4 py-3">

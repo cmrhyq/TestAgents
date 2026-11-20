@@ -76,7 +76,10 @@ export default function SpacesPage() {
       key: "name",
       header: "名称",
       render: (_, row) => (
-        <Link to={`/spaces/${row.id}`} className="font-medium text-accent hover:text-accent/80">
+        <Link
+          to={`/spaces/${row.id}`}
+          className="font-medium text-foreground transition-colors hover:text-accent"
+        >
           {row.name}
         </Link>
       ),
@@ -85,7 +88,9 @@ export default function SpacesPage() {
       key: "description",
       header: "描述",
       render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.description}</span>
+        <span className="line-clamp-1 max-w-[28rem] text-[12px] text-muted-foreground">
+          {row.description || "—"}
+        </span>
       ),
     },
     {
@@ -101,7 +106,7 @@ export default function SpacesPage() {
       key: "created_at",
       header: "创建时间",
       render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="tabular-nums text-[12px] text-muted-foreground">
           {formatDate(row.created_at)}
         </span>
       ),
@@ -113,7 +118,7 @@ export default function SpacesPage() {
       render: (_, row) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="空间操作">
+            <Button variant="ghost" size="icon-sm" aria-label="空间操作">
               <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -138,40 +143,28 @@ export default function SpacesPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="测试空间"
-        annotation="FIG.02 — SPACES"
-        description="管理 API 测试空间。"
-        // actions={
-        //   <Button
-        //     onClick={() => {
-        //       setEditingSpace(null);
-        //       setFormOpen(true);
-        //     }}
-        //   >
-        //     <Plus className="mr-2 h-4 w-4" />
-        //     创建空间
-        //   </Button>
-        // }
+        description="每个空间是一个独立的测试工作区：环境、接口、知识库与执行记录相互隔离。"
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full max-w-[320px]">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="搜索空间名称 / 描述…"
+            placeholder="搜索空间名称或描述"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            className="pl-9"
+            className="pl-8"
           />
         </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline">
+            <Button variant="outline" size="default">
               {statusLabel}
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="shadow-popover" align="end">
@@ -198,7 +191,7 @@ export default function SpacesPage() {
               setFormOpen(true);
             }}
           >
-            <Plus className="mr-2 h-4 w-4" />
+            <Plus className="h-4 w-4" />
             创建空间
           </Button>
         </div>

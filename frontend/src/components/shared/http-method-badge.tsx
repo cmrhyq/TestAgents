@@ -4,18 +4,18 @@ interface HttpMethodBadgeProps {
   method: string;
 }
 
-/** 各 HTTP 方法的徽章配色。 */
+/** 各 HTTP 方法的徽章样式。 */
 const methodStyles: Record<string, string> = {
-  GET: "border-method-get/50 bg-method-get/5 text-method-get",
-  POST: "border-method-post/50 bg-method-post/5 text-method-post",
-  PUT: "border-method-put/50 bg-method-put/5 text-method-put",
-  DELETE: "border-method-delete/50 bg-method-delete/5 text-method-delete",
-  PATCH: "border-method-patch/50 bg-method-patch/5 text-method-patch",
+  GET: "bg-surface-success text-method-get",
+  POST: "bg-surface-accent text-method-post",
+  PUT: "bg-surface-warning text-method-put",
+  DELETE: "bg-surface-destructive text-method-delete",
+  PATCH: "bg-purple-500/10 text-method-patch",
 };
 
-const DEFAULT_STYLE = "border-border bg-muted text-muted-foreground";
+const DEFAULT_STYLE = "bg-muted text-muted-foreground";
 
-/** HTTP 方法徽章：按方法着色，未收录的方法使用默认样式。 */
+/** HTTP 方法徽章：等宽定宽，按方法着色。 */
 export function HttpMethodBadge({ method }: HttpMethodBadgeProps) {
   const upper = method.toUpperCase();
   const style = methodStyles[upper] ?? DEFAULT_STYLE;
@@ -23,7 +23,7 @@ export function HttpMethodBadge({ method }: HttpMethodBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex w-16 items-center justify-center rounded-[2px] border font-mono text-xs font-semibold uppercase",
+        "inline-flex h-5 w-14 items-center justify-center rounded font-mono text-[11px] font-semibold leading-5",
         style
       )}
     >

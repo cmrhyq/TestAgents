@@ -19,7 +19,7 @@ export function AgentModeBadge({ mode }: AgentModeBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex w-16 items-center justify-center rounded-[2px] border font-mono text-xs font-semibold uppercase",
+        "inline-flex w-16 items-center justify-center rounded-full border py-0.5 text-[11px] font-semibold",
         style
       )}
     >

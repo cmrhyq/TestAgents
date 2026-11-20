@@ -121,7 +121,7 @@ export function EndpointsTab({
               <Tag className="mr-2 h-4 w-4" />
               标签
               {selectedTags.length > 0 && (
-                <span className="ml-1.5 rounded-[2px] bg-primary px-1 font-mono text-[10px] leading-4 text-primary-foreground">
+                <span className="ml-1.5 rounded-md bg-primary px-1 font-mono text-[10px] leading-4 text-primary-foreground">
                   {selectedTags.length}
                 </span>
               )}
@@ -179,7 +179,7 @@ export function EndpointsTab({
 
       {selectedTags.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             标签筛选
           </span>
           {selectedTags.map((tag) => (
@@ -188,7 +188,7 @@ export function EndpointsTab({
               type="button"
               onClick={() => onSelectedTagsChange(selectedTags.filter((item) => item !== tag))}
               aria-label={`移除筛选 ${tag}`}
-              className="inline-flex items-center gap-1 rounded-[2px] border border-accent/40 bg-accent/5 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-accent transition-colors hover:border-accent"
+              className="inline-flex items-center gap-1 rounded-md border border-accent/40 bg-accent/5 px-1.5 py-0.5 font-mono text-[11px] leading-4 text-accent transition-colors hover:border-accent"
             >
               {tag}
               <X className="h-3 w-3" />
