@@ -213,6 +213,7 @@
 | `DropdownMenu` | `rounded-lg border bg-popover p-1 shadow-popover`；项 `rounded-md px-2 py-1.5 text-[13px]`，hover `bg-hover`，图标统一灰 |
 | `Tooltip` | `bg-primary px-2 py-1 rounded-md text-[12px] max-w-xs` |
 | `ModeSelector` | 容器 `h-6 rounded bg-muted`，激活项 `bg-card shadow-xs` |
+| `DownloadReportButton` | 页头 `outline sm` 带文案，表格行 `ghost icon-sm` 只留图标；导出中显示 `Loader2` + `导出中 3/18`，行内按钮须拦 `click` 与 `keydown` 冒泡 |
 
 ### 组件规则
 
@@ -241,8 +242,8 @@
 | `/spaces` | 页头 + 筛选行（搜索 320px、状态下拉、右侧创建）+ `DataTable` |
 | `/spaces/:id` | 页头（空间名 + 状态 + 描述 + 开始对话）+ 7 个页签：概览 / 会话 / 接口 / 环境 / 记忆 / 知识库 / 执行记录 |
 | `/spaces/:spaceId/chat` | 顶部空间栏 + 消息流 `max-w-3xl` 居中 + 底部 Composer |
-| `/reports` | 页头 + 筛选行（空间、状态、右侧口径说明）+ `DataTable`，一行一次执行，整行点击进详情 |
-| `/reports/:runId` | 页头 + `ReadoutBand` 6 格 + 逐条请求表，点行才拉正文 |
+| `/reports` | 页头 + 筛选行（空间、状态、右侧口径说明）+ `DataTable`，一行一次执行，整行点击进详情，行尾图标可单独导出 |
+| `/reports/:runId` | 页头（含「下载报告」）+ `ReadoutBand` 6 格 + 逐条请求表，点行才拉正文 |
 | `/runs/:id` | 页头 + `ReadoutBand` 6 格 + 工具调用留痕表，可选「加载全部正文」 |
 | `/skills` | 页头 + 导入 / 刷新 + 技能卡片列表 + 详情侧栏 |
 
@@ -278,6 +279,7 @@
 - [ ] 页头用 `PageHeader`，返回按钮 `variant="ghost" size="sm"` 放 `actions` 第一位
 - [ ] 统计区用 `ReadoutBand`，不是卡片套卡片
 - [ ] 状态用 `StatusBadge`，方法用 `HttpMethodBadge`
+- [ ] 导出文件按 HTTP 状态判成败，不认工具层 `ok`；不跟随应用主题，固定浅色底
 - [ ] 浅蓝只落在交互态、强调元素、数据与标签；画布、卡片、侧栏、面板没有浅蓝底
 - [ ] 数字加 `tabular-nums`
 - [ ] 表格用 `DataTable`，整行可点时补了键盘支持
@@ -293,6 +295,7 @@
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-20 | v3.2：报告导出入口（页头 + 列表行尾），导出文件固定浅色、按 HTTP 状态判成败 |
 | 2026-11-20 | v3.1：浅蓝作为调和色，落在交互态、强调元素、数据与标签三处；画布与卡片保持中性 |
 | 2026-11-20 | v3.0：改为浅色 / 深色双主题令牌体系；单色主行动按钮；圆角 4/6/8/12；补尺寸、间距、组件与页面骨架规范 |
 | 2026-11-04 | v2.0：补报告、报告详情、执行详情页面骨架与口径差异 |

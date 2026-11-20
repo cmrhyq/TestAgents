@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import { ReportRequestTable } from "@/components/report/report-request-table.tsx";
+import { DownloadReportButton } from "@/components/report/download-report-button.tsx";
 import { Readout, ReadoutBand } from "@/components/shared/readout.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
 import { formatDurationMs, formatRelativeTime } from "@/lib/format";
@@ -85,6 +86,7 @@ export default function ReportViewPage() {
               <ExternalLink className="h-3.5 w-3.5" />
               执行记录
             </Button>
+            <DownloadReportButton runId={String(run.id)} />
           </>
         }
       />

@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { useReports } from "@/hooks/use-reports.ts";
 import { useSpaces } from "@/hooks/use-spaces.ts";
 import { DataTable } from "@/components/shared/data-table.tsx";
+import { DownloadReportButton } from "@/components/report/download-report-button.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import {
@@ -134,6 +135,12 @@ const columns: Column<ReportRow>[] = [
       ) : (
         <span className="text-[12px] text-muted-foreground">—</span>
       ),
+  },
+  {
+    key: "_download",
+    header: "",
+    className: "w-10 text-right",
+    render: (_, row) => <DownloadReportButton runId={String(row.run_id)} iconOnly />,
   },
   {
     key: "_enter",
