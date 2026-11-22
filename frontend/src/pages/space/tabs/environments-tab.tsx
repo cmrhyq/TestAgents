@@ -13,14 +13,13 @@ import {
 import { EmptyState } from "@/components/shared/empty-state.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog.tsx";
+import { useEnvironments } from "@/hooks/use-environments.ts";
 import type { Environment } from "@/lib/types.ts";
 
 /** `EnvironmentsTab` 的属性。 */
 export interface EnvironmentsTabProps {
-  data: Environment[];
-  loading: boolean;
-  error?: boolean;
-  onRetry?: () => void;
+  /** 当前空间 id，用于查询本空间的环境列表 */
+  spaceId: string | number;
   onAdd(): void;
   onEdit(environment: Environment): void;
   onDelete(environment: Environment): void;
@@ -28,15 +27,16 @@ export interface EnvironmentsTabProps {
 
 /** 环境 tab：以卡片列表展示与管理环境。 */
 export function EnvironmentsTab({
-  data,
-  loading,
-  error = false,
-  onRetry,
+  spaceId,
   onAdd,
   onEdit,
   onDelete,
 }: EnvironmentsTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<Environment | null>(null);
+
+  // 查询放在 tab 内：切到本 tab（组件挂载）时才拉取环境列表
+  const { data, isLoading, isError, refetch } = useEnvironments({ space_id: spaceId });
+  const environments = data?.items ?? [];
 
   return (
     <div className="space-y-4">
@@ -48,18 +48,16 @@ export function EnvironmentsTab({
         </Button>
       </div>
 
-      {error ? (
+      {isError ? (
         <QueryErrorState
           message="环境列表加载失败"
           action={
-            onRetry && (
-              <Button variant="outline" size="sm" onClick={onRetry}>
-                重试
-              </Button>
-            )
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              重试
+            </Button>
           }
         />
-      ) : loading ? (
+      ) : isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i}>
@@ -70,11 +68,11 @@ export function EnvironmentsTab({
             </Card>
           ))}
         </div>
-      ) : data.length === 0 ? (
+      ) : environments.length === 0 ? (
         <EmptyState title="暂无环境" description="添加环境以配置不同的基础 URL 和变量。" />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {data.map((env) => (
+          {environments.map((env) => (
             <Card key={env.id}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">

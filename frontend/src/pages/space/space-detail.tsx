@@ -3,10 +3,8 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
-import { useEndpoints, useEndpointTags, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
-import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
-import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
-import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
+import { useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
+import { useDeleteEnvironment } from "@/hooks/use-environments.ts";
 import { useDocumentTitle } from "@/hooks/use-document-title.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
@@ -17,7 +15,6 @@ import { DetailPageSkeleton } from "@/components/shared/detail-page-skeleton.tsx
 import { EndpointFormDialog } from "@/components/endpoint/endpoint-form-dialog.tsx";
 import { EnvironmentFormDialog } from "@/components/environment/environment-form-dialog.tsx";
 import type { Endpoint, Environment } from "@/lib/types.ts";
-import { toTagsParam } from "@/lib/endpoint-tags.ts";
 import { EndpointsTab } from "./tabs/endpoints-tab";
 import { EnvironmentsTab } from "./tabs/environments-tab";
 import { AgentRunsTab } from "./tabs/agent-runs-tab";
@@ -31,9 +28,12 @@ const SPACE_STATUS_MAP: Record<number, string> = {
   1: "已启用",
 };
 
-const PAGE_SIZE = 10;
-
-/** 空间详情页：概览、会话、接口、环境、记忆、知识库与执行记录。 */
+/**
+ * 空间详情页：概览、会话、接口、环境、记忆、知识库与执行记录。
+ *
+ * 各 tab 的数据查询下沉在 tab 组件内部，只有切到对应 tab（组件挂载）时才发起请求；
+ * 筛选与分页状态留在本组件，切换 tab 不会丢失。
+ */
 export default function SpaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -48,10 +48,6 @@ export default function SpaceDetailPage() {
   const [endpointKeyword, setEndpointKeyword] = useState("");
   const [endpointTags, setEndpointTags] = useState<string[]>([]);
   const [endpointTagsMode, setEndpointTagsMode] = useState<"any" | "all">("any");
-  const debouncedEndpointKeyword = useDebouncedValue(endpointKeyword, 300);
-
-  // 拼成逗号分隔的查询参数；空数组得到 undefined 表示不过滤
-  const endpointTagsParam = toTagsParam(endpointTags);
 
   // 筛选条件变化时回到第 1 页。放在事件回调里而不是 effect 中，避免级联渲染
   const handleKeywordChange = (value: string) => {
@@ -66,40 +62,6 @@ export default function SpaceDetailPage() {
     setEndpointTagsMode(mode);
     setEndpointPage(1);
   };
-
-  const { data: endpointTagFacets = [] } = useEndpointTags(spaceId);
-
-  const {
-    data: endpointsData,
-    isLoading: endpointsLoading,
-    isError: endpointsError,
-    refetch: refetchEndpoints,
-  } = useEndpoints({
-    space_id: spaceId,
-    keyword: debouncedEndpointKeyword || undefined,
-    tags: endpointTagsParam,
-    tags_mode: endpointTagsMode,
-    page: endpointPage,
-    page_size: PAGE_SIZE,
-  });
-  const {
-    data: environmentsData,
-    isLoading: environmentsLoading,
-    isError: environmentsError,
-    refetch: refetchEnvironments,
-  } = useEnvironments({
-    space_id: spaceId,
-  });
-  const {
-    data: agentRunsData,
-    isLoading: agentRunsLoading,
-    isError: agentRunsError,
-    refetch: refetchAgentRuns,
-  } = useAgentRuns({
-    space_id: spaceId,
-    page: agentRunPage,
-    page_size: PAGE_SIZE,
-  });
 
   const deleteEndpoint = useDeleteEndpoint();
   const deleteEnvironment = useDeleteEnvironment();
@@ -172,18 +134,11 @@ export default function SpaceDetailPage() {
             spaceId={spaceId}
             keyword={endpointKeyword}
             onKeywordChange={handleKeywordChange}
-            tagOptions={endpointTagFacets}
             selectedTags={endpointTags}
             onSelectedTagsChange={handleTagsChange}
             tagsMode={endpointTagsMode}
             onTagsModeChange={handleTagsModeChange}
-            data={endpointsData?.items ?? []}
-            total={endpointsData?.total ?? 0}
-            loading={endpointsLoading}
-            error={endpointsError}
-            onRetry={() => refetchEndpoints()}
             page={endpointPage}
-            pageSize={PAGE_SIZE}
             onPageChange={setEndpointPage}
             onAdd={() => {
               setEditingEndpoint(null);
@@ -199,10 +154,7 @@ export default function SpaceDetailPage() {
 
         <TabsContent value="environments" className="space-y-4">
           <EnvironmentsTab
-            data={environmentsData?.items ?? []}
-            loading={environmentsLoading}
-            error={environmentsError}
-            onRetry={() => refetchEnvironments()}
+            spaceId={spaceId}
             onAdd={() => {
               setEditingEnv(null);
               setEnvDialogOpen(true);
@@ -225,13 +177,8 @@ export default function SpaceDetailPage() {
 
         <TabsContent value="agent-runs" className="space-y-4">
           <AgentRunsTab
-            data={agentRunsData?.items ?? []}
-            total={agentRunsData?.total ?? 0}
-            loading={agentRunsLoading}
-            error={agentRunsError}
-            onRetry={() => refetchAgentRuns()}
+            spaceId={spaceId}
             page={agentRunPage}
-            pageSize={PAGE_SIZE}
             onPageChange={setAgentRunPage}
           />
         </TabsContent>

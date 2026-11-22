@@ -12,31 +12,28 @@ import {
 import { DataTable } from "@/components/shared/data-table.tsx";
 import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog.tsx";
 import { useParseOpenAPI } from "@/hooks/use-workflows.ts";
+import { useEndpointTags, useEndpoints } from "@/hooks/use-endpoints.ts";
+import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
+import { toTagsParam } from "@/lib/endpoint-tags.ts";
 import { buildEndpointColumns } from "../columns";
-import type { Endpoint, EndpointTagFacet } from "@/lib/types.ts";
+import type { Endpoint } from "@/lib/types.ts";
+
+const PAGE_SIZE = 10;
 
 /** `EndpointsTab` 的属性。 */
 export interface EndpointsTabProps {
-  /** 当前空间 id，用于 OpenAPI 导入 */
+  /** 当前空间 id，用于列表查询、标签聚合与 OpenAPI 导入 */
   spaceId: string | number;
-  /** 搜索关键字，受控，父组件防抖后再发往服务端过滤 */
+  /** 搜索关键字，受控；防抖在 tab 内完成 */
   keyword: string;
   onKeywordChange(keyword: string): void;
-  /** 空间内的标签聚合，作为筛选候选 */
-  tagOptions: EndpointTagFacet[];
   /** 当前选中的筛选标签，受控 */
   selectedTags: string[];
   onSelectedTagsChange(tags: string[]): void;
   /** 多标签匹配方式：any 命中任一，all 需全部命中 */
   tagsMode: "any" | "all";
   onTagsModeChange(mode: "any" | "all"): void;
-  data: Endpoint[];
-  total: number;
-  loading: boolean;
-  error?: boolean;
-  onRetry?: () => void;
   page: number;
-  pageSize: number;
   onPageChange(page: number): void;
   onAdd(): void;
   onEdit(endpoint: Endpoint): void;
@@ -48,24 +45,34 @@ export function EndpointsTab({
   spaceId,
   keyword,
   onKeywordChange,
-  tagOptions,
   selectedTags,
   onSelectedTagsChange,
   tagsMode,
   onTagsModeChange,
-  data,
-  total,
-  loading,
-  error = false,
-  onRetry,
   page,
-  pageSize,
   onPageChange,
   onAdd,
   onEdit,
   onDelete,
 }: EndpointsTabProps) {
   const [deleteTarget, setDeleteTarget] = useState<Endpoint | null>(null);
+
+  // 查询放在 tab 内：只有切到本 tab（组件挂载）时才发请求，避免进详情页就并发拉取
+  const debouncedKeyword = useDebouncedValue(keyword, 300);
+  const {
+    data: endpointsData,
+    isLoading,
+    isError,
+    refetch,
+  } = useEndpoints({
+    space_id: spaceId,
+    keyword: debouncedKeyword || undefined,
+    tags: toTagsParam(selectedTags),
+    tags_mode: tagsMode,
+    page,
+    page_size: PAGE_SIZE,
+  });
+  const { data: tagOptions = [] } = useEndpointTags(spaceId);
 
   // 雪花 ID 超出 JS 安全整数范围，必须以 string 透传，禁止 Number() 转换以免丢精度
   const { mutate: importOpenAPI, isPending: isImporting } = useParseOpenAPI(String(spaceId));
@@ -218,15 +225,15 @@ export function EndpointsTab({
 
       <DataTable
         columns={columns}
-        data={data}
-        loading={loading}
-        error={error}
-        onRetry={onRetry}
+        data={endpointsData?.items ?? []}
+        loading={isLoading}
+        error={isError}
+        onRetry={() => refetch()}
         emptyText="该空间暂无接口。"
         pagination={{
           page,
-          pageSize,
-          total,
+          pageSize: PAGE_SIZE,
+          total: endpointsData?.total ?? 0,
           onChange: onPageChange,
         }}
       />
