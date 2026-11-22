@@ -140,6 +140,15 @@ export default function SpacesPage() {
       ),
     },
     {
+      key: "description",
+      header: "描述",
+      render: (_, row) => (
+        <span className="line-clamp-1 max-w-[28rem] text-[12px] text-muted-foreground">
+          {row.description || "—"}
+        </span>
+      ),
+    },
+    {
       key: "status",
       header: "状态",
       className: "w-[112px]",
@@ -150,7 +159,7 @@ export default function SpacesPage() {
       header: "创建时间",
       className: "w-[136px]",
       render: (_, row) => (
-        <span className="block text-right tabular-nums text-[12px] text-muted-foreground">
+        <span className="block tabular-nums text-[12px] text-muted-foreground">
           {formatIsoDate(row.created_at)}
         </span>
       ),
