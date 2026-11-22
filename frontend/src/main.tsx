@@ -21,7 +21,7 @@ const queryClient = new QueryClient({
   },
 });
 
-function Root() {
+export function Root() {
   const { theme } = useTheme();
   return (
     <TooltipProvider delayDuration={200}>

@@ -30,7 +30,7 @@ export function PageHeader({
           <p className="mb-1 text-[12px] leading-4 text-muted-foreground">{annotation}</p>
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
-          <h1 className="truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-foreground">
+          <h1 className="truncate text-[22px] font-semibold leading-8 tracking-[-0.01em] text-foreground">
             {title}
           </h1>
           {meta}

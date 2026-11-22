@@ -75,13 +75,13 @@
   --hover-strong: rgba(20, 112, 180, 0.095);
   --selected: rgba(20, 112, 180, 0.1);
 
-  /* 状态色（可读文字色） */
-  --success: #0b8a4d;
+  /* 状态色（可读文字色）：12% 浅底上仍需过 4.5:1，故压深到 #06703C */
+  --success: #06703c;
   --warning: #9a6700;
   --info: #2563eb;
 
-  /* HTTP 方法 */
-  --method-get: #0b8a4d;
+  /* HTTP 方法：GET 胶囊沿用同一浅绿底，文字色同步加深 */
+  --method-get: #06703c;
   --method-post: #2563eb;
   --method-put: #9a6700;
   --method-delete: #c9302f;
@@ -105,7 +105,8 @@ html.dark {
   --popover: #242424;
   --popover-foreground: #ffffff;
 
-  --sidebar: #1f1f1f;
+  /* 暗色下侧栏比画布再深一档，避免只靠 1px 边框分层 */
+  --sidebar: #161616;
   --sidebar-foreground: #ffffff;
 
   /* 深色下主行动色反转为浅色实心 */

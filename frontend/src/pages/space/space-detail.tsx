@@ -7,6 +7,7 @@ import { useEndpoints, useEndpointTags, useDeleteEndpoint } from "@/hooks/use-en
 import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
 import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
+import { useDocumentTitle } from "@/hooks/use-document-title.ts";
 import { Button } from "@/components/ui/button.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -39,6 +40,8 @@ export default function SpaceDetailPage() {
   const spaceId = id || "";
 
   const { data: space, isLoading: spaceLoading } = useSpace(spaceId);
+
+  useDocumentTitle(spaceLoading ? "空间详情" : (space?.name ?? "空间详情"));
 
   const [endpointPage, setEndpointPage] = useState(1);
   const [agentRunPage, setAgentRunPage] = useState(1);

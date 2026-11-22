@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/layout/app-layout";
+import { AppHydrateFallback } from "./components/layout/app-hydrate-fallback";
 import ErrorPage from "./pages/error/error-page.tsx";
 import NotFoundPage from "./pages/error/not-found.tsx";
 import { LegacyChatRedirect } from "./pages/chat/legacy-chat-redirect.tsx";
@@ -8,6 +9,7 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <AppLayout />,
+    hydrateFallbackElement: <AppHydrateFallback />,
     children: [
       {
         errorElement: <ErrorPage />,

@@ -125,40 +125,36 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
 
   return (
     <AccordionItem value={String(spaceId)} className="border-none">
-      <AccordionPrimitive.Header className="flex">
-        <AccordionPrimitive.Trigger
-          className={cn(
-            "group flex flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] leading-5 transition-colors hover:bg-hover [&[data-state=open]_.space-chevron]:rotate-180"
-          )}
-        >
-          <Folder className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">
-            {spaceName}
-          </span>
-          <ChevronDown className="space-chevron h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200" />
-          <span
-            className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+      {/* 折叠与新建是两个并列按钮，不再相互嵌套；focus-within 保证键盘用户也能看到新建入口 */}
+      <AccordionPrimitive.Header asChild>
+        <div className="group relative flex items-center rounded-md text-[13px] leading-5 transition-colors hover:bg-hover focus-within:bg-hover">
+          <AccordionPrimitive.Trigger
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 pr-[76px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 [&[data-state=open]_.space-chevron]:rotate-180"
+            )}
           >
-            <button
-              type="button"
-              aria-label="新建对话"
-              className={cn(
-                "flex h-5 w-5 items-center justify-center rounded transition-colors",
-                isNewChatState
-                  ? "bg-selected text-foreground"
-                  : "text-muted-foreground hover:bg-hover-strong hover:text-foreground"
-              )}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNewConversation();
-              }}
-            >
-              <PlusCircle className="h-3.5 w-3.5" />
-            </button>
-          </span>
-        </AccordionPrimitive.Trigger>
+            <Folder className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+              {spaceName}
+            </span>
+            <ChevronDown className="space-chevron h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200" />
+          </AccordionPrimitive.Trigger>
+          <button
+            type="button"
+            aria-label="新建对话"
+            title="新建对话"
+            className={cn(
+              "absolute right-[52px] top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded opacity-0 transition-opacity",
+              "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+              isNewChatState
+                ? "bg-selected text-foreground"
+                : "text-muted-foreground hover:bg-hover-strong hover:text-foreground"
+            )}
+            onClick={handleNewConversation}
+          >
+            <PlusCircle className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </AccordionPrimitive.Header>
       <AccordionContent className="pb-1 pt-0">
         {isLoading ? (

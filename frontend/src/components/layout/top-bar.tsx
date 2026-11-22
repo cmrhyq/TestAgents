@@ -39,7 +39,7 @@ export function TopBar({ showExpand, onExpandSidebar }: TopBarProps) {
       )}
 
       <nav aria-label="面包屑" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-        <span className="shrink-0 text-muted-foreground">TestAgents</span>
+        <span className="shrink-0 text-muted-foreground">工作台</span>
         <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">
           /
         </span>

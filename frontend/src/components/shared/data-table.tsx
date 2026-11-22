@@ -30,6 +30,12 @@ interface DataTableProps<T extends object> {
   /** 错误态下的恢复动作，如重试 */
   onRetry?: () => void;
   emptyText?: string;
+  /** 自定义空态（图标 + 标题 + 操作），优先于 emptyText */
+  emptyState?: ReactNode;
+  /** 表格的可访问名称，供读屏识别 */
+  ariaLabel?: string;
+  /** 固定列宽，避免空态/加载态下列宽重排 */
+  fixedLayout?: boolean;
   pagination?: PaginationConfig;
   /** 整行可点击（如进入详情）；触发时同时支持键盘 Enter */
   onRowClick?: (row: T) => void;
@@ -56,6 +62,9 @@ export function DataTable<T extends object>({
   errorText = "加载失败，请稍后重试",
   onRetry,
   emptyText = "暂无数据",
+  emptyState,
+  ariaLabel,
+  fixedLayout = false,
   pagination,
   onRowClick,
 }: DataTableProps<T>) {
@@ -68,12 +77,16 @@ export function DataTable<T extends object>({
   return (
     <div className="w-full overflow-hidden rounded-lg border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
+        <table
+          className={cn("w-full border-collapse text-[13px]", fixedLayout && "table-fixed")}
+          aria-label={ariaLabel}
+        >
           <thead>
             <tr className="border-b border-border bg-muted">
               {columns.map((col) => (
                 <th
                   key={col.key}
+                  scope="col"
                   className={cn(
                     "whitespace-nowrap px-3 py-2 text-left text-[12px] font-medium leading-5 text-muted-foreground",
                     col.className
@@ -113,11 +126,10 @@ export function DataTable<T extends object>({
 
             {!loading && !error && data.length === 0 && (
               <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-3 py-14 text-center text-[13px] text-muted-foreground"
-                >
-                  {emptyText}
+                <td colSpan={columns.length} className="px-3 py-14">
+                  {emptyState ?? (
+                    <p className="text-center text-[13px] text-muted-foreground">{emptyText}</p>
+                  )}
                 </td>
               </tr>
             )}
@@ -139,9 +151,9 @@ export function DataTable<T extends object>({
                   }
                   tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
-                    "border-b border-border-subtle transition-colors last:border-b-0 hover:bg-hover",
+                    "border-b border-border-subtle transition-colors last:border-b-0",
                     onRowClick &&
-                      "cursor-pointer focus-visible:bg-hover focus-visible:outline-none"
+                      "cursor-pointer hover:bg-hover focus-visible:bg-hover focus-visible:outline-none"
                   )}
                 >
                   {columns.map((col) => {
