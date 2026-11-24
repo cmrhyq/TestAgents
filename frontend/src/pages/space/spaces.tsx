@@ -140,15 +140,6 @@ export default function SpacesPage() {
       ),
     },
     {
-      key: "description",
-      header: "描述",
-      render: (_, row) => (
-        <span className="line-clamp-1 max-w-[28rem] text-[12px] text-muted-foreground">
-          {row.description || "—"}
-        </span>
-      ),
-    },
-    {
       key: "status",
       header: "状态",
       className: "w-[112px]",

@@ -124,7 +124,7 @@ def update_conversation(conversation_id: int, body: ConversationUpdate, db: Sess
 
 @router.delete("/{conversation_id}", status_code=204)
 def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
-    """删除会话及其关联消息。
+    """删除会话及其关联消息、执行记录与工具调用留痕。
 
     Args:
         conversation_id: 会话 ID

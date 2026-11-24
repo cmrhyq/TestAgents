@@ -1,11 +1,19 @@
 from sqlalchemy.orm import Session
 
+from src.core.logging import get_logger
 from src.data.models.base import local_now
 from src.data.models.conversation import Conversation
 from src.data.models.message import Message
-from src.data.repositories import ConversationRepository, MessageRepository
+from src.data.repositories import (
+    AgentRunRepository,
+    AgentToolCallRepository,
+    ConversationRepository,
+    MessageRepository,
+)
 from src.data.schemas.conversation import ConversationCreate
 from src.data.services.base_service import BaseService
+
+logger = get_logger(__name__)
 
 _TITLE_MAX_LEN = 30
 
@@ -29,7 +37,7 @@ class ConversationService(BaseService[Conversation, ConversationRepository]):
     """会话业务逻辑：创建会话、追加消息并维护会话元数据。"""
 
     def __init__(self, session: Session) -> None:
-        """绑定会话与会话、消息两个仓储。
+        """绑定会话与会话、消息、执行记录三个仓储。
 
         Args:
             session: 调用方持有的会话
@@ -37,6 +45,8 @@ class ConversationService(BaseService[Conversation, ConversationRepository]):
         self._session = session
         self.conv_repo = ConversationRepository(session)
         self.msg_repo = MessageRepository(session)
+        self.run_repo = AgentRunRepository(session)
+        self.tool_call_repo = AgentToolCallRepository(session)
         super().__init__(session, self.conv_repo)
 
     def list_conversations(self, space_id: int | None, status: int | None, page: int, page_size: int):
@@ -111,9 +121,18 @@ class ConversationService(BaseService[Conversation, ConversationRepository]):
         return self.update(conversation_id, **fields)
 
     def delete_conversation(self, conversation_id: int) -> None:
-        """删除会话。
+        """删除会话及其消息、执行记录与工具调用留痕。
 
-        副作用：写库（未提交），需调用方提交事务。
+        ``agent_run.conversation_id`` 刻意不建外键（会话创建失败时执行记录仍需写入），
+        所以数据库不会替我们级联；不显式清理就会留下指向已删会话的孤儿记录。
+        删除顺序固定为「先留痕、后执行记录」：留痕按 ``run_id`` 归属，执行记录一旦先删，
+        就再也查不到这批 ``run_id`` 了。
+
+        ``llm_log`` 不清理：其 ``space_id`` / ``conversation_id`` / ``run_id`` 同样
+        不建外键，成本历史需要在对象删除后继续保留。
+
+        副作用：写库（未提交），需调用方提交事务。执行中的（``running``）记录也会
+        一并删除，该轮后续的留痕写入会因外键失败而被记录器吞掉（只记日志、不打断对话）。
 
         Args:
             conversation_id: 会话主键
@@ -121,7 +140,21 @@ class ConversationService(BaseService[Conversation, ConversationRepository]):
         Raises:
             NotFoundError: 会话不存在
         """
+        self.get_or_raise(conversation_id, "会话不存在")
+
+        run_ids = self.run_repo.list_ids_by_conversation(conversation_id)
+        deleted_tool_calls = self.tool_call_repo.delete_by_run_ids(run_ids)
+        deleted_runs = self.run_repo.delete_by_ids(run_ids)
+
         self.delete(conversation_id)
+
+        if deleted_runs or deleted_tool_calls:
+            logger.info(
+                "会话及其执行记录已删除",
+                conversation_id=conversation_id,
+                deleted_runs=deleted_runs,
+                deleted_tool_calls=deleted_tool_calls,
+            )
 
     def create_conversation(self, data: ConversationCreate) -> Conversation:
         """创建会话，``mode`` 先归一化再落库。

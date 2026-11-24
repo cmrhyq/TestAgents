@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.data.models.agent_run import AgentRun
@@ -86,6 +86,41 @@ class AgentRunRepository(BaseRepository[AgentRun]):
             .limit(limit)
         )
         return list(self._session.scalars(stmt).all())
+
+    def list_ids_by_conversation(self, conversation_id: int) -> list[int]:
+        """按会话取执行记录主键，供会话删除时联动清理。
+
+        只取主键而不是实体：后续走批量 ``DELETE``，无需加载整行。
+
+        Args:
+            conversation_id: 会话主键
+
+        Returns:
+            执行记录主键列表；无记录时返回空列表
+        """
+        stmt = select(AgentRun.id).where(AgentRun.conversation_id == conversation_id)
+        return list(self._session.scalars(stmt).all())
+
+    def delete_by_ids(self, run_ids: list[int]) -> int:
+        """按主键批量删除执行记录，走批量 ``DELETE`` 而非逐条删除。
+
+        ⚠️ 不经 ORM 关系级联，``agent_tool_call`` 需调用方先用
+        ``AgentToolCallRepository.delete_by_run_ids`` 清掉：SQLite 的外键级联
+        依赖 ``PRAGMA foreign_keys``，测试库与部分部署未开启，不能指望它。
+
+        副作用：写库（未提交），需调用方提交事务。
+
+        Args:
+            run_ids: 执行记录主键列表
+
+        Returns:
+            删除行数；入参为空时返回 0
+        """
+        if not run_ids:
+            return 0
+
+        result = self._session.execute(delete(AgentRun).where(AgentRun.id.in_(run_ids)))
+        return int(result.rowcount or 0)
 
     def find_cleanup_candidates(
         self,
