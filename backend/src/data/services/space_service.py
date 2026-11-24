@@ -1,7 +1,7 @@
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from src.core.config import get_backend_root
+from src.core.config import get_backend_root, get_config
 from src.core.errors import ConflictError, NotFoundError
 from src.core.logging import get_logger
 from src.data.models.space import Space
@@ -102,12 +102,14 @@ class SpaceService(BaseService[Space, SpaceRepository]):
         return space
 
     def delete_space(self, space_id: int) -> None:
-        """删除空间记录并归档工作区目录。
+        """删除空间记录、级联数据、向量集合，并归档工作区目录。
 
+        数据库侧由 ``delete_cascade`` 处理；向量集合（``space_knowledge_{id}``）在
+        库之外，需要单独清理，否则切片行删了而向量仍留在 Chroma 里成为孤儿。
         目录只重命名为 ``.deleted-{ts}``，不物理删除，保留恢复窗口；若事务随后回滚，
         目录由 ``ensure()`` 在下次访问时重建骨架。
 
-        副作用：写库（未提交）、重命名磁盘目录。
+        副作用：写库（未提交）、删除向量集合、重命名磁盘目录。
 
         Args:
             space_id: 空间主键
@@ -118,6 +120,7 @@ class SpaceService(BaseService[Space, SpaceRepository]):
         if not self.repo.delete_cascade(space_id):
             raise NotFoundError("空间不存在")
         self._session.flush()
+        self._drop_vector_collection(space_id)
         get_workspace_manager().archive(space_id)
 
     def get_space(self, space_id: int) -> Space | None:
@@ -132,6 +135,32 @@ class SpaceService(BaseService[Space, SpaceRepository]):
         return self.get(space_id)
 
     # 内部方法
+
+    @staticmethod
+    def _drop_vector_collection(space_id: int) -> None:
+        """尽力删除空间的知识库向量集合，失败只记日志。
+
+        向量库是外部服务：未启用、连不上或集合本就不存在都不应阻断空间删除，
+        因此整体吞异常。集合不存在时直接跳过，避免把正常情况记成告警。
+
+        副作用：删除 Chroma 集合（不可恢复）。
+
+        Args:
+            space_id: 空间主键
+        """
+        if not get_config().chroma.enabled:
+            return
+
+        from src.core.chroma.chroma_manager import get_chroma_manager
+        from src.memory.vector_store import collection_name
+
+        name = collection_name(space_id)
+        try:
+            manager = get_chroma_manager()
+            if name in manager.list_collections():
+                manager.delete_collection(name)
+        except Exception as exc:  # 向量库异常不影响库内数据删除
+            logger.warning("空间向量集合删除失败", space_id=str(space_id), collection=name, error=str(exc))
 
     @staticmethod
     def _workspace_path(space_id: int) -> str:
