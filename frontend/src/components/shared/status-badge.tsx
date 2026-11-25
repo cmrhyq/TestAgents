@@ -4,23 +4,38 @@ interface StatusBadgeProps {
   status: string | number;
 }
 
-/** 各状态名的徽章配色。 */
+/** 各状态名的徽章样式：柔和底色 + 语义文字色 + 状态点。 */
 const statusStyles: Record<string, string> = {
-  completed: "border-success/50 bg-success/5 text-success",
-  passed: "border-success/50 bg-success/5 text-success",
-  failed: "border-destructive/50 bg-destructive/5 text-destructive",
-  cancelled: "border-border bg-muted text-muted-foreground",
-  error: "border-destructive/50 bg-destructive/5 text-destructive",
-  running: "border-info/50 bg-info/5 text-info animate-pulse",
-  pending: "border-dashed border-info/60 bg-transparent text-info",
-  skipped: "border-warning/50 bg-warning/5 text-warning",
-  active: "border-success/50 bg-success/5 text-success",
-  inactive: "border-border bg-muted text-muted-foreground",
-  deleted: "border-border bg-muted text-muted-foreground",
-  deprecated: "border-warning/50 bg-warning/5 text-warning",
+  completed: "bg-surface-success text-success",
+  passed: "bg-surface-success text-success",
+  failed: "bg-surface-destructive text-destructive",
+  error: "bg-surface-destructive text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+  skipped: "bg-surface-warning text-warning",
+  deprecated: "bg-surface-warning text-warning",
+  running: "bg-surface-accent text-accent",
+  pending: "bg-muted text-muted-foreground",
+  active: "bg-surface-success text-success",
+  inactive: "bg-muted text-muted-foreground",
+  deleted: "bg-muted text-muted-foreground",
 };
 
-const DEFAULT_STYLE = "border-border bg-muted text-muted-foreground";
+const DOT_COLORS: Record<string, string> = {
+  completed: "bg-success",
+  passed: "bg-success",
+  active: "bg-success",
+  failed: "bg-destructive",
+  error: "bg-destructive",
+  skipped: "bg-warning",
+  deprecated: "bg-warning",
+  running: "bg-accent",
+  pending: "bg-muted-foreground/50",
+  cancelled: "bg-muted-foreground/50",
+  inactive: "bg-muted-foreground/50",
+  deleted: "bg-muted-foreground/50",
+};
+
+const DEFAULT_STYLE = "bg-muted text-muted-foreground";
 
 const STATUS_LABELS: Record<string, string> = {
   completed: "已完成",
@@ -45,12 +60,13 @@ const NUMERIC_STATUS: Record<number, string> = {
   4: "deprecated",
 };
 
-/** 状态徽章：把字符串或数值状态统一渲染为带配色的标签。 */
+/** 状态徽章：把字符串或数值状态统一渲染为带配色与状态点的标签。 */
 export function StatusBadge({ status }: StatusBadgeProps) {
   const normalized = (
     typeof status === "number" ? (NUMERIC_STATUS[status] ?? "") : status
   ).toLowerCase();
   const style = statusStyles[normalized] ?? DEFAULT_STYLE;
+  const dot = DOT_COLORS[normalized];
   const label =
     STATUS_LABELS[normalized] ??
     (normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : String(status));
@@ -58,10 +74,20 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-[2px] border px-1.5 py-0.5 font-mono text-[11px] font-medium",
+        "inline-flex items-center gap-1.5 rounded-md px-1.5 text-[12px] font-medium leading-5",
         style
       )}
     >
+      {dot && (
+        <span
+          className={cn(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            dot,
+            normalized === "running" && "animate-pulse"
+          )}
+          aria-hidden="true"
+        />
+      )}
       {label}
     </span>
   );

@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
-from data.constant.agent import AGENT_MAX_PROMPT_CHARS, AGENT_MAX_MEMORY_CHARS
 from src.agent.modes import ModePolicy
+from src.agent.prompt.agent import AGENT_BASE_PERSONA, AGENT_TOOL_RULES
+from src.data.constant.agent import AGENT_MAX_MEMORY_CHARS, AGENT_MAX_PROMPT_CHARS
 
 
 @dataclass(slots=True)
@@ -23,6 +23,8 @@ class SpaceSnapshot:
     endpoint_count: int = 0
     environments: list[dict[str, Any]] = field(default_factory=list)
     agents_md: str = ""
+    # 接口标签分布，形如 [("用户管理", 12), ("订单", 8)]；为空时不渲染该行
+    tag_counts: list[tuple[str, int]] = field(default_factory=list)
 
 
 def build_system_prompt(
@@ -79,6 +81,11 @@ def _render_space(space: SpaceSnapshot) -> str:
         f"- 空间 ID：{space.space_id}",
         f"- 已登记接口数：{space.endpoint_count}",
     ]
+
+    if space.tag_counts:
+        # 只列常用标签；模型可据此用 get_space_endpoints(tag=...) 取子集，避免读入全部接口
+        summary = "、".join(f"{name}({count})" for name, count in space.tag_counts)
+        lines.append(f"- 接口标签分布：{summary}")
 
     if space.environments:
         lines.append("- 测试环境：")

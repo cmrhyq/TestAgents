@@ -73,7 +73,7 @@ export function SkillSelector({ spaceId, selected, onToggle, disabled }: SkillSe
               >
                 <span
                   className={cn(
-                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] border",
+                    "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-md border",
                     active ? "border-primary bg-primary text-primary-foreground" : "border-border"
                   )}
                   aria-hidden="true"
@@ -83,7 +83,7 @@ export function SkillSelector({ spaceId, selected, onToggle, disabled }: SkillSe
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate font-mono text-xs text-foreground">{skill.name}</span>
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+                    <span className="shrink-0 text-xs text-muted-foreground">
                       {skill.scope === "builtin" ? "内置" : "空间"}
                     </span>
                   </span>

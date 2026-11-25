@@ -8,24 +8,26 @@ import type { VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[2px] text-sm font-medium transition-colors duration-200 ease-out-expo focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-medium transition-[background-color,color,border-color,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
+        // 主行动：单色实心，不用彩色强调
         default:
-          "border border-primary bg-primary text-primary-foreground shadow-xs hover:brightness-110",
+          "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/85",
+        secondary: "border border-border bg-muted text-foreground hover:bg-hover-strong",
+        outline: "border border-border bg-card text-foreground hover:bg-hover",
+        ghost: "text-muted-foreground hover:bg-hover hover:text-foreground",
         destructive:
-          "border border-destructive bg-destructive text-destructive-foreground shadow-xs hover:brightness-110",
-        outline: "border border-border bg-card text-foreground shadow-xs hover:bg-muted",
-        secondary: "border border-transparent bg-muted text-foreground hover:bg-secondary",
-        ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-        link: "text-accent underline-offset-4 hover:underline bg-transparent",
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/85",
+        link: "text-accent underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-8 px-3 py-1",
-        sm: "h-7 px-2 text-xs",
-        lg: "h-9 px-4",
-        icon: "h-8 w-8",
+        default: "h-8 px-3 [&_svg]:size-4",
+        sm: "h-7 gap-1 px-2.5 text-[12px] [&_svg]:size-3.5",
+        lg: "h-9 px-4 text-sm [&_svg]:size-4",
+        icon: "h-8 w-8 [&_svg]:size-4",
+        "icon-sm": "h-7 w-7 [&_svg]:size-3.5",
       },
     },
     defaultVariants: {

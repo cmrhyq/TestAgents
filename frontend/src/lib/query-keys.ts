@@ -15,7 +15,11 @@ function createResourceKeys<const TPrefix extends string>(prefix: TPrefix) {
  */
 export const queryKeys = {
   spaces: createResourceKeys("spaces"),
-  endpoints: createResourceKeys("endpoints"),
+  endpoints: {
+    ...createResourceKeys("endpoints"),
+    /** 空间内的标签聚合，供筛选器与表单联想 */
+    tags: (spaceId: ResourceId | null | undefined) => ["endpoints", "tags", spaceId] as const,
+  },
   environments: createResourceKeys("environments"),
   agentRuns: {
     ...createResourceKeys("agent-runs"),

@@ -2,11 +2,10 @@ import { Link } from "react-router-dom";
 import { MessageSquare, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { EmptyState } from "@/components/shared/empty-state.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
 import { useDeleteConversation, useSpaceConversations } from "@/hooks/use-conversations.ts";
-import { MODE_LABELS, type ConversationMode } from "@/lib/types";
+import { AgentModeBadge } from "@/components/shared/agent-mode-badge.tsx";
 
 /**
  * 会话 tab：空间下开过的全部对话。
@@ -48,7 +47,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
         description="在对话页选择本空间后开始第一次测试对话。"
         action={
           <Button asChild size="sm">
-            <Link to={`/chat?space_id=${spaceId}`}>开始对话</Link>
+            <Link to={`/spaces/${spaceId}/chat`}>开始对话</Link>
           </Button>
         }
       />
@@ -60,15 +59,12 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 个会话</p>
         <Button asChild size="sm">
-          <Link to={`/chat?space_id=${spaceId}`}>新建对话</Link>
+          <Link to={`/spaces/${spaceId}/chat`}>新建对话</Link>
         </Button>
       </div>
 
       <ul className="divide-y divide-border rounded-[3px] border border-border">
         {conversations.map((conversation) => {
-          const mode = (MODE_LABELS[conversation.mode as ConversationMode] ??
-            conversation.mode) as string;
-
           return (
             <li
               key={conversation.id}
@@ -77,7 +73,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
               <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
 
               <Link
-                to={`/chat?space_id=${spaceId}&conversation_id=${conversation.id}`}
+                to={`/spaces/${spaceId}/chat?conversation_id=${conversation.id}`}
                 className="min-w-0 flex-1 no-underline"
               >
                 <span className="block truncate text-sm text-foreground">
@@ -90,9 +86,7 @@ export function ConversationsTab({ spaceId }: { spaceId: string }) {
                 </span>
               </Link>
 
-              <Badge variant="outline" className="shrink-0 text-[10px]">
-                {mode}
-              </Badge>
+              <AgentModeBadge mode={conversation.mode}></AgentModeBadge>
 
               {conversation.skill_names.length > 0 && (
                 <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/70 sm:block">

@@ -7,6 +7,10 @@ AGENT_MAX_MEMORY_CHARS = 3_000
 # 单个工具结果下发的字符上限，避免大响应体拖慢前端渲染
 AGENT_MAX_TOOL_RESULT_CHARS = 4_000
 
+# 注入 prompt 的接口标签个数上限。标签过多会挤占空间上下文预算，
+# 且长尾标签对模型选择接口帮助有限
+AGENT_MAX_PROMPT_TAGS = 8
+
 # 默认模式的最大工具调用轮次。兜住模型陷入死循环的情况。
 AGENT_DEFAULT_MAX_STEPS = 100
 

@@ -59,14 +59,14 @@ export function SpaceSelector({
           type="button"
           disabled={isDisabled}
           className={cn(
-            "group inline-flex h-8 items-center gap-2 rounded-[2px] border border-border bg-card px-2.5 shadow-xs transition-colors duration-200 ease-out-expo",
+            "group inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-2.5 shadow-xs transition-colors duration-200 ease-out-expo",
             "hover:border-primary/50 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             "disabled:cursor-not-allowed disabled:opacity-40"
           )}
         >
-          <span className="hidden items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground sm:flex">
-            <Briefcase className="h-3.5 w-3.5 text-primary" />
-            Space
+          <span className="hidden items-center gap-1 text-xs font-medium text-muted-foreground sm:flex">
+            <Briefcase className="h-3.5 w-3.5 text-accent" />
+            空间
           </span>
 
           <span
@@ -82,8 +82,8 @@ export function SpaceSelector({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-[220px] shadow-popover" align="start">
-        <div className="px-2.5 pb-1 pt-2 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-          Work Spaces
+        <div className="px-2.5 pb-1 pt-2 text-xs font-medium text-muted-foreground">
+          工作空间
         </div>
         {spaces.length === 0 ? (
           <DropdownMenuItem disabled className="text-muted-foreground">
@@ -111,7 +111,7 @@ export function SpaceSelector({
                     {space.description || "—"}
                   </span>
                 </span>
-                {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
               </DropdownMenuItem>
             );
           })

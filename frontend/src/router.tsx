@@ -1,12 +1,15 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/layout/app-layout";
+import { AppHydrateFallback } from "./components/layout/app-hydrate-fallback";
 import ErrorPage from "./pages/error/error-page.tsx";
 import NotFoundPage from "./pages/error/not-found.tsx";
+import { LegacyChatRedirect } from "./pages/chat/legacy-chat-redirect.tsx";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     element: <AppLayout />,
+    hydrateFallbackElement: <AppHydrateFallback />,
     children: [
       {
         errorElement: <ErrorPage />,
@@ -53,7 +56,8 @@ export const router = createBrowserRouter([
             },
           },
           {
-            path: "chat",
+            // 对话作为空间详情的子路由：spaceId 由路径决定，conversation_id 走查询参数
+            path: "spaces/:spaceId/chat",
             lazy: async () => {
               const { default: Component } = await import("./pages/chat/chat.tsx");
               return { Component };
@@ -67,13 +71,17 @@ export const router = createBrowserRouter([
             },
           },
           {
-            // 旧路径兜底：/workflows/chat 是历史入口，书签里可能还在，重定向而不是 404
+            // 旧路径兜底：/chat 与 /workflows/* 是历史入口，书签里可能还在，重定向而不是 404
+            path: "chat",
+            element: <LegacyChatRedirect />,
+          },
+          {
             path: "workflows/chat",
-            element: <Navigate to="/chat" replace />,
+            element: <LegacyChatRedirect />,
           },
           {
             path: "workflows/run",
-            element: <Navigate to="/chat" replace />,
+            element: <LegacyChatRedirect />,
           },
           {
             path: "reports",

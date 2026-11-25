@@ -12,6 +12,26 @@ from src.data.services.base_service import BaseService
 
 logger = get_logger(__name__)
 
+# 以 JSON 字符串入库的结构字段。写入前必须序列化，读取时由 schema 层还原。
+_JSON_FIELDS = ("tags", "params", "headers", "body", "responses", "security")
+
+
+def _dump_json_fields(values: dict) -> dict:
+    """把结构字段中的列表/字典序列化为 JSON 字符串。
+
+    就地修改传入字典并返回，便于在 ``model_dump()`` 之后链式调用。
+
+    Args:
+        values: 待入库的字段字典
+
+    Returns:
+        序列化后的同一字典
+    """
+    for field in _JSON_FIELDS:
+        if isinstance(values.get(field), (list, dict)):
+            values[field] = json.dumps(values[field], ensure_ascii=False)
+    return values
+
 
 class EndpointService(BaseService[Endpoint, EndpointRepository]):
     """接口业务逻辑。
@@ -47,24 +67,36 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
             raise ValidationError("接口必须关联空间")
         if self.repo.check_duplicate(data.space_id, data.path, data.method):
             raise ConflictError(f"接口已存在: {data.method} {data.path}")
-        values = data.model_dump()
-        for field in ("tags", "params", "headers", "body", "responses", "security"):
-            if isinstance(values.get(field), (list, dict)):
-                values[field] = json.dumps(values[field], ensure_ascii=False)
+        values = _dump_json_fields(data.model_dump())
         values["method"] = values["method"].upper()
         return self.create(Endpoint(**values))
 
     def list_endpoints(
-        self, space_id: int | None, method: str | None, keyword: str | None, page: int, page_size: int
-    ):
-        """按空间、方法与关键字分页查询接口，不按状态过滤。
+        self,
+        space_id: int | None,
+        method: str | None,
+        keyword: str | None,
+        page: int,
+        page_size: int,
+        *,
+        tags: list[str] | None = None,
+        tags_mode: str = "any",
+        status: int | None = None,
+    ) -> tuple[list[Endpoint], int]:
+        """按空间、方法、标签、状态与关键字分页查询接口。
+
+        ``status`` 为空时不做状态过滤（保持既有行为：已删标记的接口仍会出现在
+        列表里，交由前端按需筛选）。
 
         Args:
             space_id: 空间主键；None 表示全部空间
             method: HTTP 方法，内部转大写比较；空值表示不过滤
-            keyword: 模糊匹配名称、路径、摘要与方法；空值表示不过滤
+            keyword: 模糊匹配名称、路径、摘要、方法与标签；空值表示不过滤
             page: 页码，从 1 开始
             page_size: 每页条数
+            tags: 标签集合，空集合表示不过滤
+            tags_mode: ``any`` 命中任一标签，``all`` 需同时命中全部标签
+            status: 数据状态；None 表示不过滤
 
         Returns:
             当前页接口列表与总数
@@ -74,6 +106,8 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
             filters.append(Endpoint.space_id == space_id)
         if method:
             filters.append(Endpoint.method == method.upper())
+        if status is not None:
+            filters.append(Endpoint.status == status)
         if keyword:
             pattern = f"%{keyword}%"
             filters.append(
@@ -82,9 +116,24 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
                     Endpoint.path.ilike(pattern),
                     Endpoint.summary.ilike(pattern),
                     Endpoint.method.ilike(pattern),
+                    Endpoint.tags.ilike(pattern),
                 )
             )
+        tag_filter = self.repo.tag_condition(tags or [], match_all=tags_mode == "all")
+        if tag_filter is not None:
+            filters.append(tag_filter)
         return self.list(page, page_size, *filters)
+
+    def list_tag_facets(self, space_id: int) -> list[tuple[str, int]]:
+        """列出空间内的标签及其接口数量，供筛选器与表单联想使用。
+
+        Args:
+            space_id: 空间主键
+
+        Returns:
+            ``(标签名, 接口数)`` 列表，按数量降序排列
+        """
+        return self.repo.get_tag_facets(space_id)
 
     def update_endpoint(self, endpoint_id: int, fields: dict) -> Endpoint:
         """局部更新接口，改动路径或方法时校验唯一性。
@@ -102,19 +151,34 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
             ConflictError: 新的 ``(path, method)`` 与同空间其他接口冲突
             NotFoundError: 接口不存在
         """
-        if "path" in fields or "method" in fields:
-            current = self.get_or_raise(endpoint_id, "接口不存在")
-            new_path = fields.get("path", current.path)
-            new_method = str(fields.get("method", current.method)).upper()
-            duplicates = self.repo.find_by_identity(current.space_id, new_path, new_method)
-            if any(dup.id != endpoint_id for dup in duplicates):
-                raise ConflictError(f"接口已存在: {new_method} {new_path}")
-        for field in ("tags", "params", "headers", "body", "responses", "security"):
-            if isinstance(fields.get(field), (list, dict)):
-                fields[field] = json.dumps(fields[field], ensure_ascii=False)
+        for field in ("path", "method"):
+            if field in fields:
+                current = self.get_or_raise(endpoint_id, "接口不存在")
+                new_path = fields.get("path", current.path)
+                new_method = self._normalize_method(fields.get("method", current.method))
+                duplicates = self.repo.find_by_identity(current.space_id, new_path, new_method)
+                if any(dup.id != endpoint_id for dup in duplicates):
+                    raise ConflictError(f"接口已存在: {new_method} {new_path}")
+                break
+        _dump_json_fields(fields)
         if fields.get("method"):
-            fields["method"] = str(fields["method"]).upper()
+            fields["method"] = self._normalize_method(fields["method"])
         return self.update(endpoint_id, **fields)
+
+    @staticmethod
+    def _normalize_method(value) -> str:
+        """把 HTTP 方法统一为入库用的大写字符串。
+
+        ``fields`` 中的 method 可能来自枚举 ``HttpMethod``，直接 ``str()`` 会得到
+        ``"HttpMethod.GET"`` 这类非法值，需先取 ``value``。
+
+        Args:
+            value: HTTP 方法，字符串或 ``HttpMethod`` 枚举
+
+        Returns:
+            大写的 HTTP 方法字符串
+        """
+        return str(getattr(value, "value", value)).upper()
 
     def get_active_by_ids(self, endpoint_ids: list[int]) -> list[Endpoint]:
         """按主键列表取启用接口。
@@ -156,8 +220,8 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
     def create_endpoint(self, endpoints: list[EndpointCreate]) -> list[Endpoint]:
         """按 ``(space_id, path, method)`` 去重后批量创建接口。
 
-        与 ``create_one`` 不同，本方法不序列化结构字段、不转写 ``method``，
-        入参需已符合入库格式。
+        与 ``create_one`` 一致：结构字段在此序列化、``method`` 统一转大写，
+        调用方无需预先处理。
 
         副作用：写库（未提交），需调用方提交事务；失败时记录日志并原样抛出。
 
@@ -177,6 +241,9 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
         logger.info(f"开始创建接口，数量: {len(endpoints)}", action="create_endpoint", count=len(endpoints))
 
         try:
+            for endpoint in endpoints:
+                endpoint.method = self._normalize_method(endpoint.method)
+
             existing_keys = self._get_existing_keys(endpoints)
             logger.debug(
                 f"已存在记录查询完成，重复数: {len(existing_keys)}",
@@ -184,7 +251,7 @@ class EndpointService(BaseService[Endpoint, EndpointRepository]):
                 existing_count=len(existing_keys),
             )
             new_data = [
-                endpoint.model_dump()
+                _dump_json_fields(endpoint.model_dump())
                 for endpoint in endpoints
                 if (endpoint.space_id, endpoint.path, endpoint.method) not in existing_keys
             ]

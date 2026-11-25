@@ -14,7 +14,7 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
 
   const statusIcon =
     call.status === "running" ? (
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
     ) : call.status === "ok" ? (
       <Check className="h-3.5 w-3.5 text-success" />
     ) : (
@@ -24,12 +24,12 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
   const duration = call.status === "running" ? "" : ` · ${call.durationMs}ms`;
 
   return (
-    <div className="rounded-[3px] border border-border bg-background/60">
+    <div className="rounded-md border border-border-subtle bg-card">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded-md"
       >
         <ChevronRight
           className={cn(
@@ -38,8 +38,8 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
           )}
         />
         <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate font-mono text-xs font-medium text-foreground">{call.name}</span>
-        <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
+        <span className="truncate font-mono text-[12px] font-medium text-foreground">{call.name}</span>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
           {duration}
         </span>
         {statusIcon}
@@ -48,8 +48,8 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
       {open && (
         <div className="space-y-2 border-t border-border-subtle px-2.5 py-2">
           <div>
-            <div className="annotation mb-1 text-muted-foreground">ARGS</div>
-            <pre className="max-h-40 overflow-auto rounded-[2px] bg-muted/50 p-1.5 font-mono text-[11px] leading-relaxed text-foreground">
+            <div className="mb-1 text-[11px] font-medium text-muted-foreground">参数</div>
+            <pre className="max-h-40 overflow-auto rounded-md bg-muted p-2 font-mono text-[11px] leading-4 text-foreground">
               {call.args && Object.keys(call.args).length > 0
                 ? JSON.stringify(call.args, null, 2)
                 : "（无参数）"}
@@ -58,15 +58,15 @@ export function ToolCallCard({ call }: { call: ToolCallRecord }) {
 
           {call.status !== "running" && (
             <div>
-              <div className="annotation mb-1 text-muted-foreground">
-                {call.status === "ok" ? "RESULT" : "ERROR"}
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                {call.status === "ok" ? "结果" : "错误"}
               </div>
               <pre
                 className={cn(
-                  "max-h-60 overflow-auto rounded-[2px] p-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words",
+                  "max-h-60 overflow-auto rounded-md p-2 font-mono text-[11px] leading-4 whitespace-pre-wrap break-words",
                   call.status === "ok"
-                    ? "bg-muted/50 text-foreground"
-                    : "bg-destructive/10 text-destructive"
+                    ? "bg-muted text-foreground"
+                    : "bg-surface-destructive text-destructive"
                 )}
               >
                 {call.content || "（空）"}
@@ -85,7 +85,7 @@ export function ToolCallList({ calls }: { calls: ToolCallRecord[] }) {
 
   return (
     <div className="space-y-1.5">
-      <div className="annotation text-muted-foreground">TOOL_TRACE · {calls.length}</div>
+      <div className="text-[11px] font-medium text-muted-foreground">工具调用 · {calls.length}</div>
       {calls.map((call) => (
         <ToolCallCard key={call.id} call={call} />
       ))}

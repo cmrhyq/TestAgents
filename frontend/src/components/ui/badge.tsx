@@ -6,21 +6,21 @@ import type { VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center gap-1 rounded-md border border-transparent px-1.5 text-[12px] font-medium leading-5 transition-colors",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
-        success:
-          "border-transparent bg-green-600 text-primary-foreground shadow hover:bg-green-600/80",
-        secondary: "border-transparent bg-muted text-muted-foreground hover:bg-secondary",
-        destructive:
-          "border-transparent bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/80",
-        outline: "border border-border text-foreground",
+        default: "bg-primary text-primary-foreground",
+        secondary: "bg-muted text-muted-foreground",
+        success: "bg-surface-success text-success",
+        warning: "bg-surface-warning text-warning",
+        info: "bg-surface-accent text-accent",
+        destructive: "bg-surface-destructive text-destructive",
+        outline: "border-border bg-transparent text-foreground",
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "secondary",
     },
   }
 );

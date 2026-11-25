@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as AccordionPrimitive from "@radix-ui/react-accordion";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, Folder, PlusCircle, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useSpaces } from "@/hooks/use-spaces";
 import {
@@ -93,6 +93,7 @@ interface SpaceAccordionItemProps {
 
 function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, isLoading } = useConversations({
     space_id: spaceId,
     status: 1,
@@ -106,43 +107,54 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
 
   const conversations = data?.items ?? [];
 
+  // 当前路由处于本空间的对话页时，从 URL 解析出正在查看的会话，用于高亮与删除跳转判断
+  const chatMatch = location.pathname.match(/^\/spaces\/([^/]+)\/chat$/);
+  const isSpaceChat = chatMatch?.[1] === String(spaceId);
+  const activeConversationId = isSpaceChat
+    ? new URLSearchParams(location.search).get("conversation_id")
+    : null;
+  const isNewChatState = isSpaceChat && !activeConversationId;
+
   const handleNewConversation = () => {
-    navigate(`/workflows/chat?space_id=${spaceId}`);
+    navigate(`/spaces/${spaceId}/chat`);
   };
 
   const handleOpen = (id: string | number) => {
-    navigate(`/workflows/chat?conversation_id=${id}`);
+    navigate(`/spaces/${spaceId}/chat?conversation_id=${id}`);
   };
 
   return (
     <AccordionItem value={String(spaceId)} className="border-none">
-      <AccordionPrimitive.Header className="flex">
-        <AccordionPrimitive.Trigger
-          className={cn(
-            "group flex flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium transition-colors hover:bg-muted hover:no-underline [&[data-state=open]_.space-chevron]:rotate-180"
-          )}
-        >
-          <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-left text-foreground">{spaceName}</span>
-          <ChevronDown className="space-chevron h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200" />
-          <span
-            className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
+      {/* 折叠与新建是两个并列按钮，不再相互嵌套；focus-within 保证键盘用户也能看到新建入口 */}
+      <AccordionPrimitive.Header asChild>
+        <div className="group relative flex items-center rounded-md text-[13px] leading-5 transition-colors hover:bg-hover focus-within:bg-hover">
+          <AccordionPrimitive.Trigger
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 pr-[76px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 [&[data-state=open]_.space-chevron]:rotate-180"
+            )}
           >
-            <button
-              type="button"
-              aria-label="新建对话"
-              className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNewConversation();
-              }}
-            >
-              <PlusCircle className="h-3.5 w-3.5" />
-            </button>
-          </span>
-        </AccordionPrimitive.Trigger>
+            <Folder className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+              {spaceName}
+            </span>
+            <ChevronDown className="space-chevron h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200" />
+          </AccordionPrimitive.Trigger>
+          <button
+            type="button"
+            aria-label="新建对话"
+            title="新建对话"
+            className={cn(
+              "absolute right-[52px] top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded opacity-0 transition-opacity",
+              "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+              isNewChatState
+                ? "bg-selected text-foreground"
+                : "text-muted-foreground hover:bg-hover-strong hover:text-foreground"
+            )}
+            onClick={handleNewConversation}
+          >
+            <PlusCircle className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </AccordionPrimitive.Header>
       <AccordionContent className="pb-1 pt-0">
         {isLoading ? (
@@ -157,7 +169,14 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
           <ul className="space-y-0.5 pl-6">
             {conversations.map((item) => (
               <li key={item.id} className="group/item">
-                <div className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
+                <div
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px] leading-5 transition-colors",
+                    String(item.id) === activeConversationId
+                      ? "bg-selected font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-hover hover:text-foreground"
+                  )}
+                >
                   <button
                     type="button"
                     className="min-w-0 flex-1 truncate text-left"
@@ -165,20 +184,20 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
                   >
                     {item.title || "未命名会话"}
                   </button>
-                  <span className="shrink-0 text-xs text-muted-foreground group-hover/item:hidden">
+                  <span className="shrink-0 text-[11px] text-muted-foreground group-hover/item:hidden">
                     {formatRelativeTime(item.last_message_at || item.updated_at)}
                   </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="会话操作"
-                          className="invisible shrink-0 rounded p-0.5 text-muted-foreground group-hover/item:visible hover:bg-background hover:text-foreground focus-visible:visible"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                      </DropdownMenuTrigger>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="会话操作"
+                        className="invisible flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-hover-strong hover:text-foreground focus-visible:visible group-hover/item:visible"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="shadow-popover">
                       <DropdownMenuItem onClick={() => setRenameTarget(item)}>
                         <Pencil className="h-3.5 w-3.5" />
@@ -218,7 +237,13 @@ function SpaceAccordionItem({ spaceId, spaceName }: SpaceAccordionItemProps) {
         }}
         onConfirm={() => {
           if (deleteTarget) {
-            deleteConversation.mutate(deleteTarget.id);
+            const wasActive = String(deleteTarget.id) === activeConversationId;
+            deleteConversation.mutate(deleteTarget.id, {
+              // 删除的是正在查看的会话时，主动跳回该空间的新建态，避免停在失效会话上
+              onSettled: () => {
+                if (wasActive) navigate(`/spaces/${spaceId}/chat`);
+              },
+            });
             setDeleteTarget(null);
           }
         }}
@@ -247,28 +272,32 @@ export function SpacesSection() {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <button
         type="button"
-        className="flex w-full shrink-0 items-center gap-1 px-5 py-3 text-left"
+        className="flex w-full shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-left"
         onClick={() => setSectionOpen((open) => !open)}
         aria-expanded={sectionOpen}
       >
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200",
             !sectionOpen && "-rotate-90"
           )}
         />
-        <span className="text-[11px] font-medium text-muted-foreground">空间 ({total})</span>
+        <span className="text-[11px] font-medium leading-4 text-muted-foreground">
+          空间会话 ({total})
+        </span>
       </button>
 
       {sectionOpen && (
-        <div className="spaces-scroll min-h-0 flex-1 px-3 pb-4">
+        <div className="spaces-scroll min-h-0 flex-1 px-2.5 pb-3">
           {isLoading && <SpacesSkeleton />}
 
-          {isError && <p className="px-2 py-2 text-xs text-destructive">加载空间列表失败</p>}
+          {isError && (
+            <p className="px-2 py-2 text-[12px] text-destructive">加载空间列表失败</p>
+          )}
 
           {!isLoading && !isError && spaces.length === 0 && (
-            <p className="px-2 py-2 text-xs text-muted-foreground">
-              暂无空间，请先在仪表盘创建空间
+            <p className="px-2 py-2 text-[12px] leading-4 text-muted-foreground">
+              暂无空间，先在「测试空间」创建一个
             </p>
           )}
 

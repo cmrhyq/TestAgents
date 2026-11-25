@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { HttpMethodBadge } from "@/components/shared/http-method-badge.tsx";
+import { EndpointTagList } from "@/components/shared/endpoint-tag-list.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import type { Column } from "@/components/shared/data-table.tsx";
 import type { AgentRun, Endpoint } from "@/lib/types.ts";
@@ -19,14 +20,34 @@ import { formatDate, formatDurationMs } from "@/lib/format";
 export interface EndpointRowHandlers {
   onEdit(endpoint: Endpoint): void;
   onDelete(endpoint: Endpoint): void;
+  /** 点击标签时按该标签筛选列表；不传则标签只读 */
+  onTagClick?(tag: string): void;
 }
 
 /** 构建接口表格的列定义。 */
 export function buildEndpointColumns({
   onEdit,
   onDelete,
+  onTagClick,
 }: EndpointRowHandlers): Column<Endpoint>[] {
   return [
+    {
+      key: "name",
+      header: "名称",
+      render: (_, row) => <span className="font-medium text-foreground">{row.name}</span>,
+    },
+    {
+      key: "summary",
+      header: "摘要",
+      render: (_, row) => <span className="text-xs text-foreground">{row.summary}</span>,
+    },
+    {
+      key: "path",
+      header: "路径",
+      render: (_, row) => (
+        <span className="text-xs text-muted-foreground">{row.path}</span>
+      ),
+    },
     {
       key: "method",
       header: "方法",
@@ -34,20 +55,16 @@ export function buildEndpointColumns({
       render: (_, row) => <HttpMethodBadge method={row.method} />,
     },
     {
-      key: "path",
-      header: "路径",
-      render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.path}</span>
-      ),
-    },
-    {
-      key: "name",
-      header: "名称",
-      render: (_, row) => <span className="font-medium text-foreground">{row.name}</span>,
+      key: "tags",
+      header: "标签",
+      // 宽度按「两个 84px 标签 + 折叠角标」预算，避免 +N 被裁掉
+      className: "w-[210px]",
+      render: (_, row) => <EndpointTagList tags={row.tags} onSelect={onTagClick} />,
     },
     {
       key: "status",
       header: "状态",
+      className: "w-30",
       render: (_, row) => <StatusBadge status={row.status === 1 ? "active" : "inactive"} />,
     },
     {

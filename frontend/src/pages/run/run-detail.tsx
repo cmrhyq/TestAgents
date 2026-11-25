@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Loader2 } from "lucide-react";
 
 import { useAgentRunDetail, useAgentToolCalls } from "@/hooks/use-agent-runs.ts";
 import { Button } from "@/components/ui/button.tsx";
+import { Badge } from "@/components/ui/badge.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { PassRateBar } from "@/components/shared/pass-rate-bar.tsx";
 import { QueryErrorState } from "@/components/shared/query-error-state.tsx";
+import { Readout, ReadoutBand } from "@/components/shared/readout.tsx";
+import { PageHeader } from "@/components/layout/page-header.tsx";
 import { ToolCallsTable } from "@/components/report/tool-calls-table.tsx";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/format";
 
@@ -34,23 +37,23 @@ export default function RunDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-[4px]" />
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-7 w-64" />
+        <ReadoutBand>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Readout key={i} label="—" value={<Skeleton className="h-6 w-10" />} />
           ))}
-        </div>
-        <Skeleton className="h-64 rounded-[4px]" />
+        </ReadoutBand>
+        <Skeleton className="h-64 rounded-lg" />
       </div>
     );
   }
 
   if (isError || !data) {
     return (
-      <div className="space-y-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
+      <div className="flex flex-col gap-4">
+        <Button variant="ghost" size="sm" className="self-start" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-3.5 w-3.5" />
           返回
         </Button>
         <QueryErrorState
@@ -65,112 +68,70 @@ export default function RunDetailPage() {
     );
   }
 
-  const readouts = [
-    {
-      label: "工具调用",
-      value: String(data.tool_call_count),
-      className: "text-foreground",
-      dot: null as string | null,
-    },
-    { label: "成功", value: String(data.ok_count), className: "text-success", dot: "bg-success" },
-    {
-      label: "失败",
-      value: String(data.error_count),
-      className: "text-destructive",
-      dot: "bg-destructive",
-    },
-    {
-      label: "LLM 调用",
-      value: String(data.llm_call_count),
-      className: "text-foreground",
-      dot: null,
-    },
-    {
-      label: "Tokens",
-      value: formatTokens(data.total_tokens),
-      className: "text-foreground",
-      dot: null,
-    },
-    { label: "成本", value: formatCost(data.cost_usd), className: "text-foreground", dot: null },
-  ];
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex flex-1 items-center gap-3">
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-            {data.title || `执行 ${data.id}`}
-          </h1>
-          <StatusBadge status={data.status} />
-          <span className="rounded-[2px] border border-border bg-muted px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            {data.mode}
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title={data.title || `执行 ${String(data.id)}`}
+        annotation={`执行记录 ${String(data.id)}`}
+        meta={
+          <>
+            <StatusBadge status={data.status} />
+            <Badge variant="info">{data.mode}</Badge>
+            <Badge variant="info">{data.trigger_type}</Badge>
+            {isActive && <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />}
+          </>
+        }
+        description={
+          <span className="tabular-nums">
+            {data.llm_provider || "—"} / {data.llm_model || "—"} · 总耗时{" "}
+            {formatDurationMs(data.duration_ms)}
           </span>
-          <span className="rounded-[2px] border border-border bg-muted px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            {data.trigger_type}
-          </span>
-          {isActive && <Loader2 className="h-4 w-4 animate-spin text-info" />}
-        </div>
-        {hasHttpCalls && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate(`/reports/${String(data.id)}`)}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            查看报告
-          </Button>
-        )}
-      </div>
+        }
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+              <ArrowLeft className="h-3.5 w-3.5" />
+              返回
+            </Button>
+            {hasHttpCalls && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/reports/${String(data.id)}`)}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                查看报告
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {data.error_message && (
-        <div className="rounded-[4px] border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-lg bg-surface-destructive px-4 py-3 text-[13px] leading-5 text-destructive">
           {data.error_message}
         </div>
       )}
 
-      <div className="rounded-[4px] border border-border bg-card shadow-xs">
-        <div className="flex flex-col divide-y divide-border-subtle sm:flex-row sm:divide-x sm:divide-y-0">
-          {readouts.map((item) => (
-            <div key={item.label} className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {item.dot && (
-                  <span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} aria-hidden="true" />
-                )}
-                {item.label}
-              </span>
-              <span
-                className={`font-display text-3xl font-semibold tabular-nums tracking-tight ${item.className}`}
-              >
-                {item.value}
-              </span>
-            </div>
-          ))}
-          <div className="flex flex-1 flex-col justify-center gap-2 px-6 py-5">
-            <span className="text-xs text-muted-foreground">成功率</span>
-            <PassRateBar passed={data.ok_count} total={data.tool_call_count} />
-          </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-            <span className="text-xs text-muted-foreground">总耗时</span>
-            <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {formatDurationMs(data.duration_ms)}
-            </span>
-          </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
-            <span className="text-xs text-muted-foreground">平均工具耗时</span>
-            <span className="font-display text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {formatDurationMs(data.avg_response_time)}
-            </span>
-          </div>
+      <ReadoutBand>
+        <Readout label="工具调用" value={String(data.tool_call_count)} tone="accent" />
+        <Readout label="成功" value={String(data.ok_count)} tone="success" dot />
+        <Readout label="失败" value={String(data.error_count)} tone="danger" dot />
+        <div className="flex flex-col justify-center gap-1.5 px-4 py-3">
+          <span className="text-[12px] leading-4 text-muted-foreground">成功率</span>
+          <PassRateBar passed={data.ok_count} total={data.tool_call_count} />
         </div>
-      </div>
+        <Readout label="Tokens" value={formatTokens(data.total_tokens)} />
+        <Readout label="成本" value={formatCost(data.cost_usd)} />
+      </ReadoutBand>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-foreground">
-            工具调用留痕（{calls.length || data.tool_call_count}）
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[14px] font-semibold leading-5 text-foreground">
+            工具调用留痕
+            <span className="ml-1.5 text-[12px] font-normal text-muted-foreground">
+              {calls.length || data.tool_call_count} 条
+            </span>
           </h2>
           <div className="flex items-center gap-2">
             {!wantBody && (
@@ -178,13 +139,7 @@ export default function RunDetailPage() {
                 加载全部正文
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                refetchCalls();
-              }}
-            >
+            <Button variant="ghost" size="sm" onClick={() => refetchCalls()}>
               刷新
             </Button>
           </div>

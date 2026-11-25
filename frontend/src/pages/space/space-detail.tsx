@@ -1,14 +1,13 @@
-import { useEffect, useState } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { MessageSquare } from "lucide-react";
+import { useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 
 import { useSpace } from "@/hooks/use-spaces.ts";
-import { useEndpoints, useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
-import { useEnvironments, useDeleteEnvironment } from "@/hooks/use-environments.ts";
-import { useAgentRuns } from "@/hooks/use-agent-runs.ts";
-import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
-import { Card, CardContent } from "@/components/ui/card.tsx";
+import { useDeleteEndpoint } from "@/hooks/use-endpoints.ts";
+import { useDeleteEnvironment } from "@/hooks/use-environments.ts";
+import { useDocumentTitle } from "@/hooks/use-document-title.ts";
 import { Button } from "@/components/ui/button.tsx";
+import { PageHeader } from "@/components/layout/page-header.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.tsx";
 import { EmptyState } from "@/components/shared/empty-state.tsx";
@@ -29,9 +28,12 @@ const SPACE_STATUS_MAP: Record<number, string> = {
   1: "已启用",
 };
 
-const PAGE_SIZE = 10;
-
-/** 空间详情页：概览、会话、接口、环境、记忆、知识库与执行记录。 */
+/**
+ * 空间详情页：概览、会话、接口、环境、记忆、知识库与执行记录。
+ *
+ * 各 tab 的数据查询下沉在 tab 组件内部，只有切到对应 tab（组件挂载）时才发起请求；
+ * 筛选与分页状态留在本组件，切换 tab 不会丢失。
+ */
 export default function SpaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -39,44 +41,27 @@ export default function SpaceDetailPage() {
 
   const { data: space, isLoading: spaceLoading } = useSpace(spaceId);
 
+  useDocumentTitle(spaceLoading ? "空间详情" : (space?.name ?? "空间详情"));
+
   const [endpointPage, setEndpointPage] = useState(1);
   const [agentRunPage, setAgentRunPage] = useState(1);
   const [endpointKeyword, setEndpointKeyword] = useState("");
-  const debouncedEndpointKeyword = useDebouncedValue(endpointKeyword, 300);
+  const [endpointTags, setEndpointTags] = useState<string[]>([]);
+  const [endpointTagsMode, setEndpointTagsMode] = useState<"any" | "all">("any");
 
-  useEffect(() => {
+  // 筛选条件变化时回到第 1 页。放在事件回调里而不是 effect 中，避免级联渲染
+  const handleKeywordChange = (value: string) => {
+    setEndpointKeyword(value);
     setEndpointPage(1);
-  }, [debouncedEndpointKeyword]);
-
-  const {
-    data: endpointsData,
-    isLoading: endpointsLoading,
-    isError: endpointsError,
-    refetch: refetchEndpoints,
-  } = useEndpoints({
-    space_id: spaceId,
-    keyword: debouncedEndpointKeyword || undefined,
-    page: endpointPage,
-    page_size: PAGE_SIZE,
-  });
-  const {
-    data: environmentsData,
-    isLoading: environmentsLoading,
-    isError: environmentsError,
-    refetch: refetchEnvironments,
-  } = useEnvironments({
-    space_id: spaceId,
-  });
-  const {
-    data: agentRunsData,
-    isLoading: agentRunsLoading,
-    isError: agentRunsError,
-    refetch: refetchAgentRuns,
-  } = useAgentRuns({
-    space_id: spaceId,
-    page: agentRunPage,
-    page_size: PAGE_SIZE,
-  });
+  };
+  const handleTagsChange = (tags: string[]) => {
+    setEndpointTags(tags);
+    setEndpointPage(1);
+  };
+  const handleTagsModeChange = (mode: "any" | "all") => {
+    setEndpointTagsMode(mode);
+    setEndpointPage(1);
+  };
 
   const deleteEndpoint = useDeleteEndpoint();
   const deleteEnvironment = useDeleteEnvironment();
@@ -105,34 +90,25 @@ export default function SpaceDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="bg-surface-primary/50">
-        <CardContent className="pt-6">
-          <div className="flex items-start justify-between">
-            <div className="min-w-0">
-              <div className="annotation mb-1.5 text-primary">SPACE_{space.id}</div>
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
-                {space.name}
-              </h1>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <Badge variant={space.status === 1 ? "success" : "secondary"}>
-                  {SPACE_STATUS_MAP[space.status] ?? "未知"}
-                </Badge>
-              </div>
-              {space.description && (
-                <p className="mt-2 text-sm text-muted-foreground">{space.description}</p>
-              )}
-            </div>
-
-            <Button asChild size="sm">
-              <Link to={`/chat?space_id=${space.id}`}>
-                <MessageSquare className="mr-2 h-3.5 w-3.5" />
-                开始对话
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title={space.name}
+        annotation={`空间 ${String(space.id)}`}
+        meta={
+          <Badge variant={space.status === 1 ? "success" : "secondary"}>
+            {SPACE_STATUS_MAP[space.status] ?? "未知"}
+          </Badge>
+        }
+        description={space.description || undefined}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/spaces/${spaceId}/chat`}>
+              <Sparkles className="h-3.5 w-3.5" />
+              开始对话
+            </Link>
+          </Button>
+        }
+      />
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList>
@@ -157,14 +133,12 @@ export default function SpaceDetailPage() {
           <EndpointsTab
             spaceId={spaceId}
             keyword={endpointKeyword}
-            onKeywordChange={setEndpointKeyword}
-            data={endpointsData?.items ?? []}
-            total={endpointsData?.total ?? 0}
-            loading={endpointsLoading}
-            error={endpointsError}
-            onRetry={() => refetchEndpoints()}
+            onKeywordChange={handleKeywordChange}
+            selectedTags={endpointTags}
+            onSelectedTagsChange={handleTagsChange}
+            tagsMode={endpointTagsMode}
+            onTagsModeChange={handleTagsModeChange}
             page={endpointPage}
-            pageSize={PAGE_SIZE}
             onPageChange={setEndpointPage}
             onAdd={() => {
               setEditingEndpoint(null);
@@ -180,10 +154,7 @@ export default function SpaceDetailPage() {
 
         <TabsContent value="environments" className="space-y-4">
           <EnvironmentsTab
-            data={environmentsData?.items ?? []}
-            loading={environmentsLoading}
-            error={environmentsError}
-            onRetry={() => refetchEnvironments()}
+            spaceId={spaceId}
             onAdd={() => {
               setEditingEnv(null);
               setEnvDialogOpen(true);
@@ -206,13 +177,8 @@ export default function SpaceDetailPage() {
 
         <TabsContent value="agent-runs" className="space-y-4">
           <AgentRunsTab
-            data={agentRunsData?.items ?? []}
-            total={agentRunsData?.total ?? 0}
-            loading={agentRunsLoading}
-            error={agentRunsError}
-            onRetry={() => refetchAgentRuns()}
+            spaceId={spaceId}
             page={agentRunPage}
-            pageSize={PAGE_SIZE}
             onPageChange={setAgentRunPage}
           />
         </TabsContent>

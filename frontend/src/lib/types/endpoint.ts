@@ -8,7 +8,8 @@ export interface Endpoint {
   name: string;
   path: string;
   method: string;
-  tags: string;
+  /** 标签数组。服务端库内存的是 JSON 字符串，接口层已解析为数组。 */
+  tags: string[];
   summary: string;
   description: string;
   params: string;
@@ -26,3 +27,9 @@ export interface Endpoint {
 
 /** 接口列表的分页响应。 */
 export type EndpointListResponse = PaginatedResponse<Endpoint>;
+
+/** 空间内的标签聚合项：标签名与带该标签的接口数量。 */
+export interface EndpointTagFacet {
+  name: string;
+  count: number;
+}

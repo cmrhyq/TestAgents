@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -74,6 +73,25 @@ def append_message(factory):
             session.commit()
 
     return _append
+
+
+@pytest.fixture()
+def make_run(factory):
+    """直接造一条执行记录与工具留痕，避免依赖 Agent 执行链路。"""
+
+    def _make(conversation_id: int, *, space_id: int = SPACE_ID) -> int:
+        from src.data.models.agent_run import AgentRun
+        from src.data.models.agent_tool_call import AgentToolCall
+
+        with factory() as session:
+            run = AgentRun(space_id=space_id, conversation_id=conversation_id, title="查接口")
+            session.add(run)
+            session.flush()
+            session.add(AgentToolCall(run_id=run.id, tool_name="send_request", call_id="call_1"))
+            session.commit()
+            return run.id
+
+    return _make
 
 
 def _create(client: TestClient, **overrides) -> dict:
@@ -169,6 +187,64 @@ class TestConversationCrud:
 
     def test_missing_conversation_is_404(self, client):
         assert client.get("/api/v1/conversations/999999").status_code == 404
+
+
+class TestConversationDeleteCascade:
+    """删除会话需连带清理执行记录与工具留痕，避免留下孤儿数据。"""
+
+    def test_delete_removes_agent_runs_and_tool_calls(self, client, make_run, factory):
+        cid = _create(client)["id"]
+        run_id = make_run(cid)
+
+        assert client.delete(f"/api/v1/conversations/{cid}").status_code == 204
+
+        with factory() as session:
+            from src.data.models.agent_run import AgentRun
+            from src.data.models.agent_tool_call import AgentToolCall
+
+            assert session.query(AgentRun).filter_by(conversation_id=cid).count() == 0
+            assert session.query(AgentToolCall).filter_by(run_id=run_id).count() == 0
+
+    def test_delete_keeps_runs_of_other_conversations(self, client, make_run, factory):
+        doomed = _create(client)["id"]
+        kept = _create(client)["id"]
+        doomed_run = make_run(doomed)
+        kept_run = make_run(kept)
+
+        client.delete(f"/api/v1/conversations/{doomed}")
+
+        with factory() as session:
+            from src.data.models.agent_run import AgentRun
+            from src.data.models.agent_tool_call import AgentToolCall
+
+            assert session.query(AgentRun).filter_by(id=doomed_run).count() == 0
+            assert session.query(AgentRun).filter_by(id=kept_run).count() == 1
+            assert session.query(AgentToolCall).filter_by(run_id=kept_run).count() == 1
+
+    def test_delete_keeps_llm_log_cost_history(self, client, make_run, factory):
+        """``llm_log`` 不建外键，成本历史需在会话删除后保留。"""
+        cid = _create(client)["id"]
+        run_id = make_run(cid)
+
+        with factory() as session:
+            from src.data.models.llm_log import LLMLog
+
+            session.add(LLMLog(model_name="test/model", space_id=SPACE_ID, conversation_id=cid, run_id=run_id))
+            session.commit()
+
+        client.delete(f"/api/v1/conversations/{cid}")
+
+        with factory() as session:
+            from src.data.models.llm_log import LLMLog
+
+            assert session.query(LLMLog).filter_by(run_id=run_id).count() == 1
+
+    def test_delete_without_runs_still_works(self, client, factory):
+        """没有执行记录的会话照常删除，不受级联清理影响。"""
+        cid = _create(client)["id"]
+
+        assert client.delete(f"/api/v1/conversations/{cid}").status_code == 204
+        assert client.get(f"/api/v1/conversations/{cid}").status_code == 404
 
 
 class TestSpaceConversationList:

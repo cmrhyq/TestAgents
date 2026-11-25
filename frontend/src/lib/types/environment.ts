@@ -9,6 +9,7 @@ export interface Environment {
   description: string;
   variables: string;
   is_default: number;
+  is_production: number;
   status: number;
   created_at: string;
   updated_at: string;

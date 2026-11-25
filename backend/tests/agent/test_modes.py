@@ -3,16 +3,8 @@
 模式的可执行约束只有工具白名单，prompt 中的劝告不构成限制，故断言落在过滤结果上。
 """
 
-import pytest
-
-from src.agent.modes import (
-    DEFAULT_MAX_STEPS,
-    PLAN_MAX_STEPS,
-    Mode,
-    filter_tools,
-    normalize_mode,
-    policy_for,
-)
+from src.agent.modes import Mode, filter_tools, normalize_mode, policy_for
+from src.data.constant.agent import AGENT_DEFAULT_MAX_STEPS, AGENT_PLAN_MAX_STEPS
 
 
 class FakeTool:
@@ -67,14 +59,14 @@ class TestPolicy:
     def test_plan_has_own_instruction(self):
         policy = policy_for("plan")
         assert "计划" in policy.instruction
-        assert policy.max_steps == PLAN_MAX_STEPS
+        assert policy.max_steps == AGENT_PLAN_MAX_STEPS
 
     def test_ask_instruction_forbids_execution(self):
         policy = policy_for("ask")
         assert "不要" in policy.instruction or "只回答" in policy.instruction
 
     def test_agent_default_steps(self):
-        assert policy_for("agent").max_steps == DEFAULT_MAX_STEPS
+        assert policy_for("agent").max_steps == AGENT_DEFAULT_MAX_STEPS
 
     def test_policy_exposes_label(self):
         assert policy_for("ask").label == "问答"

@@ -113,9 +113,10 @@ def update_space(space_id: int, body: SpaceUpdate, db: Session = Depends(get_db)
 
 @router.delete("/{space_id}", status_code=204)
 def delete_space(space_id: int, db: Session = Depends(get_db)):
-    """删除空间，级联删除其环境、接口、执行记录等数据。
+    """删除空间，级联删除其环境、接口、会话与消息、执行记录与工具留痕、
+    记忆、知识库文档与切片、空间级 skill 注册行，以及知识库向量集合。
 
-    工作目录仅归档改名，磁盘文件保留以便恢复。
+    工作目录仅归档改名，磁盘文件保留以便恢复；``llm_log`` 的成本历史同样保留。
 
     Args:
         space_id: 空间 ID

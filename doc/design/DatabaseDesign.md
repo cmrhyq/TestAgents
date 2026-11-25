@@ -109,7 +109,7 @@ DELETE），并把拒绝原因作为工具结果回灌模型，而不是抛异�
 | `name` | Text | NOT NULL | 接口名 |
 | `path` | Text | NOT NULL | 请求路径 |
 | `method` | Text | NOT NULL | HTTP 方法 |
-| `tags` | Text | default `"[]"` | 标签，JSON 数组字符串 |
+| `tags` | Text | default `"[]"` | 标签，JSON 数组字符串；API 出入参均为 `string[]` |
 | `summary` | Text | NULL | 简述 |
 | `description` | Text | default `""` | 详述 |
 | `params` | Text | NULL | 路径/查询参数定义，JSON |
@@ -133,7 +133,29 @@ DELETE），并把拒绝原因作为工具结果回灌模型，而不是抛异�
 
 索引：`idx_endpoint_space`（`space_id`）、`idx_endpoint_operation_id`（`operation_id`）。
 
-同一空间内「路径 + 方法」唯一：重复解析同一份 OpenAPI 文档不会产生重复接口。
+同一空间内「路径 + 方法」唯一：重复解析同一份 OpenAPI 文档不会产生重复接口；
+已存在的接口会被跳过，因此用户手工改过的标签在重新导入时不会被覆盖。
+
+### 4.1 tags 的存取与匹配
+
+`tags` 在库里是 JSON 数组字符串，在 API 上是字符串数组，转换发生在
+`src/data/schemas/endpoint.py`：请求进入时归一化（去空白、去空项、不区分大小写去重），
+响应输出时解析回数组。约束定义在 `src/data/constant/endpoint.py`——单个标签不超过
+32 字符、单接口不超过 10 个、禁止双引号与反斜杠。
+
+禁止双引号不是洁癖。按标签过滤走的是 `LIKE`，边界用双引号构成：
+
+```sql
+WHERE tags LIKE '%"用户"%' ESCAPE '\'
+```
+
+`"用户"` 这个子串不会命中 `"用户管理"`，因此这条 SQL 具备**精确元素匹配**语义。
+本项目的 SQLite 未编译 JSON1 扩展（`json_each` 调用会报 `no such function`），
+无法在 SQL 层展开数组，这是最接近 `json_each` 的替代方案。代价是标签不能含双引号——
+否则边界会歧义，故写入时直接拒绝。
+
+标签聚合（列表页的筛选项与表单联想）在 Python 侧完成，原因同上：没有 `json_each`
+就做不了 `GROUP BY`。单个空间的接口数量在数十至数百量级，代价可接受。
 
 ---
 
@@ -594,6 +616,7 @@ cd backend && uv run python app.py
 
 | 日期 | 说明 |
 |---|---|
+| 2026-11-18 | 补 §4.1：`tags` 的存取口径、LIKE 精确匹配原理、无 JSON1 时的聚合方案 |
 | 2026-11-04 | v2.0：按当前 ORM 全量重写。删除 `test_run` / `test_case` / `test_result` / `test_summary` / `report` 五张表的章节（已由 v3/v4 迁移删除）；新增 `agent_run` / `agent_tool_call`；补 `space.base_url` 已移除的说明；`llm_log` 增补 `run_id` 与 `idx_llm_log_run`；表数量由 15 更正为 12 |
 | 2026-10-21 | 补 `llm_log` 章节与归因列 |
 | 2026-08-27 | `project` → `space` 术语层重命名；新增 `conversation` / `message` |

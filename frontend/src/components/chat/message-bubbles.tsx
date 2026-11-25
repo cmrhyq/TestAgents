@@ -3,13 +3,34 @@ import { ToolCallList } from "@/components/chat/tool-call-card.tsx";
 import { MarkdownRenderer } from "@/components/markdown";
 import type { ToolCallRecord } from "@/hooks/use-chat.ts";
 
-/** 用户消息气泡。 */
+/** 流式等待指示：三点脉冲。 */
+function TypingDots() {
+  return (
+    <span className="flex items-center gap-1" aria-hidden="true">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+    </span>
+  );
+}
+
+/** 用户消息：右对齐的浅色块。 */
 export function UserBubble({ content }: { content: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-[4px] border border-primary/40 bg-surface-primary px-4 py-2 text-sm text-foreground">
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-selected px-3.5 py-2 text-[13px] leading-5 text-foreground">
         {content}
       </div>
+    </div>
+  );
+}
+
+/** Agent 输出的标签行，用于区分「谁在说话」。 */
+function AssistantLabel({ trailing }: { trailing?: string }) {
+  return (
+    <div className="mb-1.5 flex items-center gap-2">
+      <span className="text-[12px] font-medium leading-4 text-muted-foreground">Agent</span>
+      {trailing && <span className="text-[12px] leading-4 text-muted-foreground">{trailing}</span>}
     </div>
   );
 }
@@ -23,17 +44,9 @@ export function AssistantBubble({
   isStreaming?: boolean;
 }) {
   return (
-    <div className="flex gap-3">
-      <div className="w-0.5 shrink-0 self-stretch rounded-full bg-primary/50" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex items-center gap-2">
-          <span className="font-mono text-[11px] font-semibold uppercase tracking-widest text-primary">
-            Agent
-          </span>
-          <span className="h-px flex-1 border-t border-dashed border-border" aria-hidden="true" />
-        </div>
-        <MarkdownRenderer content={content} isStreaming={isStreaming} />
-      </div>
+    <div className="min-w-0">
+      <AssistantLabel />
+      <MarkdownRenderer content={content} isStreaming={isStreaming} />
     </div>
   );
 }
@@ -50,12 +63,8 @@ export function StreamingAssistantMessage({
 
   if (isStreaming && rawText.length === 0) {
     return (
-      <div className="flex items-center gap-2 pl-[14px] font-mono text-sm text-muted-foreground">
-        <span className="flex items-center gap-1" aria-hidden="true">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
-        </span>
+      <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+        <TypingDots />
         <span>处理中</span>
       </div>
     );
@@ -85,42 +94,25 @@ export function StreamingTurn({
   const idle = isStreaming && answer.length === 0 && tools.length === 0;
 
   return (
-    <div className="flex gap-3">
-      <div className="w-0.5 shrink-0 self-stretch rounded-full bg-primary/50" aria-hidden="true" />
-      <div className="min-w-0 flex-1 space-y-2.5">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] font-semibold uppercase tracking-widest text-primary">
-            Agent
-          </span>
-          <span className="h-px flex-1 border-t border-dashed border-border" aria-hidden="true" />
-          {isStreaming && (
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">
-              执行中
-            </span>
-          )}
+    <div className="min-w-0 space-y-2.5">
+      <AssistantLabel trailing={isStreaming ? "执行中" : undefined} />
+
+      {idle && (
+        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <TypingDots />
+          <span>处理中</span>
         </div>
+      )}
 
-        {idle && (
-          <div className="flex items-center gap-2 font-mono text-sm text-muted-foreground">
-            <span className="flex items-center gap-1" aria-hidden="true">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:150ms]" />
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary [animation-delay:300ms]" />
-            </span>
-            <span>处理中</span>
-          </div>
-        )}
+      {tools.length > 0 && <ToolCallList calls={tools} />}
 
-        {tools.length > 0 && <ToolCallList calls={tools} />}
+      {displayText && <MarkdownRenderer content={displayText} isStreaming={isStreaming} />}
 
-        {displayText && <MarkdownRenderer content={displayText} isStreaming={isStreaming} />}
-
-        {error && (
-          <div className="rounded-[3px] border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
-            {error}
-          </div>
-        )}
-      </div>
+      {error && (
+        <div className="rounded-md bg-surface-destructive px-3 py-2 text-[12px] leading-5 text-destructive">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

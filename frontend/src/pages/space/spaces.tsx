@@ -1,13 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  FolderPlus,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  SearchX,
+  Trash2,
+} from "lucide-react";
 
 import { useSpaces, useDeleteSpace } from "@/hooks/use-spaces.ts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value.ts";
+import { useDocumentTitle } from "@/hooks/use-document-title.ts";
 import { Button } from "@/components/ui/button.tsx";
-import { Badge } from "@/components/ui/badge.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { DataTable } from "@/components/shared/data-table.tsx";
+import { StatusBadge } from "@/components/shared/status-badge.tsx";
 import { PageHeader } from "@/components/layout/page-header.tsx";
 import { SpaceFormDialog } from "@/components/space/space-form-dialog.tsx";
 import { ConfirmDeleteDialog } from "@/components/shared/confirm-delete-dialog.tsx";
@@ -19,22 +29,53 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip.tsx";
 import type { Column } from "@/components/shared/data-table.tsx";
 import type { Space } from "@/lib/types.ts";
-import { formatDate } from "@/lib/format.ts";
+import { formatIsoDate } from "@/lib/format.ts";
 
 const PAGE_SIZE = 10;
-
-const STATUS_MAP: Record<number, string> = {
-  0: "未启用",
-  1: "已启用",
-};
 
 const STATUS_FILTERS = [
   { value: "all", label: "全部状态", status: undefined as number | undefined },
   { value: "1", label: "已启用", status: 1 },
   { value: "0", label: "未启用", status: 0 },
 ];
+
+interface SpaceActionsProps {
+  space: Space;
+  onEdit: (space: Space) => void;
+  onDelete: (space: Space) => void;
+}
+
+/** 行尾操作菜单：带 tooltip，菜单展开时隐藏提示避免重叠。 */
+function SpaceActions({ space, onEdit, onDelete }: SpaceActionsProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <Tooltip open={menuOpen ? false : undefined}>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="空间操作">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <DropdownMenuContent className="shadow-popover" align="end">
+          <DropdownMenuItem onClick={() => onEdit(space)}>
+            <Pencil className="h-3.5 w-3.5" />
+            编辑
+          </DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive" onClick={() => onDelete(space)}>
+            <Trash2 className="h-3.5 w-3.5" />
+            删除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <TooltipContent>空间操作</TooltipContent>
+    </Tooltip>
+  );
+}
 
 /** 空间列表页：搜索、状态筛选、创建与删除。 */
 export default function SpacesPage() {
@@ -50,11 +91,23 @@ export default function SpacesPage() {
 
   const deleteSpace = useDeleteSpace();
 
-  useEffect(() => {
-    setPage(1);
-  }, [debouncedKeyword, status]);
+  useDocumentTitle("测试空间");
 
-  const { data: spacesData, isLoading, isError, refetch } = useSpaces({
+  // 区分「没有数据」与「筛选后没有结果」，空态文案与操作据此切换
+  const hasFilters = Boolean(debouncedKeyword.trim()) || status !== undefined;
+  const clearFilters = () => {
+    setKeyword("");
+    setStatus(undefined);
+    setStatusFilter("all");
+    setPage(1);
+  };
+
+  const {
+    data: spacesData,
+    isLoading,
+    isError,
+    refetch,
+  } = useSpaces({
     keyword: debouncedKeyword || undefined,
     status,
     page,
@@ -68,105 +121,83 @@ export default function SpacesPage() {
 
   const columns: Column<Space>[] = [
     {
+      // 名称与描述合并为一列：整块可点，描述不再是"看得见点不动"的死区
       key: "name",
       header: "名称",
+      className: "w-[46%]",
       render: (_, row) => (
-        <Link to={`/spaces/${row.id}`} className="font-medium text-accent hover:text-accent/80">
-          {row.name}
+        <Link
+          to={`/spaces/${row.id}`}
+          className="block rounded-sm px-1 py-0.5 transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <span className="block truncate font-medium text-foreground">{row.name}</span>
+          {row.description && (
+            <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
+              {row.description}
+            </span>
+          )}
         </Link>
-      ),
-    },
-    {
-      key: "description",
-      header: "描述",
-      render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">{row.description}</span>
       ),
     },
     {
       key: "status",
       header: "状态",
-      render: (_, row) => (
-        <Badge variant={row.status === 1 ? "success" : "secondary"}>
-          {STATUS_MAP[row.status] ?? "未知"}
-        </Badge>
-      ),
+      className: "w-[112px]",
+      render: (_, row) => <StatusBadge status={row.status === 1 ? "active" : "inactive"} />,
     },
     {
       key: "created_at",
       header: "创建时间",
+      className: "w-[136px]",
       render: (_, row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {formatDate(row.created_at)}
+        <span className="block tabular-nums text-[12px] text-muted-foreground">
+          {formatIsoDate(row.created_at)}
         </span>
       ),
     },
     {
       key: "id",
       header: "操作",
-      className: "w-12",
+      className: "w-14 text-right",
       render: (_, row) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="空间操作">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="shadow-popover" align="end">
-            <DropdownMenuItem
-              onClick={() => {
-                setEditingSpace(row);
-                setFormOpen(true);
-              }}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              编辑
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(row)}>
-              <Trash2 className="h-3.5 w-3.5" />
-              删除
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <SpaceActions
+          space={row}
+          onEdit={(space) => {
+            setEditingSpace(space);
+            setFormOpen(true);
+          }}
+          onDelete={setDeleteTarget}
+        />
       ),
     },
   ];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="测试空间"
-        annotation="FIG.02 — SPACES"
-        description="管理 API 测试空间。"
-        actions={
-          <Button
-            onClick={() => {
-              setEditingSpace(null);
-              setFormOpen(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            创建空间
-          </Button>
-        }
+        description="每个空间是一个独立的测试工作区：环境、接口、知识库与执行记录相互隔离。"
       />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full max-w-[320px]">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="搜索空间名称 / 描述…"
+            placeholder="搜索空间名称或描述"
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            className="pl-9"
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+            className="pl-8"
           />
         </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline">
+            <Button variant="outline" size="default">
               {statusLabel}
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="shadow-popover" align="end">
@@ -175,6 +206,7 @@ export default function SpacesPage() {
               onValueChange={(value) => {
                 setStatusFilter(value);
                 setStatus(STATUS_FILTERS.find((f) => f.value === value)?.status);
+                setPage(1);
               }}
             >
               {STATUS_FILTERS.map((filter) => (
@@ -185,6 +217,18 @@ export default function SpacesPage() {
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            onClick={() => {
+              setEditingSpace(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            创建空间
+          </Button>
+        </div>
       </div>
 
       <DataTable
@@ -193,7 +237,46 @@ export default function SpacesPage() {
         loading={isLoading}
         error={isError}
         onRetry={() => refetch()}
+        ariaLabel="测试空间列表"
+        fixedLayout
         emptyText="暂无空间，创建一个开始使用吧。"
+        emptyState={
+          <div className="flex flex-col items-center gap-3">
+            <div className="text-muted-foreground">
+              {hasFilters ? (
+                <SearchX className="h-9 w-9" strokeWidth={1.5} />
+              ) : (
+                <FolderPlus className="h-9 w-9" strokeWidth={1.5} />
+              )}
+            </div>
+            <div className="space-y-1 text-center">
+              <p className="text-[14px] font-medium text-foreground">
+                {hasFilters ? "没有找到匹配的空间" : "暂无空间，创建一个开始使用吧"}
+              </p>
+              <p className="text-[12px] text-muted-foreground">
+                {hasFilters
+                  ? "试试其他关键词，或清除筛选查看全部空间。"
+                  : "空间之间的环境、接口与执行记录相互隔离。"}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasFilters && (
+                <Button variant="outline" onClick={clearFilters}>
+                  清除筛选
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  setEditingSpace(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                创建空间
+              </Button>
+            </div>
+          </div>
+        }
         pagination={{
           page,
           pageSize: PAGE_SIZE,
@@ -202,11 +285,7 @@ export default function SpacesPage() {
         }}
       />
 
-      <SpaceFormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        space={editingSpace}
-      />
+      <SpaceFormDialog open={formOpen} onOpenChange={setFormOpen} space={editingSpace} />
 
       <ConfirmDeleteDialog
         open={deleteTarget !== null}

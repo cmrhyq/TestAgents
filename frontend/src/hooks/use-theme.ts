@@ -13,13 +13,14 @@ function getInitialTheme(): Theme {
   } catch {
     // localStorage 不可用时回退默认值
   }
-  return "light"; // 默认亮色
+  // 用户从未显式选择时，跟随系统亮暗偏好（与 index.html 的防闪烁脚本保持一致）
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 /**
- * 主题状态：默认亮色，暗色通过 `html.dark` 类切换。
+ * 主题状态：默认跟随系统，用户显式切换后写入 localStorage。
  *
- * 仅在用户显式切换时写入 localStorage；未显式选择时跟随系统偏好。
+ * 暗色通过 `html.dark` 类切换，与 index.css 的令牌覆盖保持一致。
  */
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(getInitialTheme);

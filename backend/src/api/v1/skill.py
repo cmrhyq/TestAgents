@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from data.constant.constants import MAX_ZIP_BYTES
 from src.api.deps import get_db
 from src.core.errors import NotFoundError, ValidationError
+from src.data.constant.constants import MAX_ZIP_BYTES
 from src.skill.registry import SkillRegistry
 from src.skill.service import SkillImportError, get_skill_service
 

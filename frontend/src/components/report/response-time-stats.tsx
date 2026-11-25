@@ -26,7 +26,7 @@ export function ResponseTimeStats({ durations, label = "响应" }: ResponseTimeS
       {items.map((s) => (
         <Card key={s.label}>
           <CardHeader className="pb-2">
-            <CardTitle className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <CardTitle className="text-xs font-medium text-muted-foreground">
               {s.label}
               {label}
             </CardTitle>

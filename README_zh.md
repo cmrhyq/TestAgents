@@ -174,7 +174,7 @@ LLMTestAgent/
 │       ├── skill/                       # SKILL.md 解析、发现、zip 导入、启用开关
 │       ├── memory/                      # 长期记忆 + 知识库
 │       ├── api/                         # FastAPI 路由层
-│       ├── core/                        # 配置、数据库、LLM 网关、Chroma、缓存、日志
+│       ├── core/                        # 配置、数据库、LLM 服务、Chroma、缓存、日志
 │       ├── data/                        # models / schemas / repositories / services / migration
 │       └── utils/                       # 雪花 ID、HTTP 封装、OpenAPI 解析
 ├── frontend/src/
@@ -283,7 +283,8 @@ allowed_tools: [get_space_endpoints, read_file]
 | 模块 | 前缀 | 功能 |
 |---|---|---|
 | 空间 | `/api/v1/spaces` | CRUD、目录树、`AGENTS.md`、记忆、文档 |
-| 接口 | `/api/v1/endpoints` | 接口定义 CRUD |
+| 接口 | `/api/v1/endpoints` | 接口定义 CRUD；`GET /tags?space_id=` 返回标签聚合 |
+| 接口筛选 | `GET /api/v1/endpoints/` | `?tags=用户,鉴权&tags_mode=any\|all` 按标签过滤 |
 | 环境 | `/api/v1/environments` | 环境 CRUD（含 `is_production`） |
 | 测试运行 | `/api/v1/agent/runs` | 执行历史、工具调用留痕、清理 |
 | 报告 | `/api/v1/reports` | 按 run 聚合 `send_request` 的接口调用报告 |

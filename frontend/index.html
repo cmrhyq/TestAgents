@@ -4,28 +4,43 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLMTestAgent</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <title>TestAgents · API 智能测试平台</title>
     <script>
-      // 防闪烁：在 React 挂载前根据 localStorage 设定主题（默认亮色图纸）
+      // 防闪烁：在 React 挂载前根据 localStorage 设定主题（浅色为默认）
       (function () {
         try {
           var stored = localStorage.getItem("lta-theme");
-          if (stored === "dark") document.documentElement.classList.add("dark");
-          var isDark = stored === "dark";
-          document.documentElement.style.backgroundColor = isDark ? "#131f30" : "#eef3f8";
+          var prefersDark =
+            window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var isDark = stored ? stored === "dark" : prefersDark;
+          if (isDark) document.documentElement.classList.add("dark");
+          document.documentElement.style.backgroundColor = isDark ? "#1a1a1a" : "#ffffff";
           document.documentElement.style.colorScheme = isDark ? "dark" : "light";
         } catch (e) {}
       })();
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- 挂载前的静态骨架：首屏就有 main 地标，避免 Lighthouse 抓到 "no main landmark" -->
+    <div id="root">
+      <div style="display:flex;height:100vh;overflow:hidden">
+        <div style="width:264px;flex:none;border-right:1px solid rgba(128,128,128,.2);background:rgba(128,128,128,.06)"></div>
+        <div style="display:flex;flex:1;min-width:0;flex-direction:column">
+          <div style="height:48px;flex:none;border-bottom:1px solid rgba(128,128,128,.16)"></div>
+          <main id="main-content" style="flex:1;overflow-y:auto;padding:32px;box-sizing:border-box">
+            <div style="height:28px;width:160px;border-radius:6px;background:rgba(128,128,128,.13)"></div>
+            <div style="height:20px;width:420px;max-width:100%;margin-top:8px;border-radius:6px;background:rgba(128,128,128,.1)"></div>
+            <div style="height:36px;margin-top:24px;border-radius:6px;background:rgba(128,128,128,.1)"></div>
+            <div style="margin-top:12px;padding:12px;border:1px solid rgba(128,128,128,.2);border-radius:8px">
+              <div style="height:32px;border-bottom:1px solid rgba(128,128,128,.12);background:rgba(128,128,128,.06)"></div>
+              <div style="height:32px;border-bottom:1px solid rgba(128,128,128,.12)"></div>
+              <div style="height:32px;border-bottom:1px solid rgba(128,128,128,.12)"></div>
+              <div style="height:32px"></div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

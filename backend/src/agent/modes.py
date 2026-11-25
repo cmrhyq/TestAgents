@@ -10,9 +10,9 @@ from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool
 
-from agent.prompt.agent import AGENT_MODE_INSTRUCTIONS
-from data.constant.agent import AGENT_PLAN_MAX_STEPS, AGENT_DEFAULT_MAX_STEPS
-from data.enum.agent import Mode
+from src.agent.prompt.agent import AGENT_MODE_INSTRUCTIONS
+from src.data.constant.agent import AGENT_DEFAULT_MAX_STEPS, AGENT_PLAN_MAX_STEPS
+from src.data.enum.agent import Mode
 
 # 有副作用的工具：改动外部状态或持久化数据
 SIDE_EFFECT_TOOL_NAMES = frozenset(

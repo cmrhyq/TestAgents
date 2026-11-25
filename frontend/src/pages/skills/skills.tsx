@@ -34,7 +34,7 @@ export default function SkillsPage() {
   const skills = data?.items ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="技能管理"
         description="技能是可复用的测试方法论：选中后其正文会注入 system prompt，声明的工具会收窄本轮可用工具。"
@@ -44,7 +44,7 @@ export default function SkillsPage() {
         <div className="flex items-center gap-2">
           <SpaceSelector value={spaceId} onChange={(id) => setSpaceId(String(id))} placeholder="仅内置技能" />
           <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="mr-2 h-3.5 w-3.5" />
+            <RefreshCw className="h-3.5 w-3.5" />
             刷新
           </Button>
         </div>
@@ -55,7 +55,7 @@ export default function SkillsPage() {
             onClick={() => fileRef.current?.click()}
             disabled={importSkill.isPending}
           >
-            <Upload className="mr-2 h-3.5 w-3.5" />
+            <Upload className="h-3.5 w-3.5" />
             {importSkill.isPending ? "导入中…" : "导入技能包"}
           </Button>
           <input
@@ -84,7 +84,7 @@ export default function SkillsPage() {
       ) : isLoading ? (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-32 animate-pulse rounded-[3px] bg-muted" />
+            <div key={i} className="h-32 animate-pulse rounded-lg bg-muted" />
           ))}
         </div>
       ) : skills.length === 0 ? (
@@ -101,34 +101,34 @@ export default function SkillsPage() {
                 key={`${skill.scope}:${skill.name}`}
                 className={cn(
                   "cursor-pointer transition-colors",
-                  active ? "border-primary/60 bg-surface-primary/40" : "hover:border-primary/40",
+                  active ? "border-accent/60 bg-surface-accent" : "hover:border-border-strong",
                   !skill.enabled && "opacity-60"
                 )}
                 onClick={() => setActiveName(skill.name)}
               >
-                <CardHeader className="pb-2">
+                <CardHeader className="gap-1.5">
                   <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="truncate font-mono text-sm">{skill.name}</CardTitle>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                    <CardTitle className="truncate font-mono text-[13px]">{skill.name}</CardTitle>
+                    <Badge variant="info" className="shrink-0">
                       {skill.scope === "builtin" ? "内置" : "空间"}
                     </Badge>
                   </div>
                 </CardHeader>
 
                 <CardContent className="space-y-2">
-                  <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                  <p className="line-clamp-3 text-[12px] leading-5 text-muted-foreground">
                     {skill.description}
                   </p>
 
                   {skill.allowed_tools.length > 0 && (
-                    <div className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground/70">
-                      <Wrench className="h-3 w-3" />
+                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Wrench className="h-3 w-3" strokeWidth={1.75} />
                       限 {skill.allowed_tools.length} 个工具
                     </div>
                   )}
 
                   <div className="flex items-center justify-between pt-1">
-                    <span className="font-mono text-[10px] text-muted-foreground/60">
+                    <span className="tabular-nums text-[11px] text-muted-foreground">
                       v{skill.version || "—"}
                     </span>
                     <button
@@ -138,10 +138,10 @@ export default function SkillsPage() {
                         toggleSkill.mutate({ name: skill.name, enabled: !skill.enabled });
                       }}
                       className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                        "inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-medium transition-colors",
                         skill.enabled
-                          ? "border-primary/50 text-primary hover:bg-primary/10"
-                          : "border-border text-muted-foreground hover:bg-muted"
+                          ? "bg-surface-success text-success hover:bg-surface-success/80"
+                          : "bg-muted text-muted-foreground hover:bg-hover-strong"
                       )}
                     >
                       {skill.enabled ? "已启用" : "已禁用"}
@@ -156,10 +156,10 @@ export default function SkillsPage() {
 
       {activeName && (
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="gap-1.5">
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 font-mono text-sm">
-                <FileCode2 className="h-4 w-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 font-mono text-[13px]">
+                <FileCode2 className="h-3.5 w-3.5 text-muted-foreground" />
                 {activeName}
               </CardTitle>
               <Button variant="ghost" size="sm" onClick={() => setActiveName(null)}>
@@ -167,14 +167,16 @@ export default function SkillsPage() {
               </Button>
             </div>
             {detail?.when_to_use && (
-              <p className="text-xs text-muted-foreground">适用场景：{detail.when_to_use}</p>
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                适用场景：{detail.when_to_use}
+              </p>
             )}
           </CardHeader>
           <CardContent>
             {detailLoading ? (
               <div className="h-24 animate-pulse rounded bg-muted" />
             ) : (
-              <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-[3px] bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground">
+              <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border-subtle bg-muted p-3 font-mono text-[12px] leading-5 text-foreground">
                 {detail?.body || "（无正文）"}
               </pre>
             )}

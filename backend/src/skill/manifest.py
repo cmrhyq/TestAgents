@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 import yaml
 
-from data.constant.skills import SKILL_NAME_PATTERN, SKILL_FRONTMATTER_DELIMITER
+from src.data.constant.skills import SKILL_FRONTMATTER_DELIMITER, SKILL_NAME_PATTERN
 
 
 class SkillManifestError(ValueError):

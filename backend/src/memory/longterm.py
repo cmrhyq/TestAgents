@@ -15,8 +15,8 @@ from pathlib import Path
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from data.constant.memory import VALID_CATEGORIES, DEFAULT_RECALL_LIMIT, CATEGORY_TITLES
 from src.core.logging import get_logger
+from src.data.constant.memory import CATEGORY_TITLES, DEFAULT_RECALL_LIMIT, VALID_CATEGORIES
 from src.data.models.base import local_now
 from src.data.models.space_memory import SpaceMemory
 from src.workspace.manager import WorkspaceManager

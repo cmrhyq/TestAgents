@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from data.constant.constants import MAX_UPLOAD_BYTES
 from src.api.deps import get_db
 from src.core.errors import NotFoundError, ValidationError
+from src.data.constant.constants import MAX_UPLOAD_BYTES
 from src.data.services import SpaceService
 from src.memory import get_knowledge_base
 

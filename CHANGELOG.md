@@ -3,6 +3,60 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- `tests/core/llm/test_llm_adapter_contract.py`：只 mock litellm Router、让真实
+  `langchain-litellm` 适配器参与，锁定「必须真流式」与「归因必须落到 `llm_log`」两条契约
+
+### Removed
+
+- **破坏性变更**：删除 `core/llm/llm_gateway.py` 门面。生产链路只用过 `astream_with_tools`
+  一个入口，其余 `chat` / `chat_stream` / `achat_stream` / `invoke_with_tools` /
+  `astream_events` / `get_model` 在 `src/` 无调用方，且 `get_model` / `astream_events` 绕过埋点。
+  `runner` 改为直连 `LLMService.astream_with_tools`；`src` 包级导出收敛为
+  `LLMService` / `get_llm_service` / `reset_llm_service`
+- 删除 `tests/core/llm/test_llm_gateway.py` 与 `conftest.py` 中两个未使用的 gateway mock
+  fixture；`tests/agent/test_runner_attribution.py` 改为断言 runner 直连 `LLMService`
+
+### Fixed
+
+- **Agent 对话恢复 token 级流式**：`ChatLiteLLMRouter` 未显式开启 `streaming` 时，
+  langchain-core 的 `_should_stream` 会回退 `ainvoke`，`astream_with_tools` 只产出一个
+  整体分片，SSE 的 `text_delta` 退化为终态分片（首字节延迟等于整段生成时间）
+- **流式路径的模型归因与成本**：`langchain-litellm` 会把 `response_metadata` 覆盖成路由组名，
+  导致 `llm_log.model_name` 记成 `smart-router`、`routing_tier` 为空、`cost_usd` 为 NULL。
+  新增 `src/core/llm/chat_model.py` 的 `MetadataChatLiteLLMRouter`，把 litellm 预路由就地写入
+  `metadata` 的 `deployment` / `routing_decision` 回填到 `response_metadata`
+- 显式 `stream=False` 时 `langchain-litellm` 仍以 `stream=True` 请求 Router（把异步流当完整
+  响应解析）；子类移除默认参数里的 `stream`，让调用意图真正生效
+
+## [1.4.0] - 2026-11-18
+
+### Added
+
+- 接口标签（tags）全链路：
+  - 列表展示（超过 2 个折叠为 `+N`，点击即按该标签筛选）
+  - 新增与修改（表单标签输入，支持回车添加、本空间已有标签联想、即时校验）
+  - 筛选（多选勾选，支持「命中任一」与「需同时满足全部标签」两种模式）
+  - `GET /api/v1/endpoints/tags?space_id=`：按空间返回标签聚合（标签名 + 接口数）
+- `GET /api/v1/endpoints/` 新增 `tags` / `tags_mode` / `status` 查询参数；关键字搜索覆盖标签
+- Agent 的 `get_space_endpoints` 新增 `tag` 参数，可按标签取接口子集；system prompt 注入标签分布
+
+### Changed
+
+- **`tags` 的 API 形态由 JSON 字符串改为字符串数组**，库内仍是 JSON 数组字符串，转换在
+  schema 层完成。此前 `EndpointCreate.tags` 是 `str`、`EndpointUpdate.tags` 是 `list[str]`，
+  同一字段两种类型，前端无法用同一份逻辑处理
+- 批量创建与单条创建统一走同一套序列化，`method` 在批量路径也统一转大写
+  （此前批量路径要求调用方预先序列化，改类型后会直接把 list 写进 Text 列）
+
+### Fixed
+
+- 接口列表的标签列恒为空：渲染时三元条件写反（`row.tags ? "" : row.tags`）
+- 删除从未被路由使用的 `EndpointQuery`：它的 `tags` 字段与实际查询参数长期不一致
+
 ## [1.3.0] - 2026-11-04
 
 ### Changed
