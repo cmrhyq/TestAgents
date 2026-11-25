@@ -173,7 +173,7 @@ LLMTestAgent/
 │       ├── skill/                       # SKILL.md parsing, discovery, zip import, enable flags
 │       ├── memory/                      # Long-term memory + knowledge base
 │       ├── api/                         # FastAPI route layer
-│       ├── core/                        # config, database, llm gateway, chroma, cache, logging
+│       ├── core/                        # config, database, llm service, chroma, cache, logging
 │       ├── data/                        # models / schemas / repositories / services / migration
 │       └── utils/                       # snowflake IDs, HTTP helpers, OpenAPI parser
 ├── frontend/src/

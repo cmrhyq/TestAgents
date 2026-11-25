@@ -154,7 +154,7 @@ CORS 来源取环境变量 `CORS_ORIGINS`，默认 `http://localhost:5173`。这
 yield StartEvent(conversation_id, space_id, mode, skills, run_id)
 for step in range(policy.max_steps):
     accumulated = None
-    async for chunk in chat(messages):          # chat 来自 gateway.astream_with_tools
+    async for chunk in chat(messages):          # chat 来自 LLMService.astream_with_tools
         if text := chunk.text: yield TextDeltaEvent(text)
         accumulated = accumulated + chunk       # 分片合并交给 AIMessageChunk.__add__
     if not accumulated.tool_calls:
@@ -372,18 +372,19 @@ allowed_tools: [get_space_endpoints, read_file]
 > 同步 `Router.completion` 不走，会把 `auto_router/complexity_router` 当作普通 provider
 > 并报 `Unmapped LLM provider`。本项目的对话与工具调用均为异步，因此默认值安全。
 
-接入路径有两个类：
+接入只有一条路径：`LLMService`（`list[BaseMessage]` → `AIMessage` / `AIMessageChunk`）。
 
-| 类 | 输入 | 输出 | 适用场景 |
-|---|---|---|---|
-| `LLMGateway` | `list[dict]` 或 `BaseMessage` | `str` / `AIMessage` / `AIMessageChunk` | 简单问答、工具调用、Agent 运行时 |
-| `LLMService` | `list[BaseMessage]` | 原始 `AIMessage` / `AIMessageChunk` | 需要 `usage_metadata` 的底层场景 |
-
-`runner` 每轮调用 `gateway.astream_with_tools(messages, tools, space_id=…, conversation_id=…, run_id=…)`。
+`runner` 每轮调用 `LLMService.astream_with_tools(messages, tools, space_id=…, conversation_id=…, run_id=…)`。
 该方法把 `bind_tools` + `astream` + 埋点收敛在同一处，全程使用原生消息对象。
 
-`gateway.get_model()` 是「直接取底层 `BaseChatModel`」的旧快路径，**不经过埋点**，
-已加 `DeprecationWarning` 并抛出。业务代码不得使用——绕过它一次，那一轮的 token 与成本就是空白。
+`ChatLiteLLMRouter` 构造时必须显式 `streaming=True`。langchain-core 的 `_should_stream`
+会因 `streaming=False` 回退到 `ainvoke`，`astream` 只产出一个整体分片，token 级
+`text_delta` 会退化成一个终态分片（首字节延迟等于整段生成时间），而调用方无从察觉。
+`src/core/llm/chat_model.py` 的 `MetadataChatLiteLLMRouter` 同时移除父类默认参数里的
+`stream`，否则显式 `stream=False` 的调用仍会以 `stream=True` 请求 Router，把异步流当成完整响应解析。
+
+业务代码不得直接使用 `LLMService.model`，也不要自行 `bind_tools().astream()`：
+两者都绕过 `_record_usage`，那一轮的 token 与成本就是空白。
 
 ### 7.2 成本统计
 
@@ -398,9 +399,15 @@ allowed_tools: [get_space_endpoints, read_file]
 > **成本未知不等于免费**。`cost_usd` 为 NULL 表示「定价表查不到」，为 0 表示「确实免费」。
 > `GET /api/v1/usage/stats` 同时返回金额与 `unpriced_calls`，两者要一起看。
 
-> **真实模型名不能取 `response_metadata["model"]`**。该键为空，兜底会把所有调用记成
-> Router 的逻辑组名（`smart-router`），而组名没有定价，成本将永远是 NULL。
-> 取值优先级：`deployment` → `routing_decision.routed_model` → `deployment_model_name` → `model_name` / `model`。
+> **真实模型名不能取 `response_metadata["model"]`**。`langchain-litellm` 会把
+> `response_metadata` 覆盖成 `{model_name: 路由组名, model_provider}`，而 litellm 的
+> `deployment` / `routing_decision` 实际写在调用方传入的 `metadata` 里（Router 就地补全）。
+> `MetadataChatLiteLLMRouter` 负责把它回填到 `response_metadata`，取值优先级：
+> `deployment` → `routing_decision.routed_model` → `deployment_model_name` → `model_name` / `model`。
+>
+> 回填与 `streaming=True` 必须成对出现：非流式路径靠 langchain-core 合并 `llm_output`
+> 兜住归因，若只开流式而不回填，所有调用都会记成 `smart-router`、`routing_tier` 为空、
+> 成本恒为 NULL，且没有任何报错。`tests/core/llm/test_llm_adapter_contract.py` 锁定这条契约。
 
 ### 7.3 Prompt 体系
 

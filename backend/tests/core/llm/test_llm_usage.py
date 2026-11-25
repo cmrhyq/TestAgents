@@ -6,44 +6,17 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Generator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
 
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.config import AppConfig
 from src.core.llm.llm_service import LLMService
-from src.data.models.base import Base
 from src.data.models.llm_log import LLMLog
 
 SPACE_ID = 7001
 CONVERSATION_ID = 8001
-
-
-@pytest.fixture()
-def session_scope(tmp_path):
-    """临时 SQLite 库，避免统计写入真实 db/TestAgents.db。"""
-    engine = create_engine(f"sqlite:///{tmp_path / 'usage.db'}")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    @contextmanager
-    def _scope() -> Generator[Session, None, None]:
-        session = factory()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
-    yield _scope
-    engine.dispose()
 
 
 def _config() -> AppConfig:
@@ -173,7 +146,10 @@ class TestModelName:
         chunk = AIMessageChunk(
             content="hi",
             usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},  # type: ignore[arg-type]
-            response_metadata={"model_group": "smart-router", "routing_decision": {"routed_model": "deepseek-v4-flash"}},
+            response_metadata={
+                "model_group": "smart-router",
+                "routing_decision": {"routed_model": "deepseek-v4-flash"},
+            },
         )
         service = _service(session_scope, FakeStreamModel([chunk]))
 
@@ -195,7 +171,9 @@ class TestUsage:
     async def test_tokens_recorded(self, session_scope):
         service = _service(
             session_scope,
-            FakeStreamModel([_chunk("h"), _chunk("i", usage={"input_tokens": 11, "output_tokens": 7, "total_tokens": 18})]),
+            FakeStreamModel(
+                [_chunk("h"), _chunk("i", usage={"input_tokens": 11, "output_tokens": 7, "total_tokens": 18})]
+            ),
         )
 
         await _drain(service.astream_with_tools([HumanMessage(content="q")], []))

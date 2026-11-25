@@ -198,6 +198,7 @@ async def run(
 # 组装
 # ---------------------------------------------------------------------------
 
+
 def _system_prompt(request: RunRequest, tools: ToolBundle) -> str:
     """按请求组装本轮 system prompt。"""
     snapshot = SpaceSnapshot(
@@ -222,12 +223,12 @@ def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest
         bound = model.bind_tools(tools) if tools else model
         return bound.astream
 
-    from src.core.llm.llm_gateway import get_llm_gateway
+    from src.core.llm.llm_service import get_llm_service
 
-    gateway = get_llm_gateway()
+    service = get_llm_service()
 
     def _stream(messages: list[BaseMessage]) -> Any:
-        return gateway.astream_with_tools(
+        return service.astream_with_tools(
             messages,
             tools,
             space_id=request.space_id,
@@ -241,6 +242,7 @@ def _make_streamer(model: Any | None, tools: list[BaseTool], request: RunRequest
 # ---------------------------------------------------------------------------
 # 流式分片处理
 # ---------------------------------------------------------------------------
+
 
 def _merge(accumulated: Any, chunk: Any) -> Any:
     """累积流式 chunk。
@@ -302,6 +304,7 @@ def _assistant_message(accumulated: Any, calls: list[dict]) -> AIMessage:
 # 工具执行
 # ---------------------------------------------------------------------------
 
+
 async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any]) -> ToolOutcome:
     """执行单个工具调用，异常一律转成 ``ToolOutcome``。
 
@@ -320,8 +323,7 @@ async def _execute(tool_map: dict[str, BaseTool], name: str, args: dict[str, Any
     if tool is None:
         return ToolOutcome(
             False,
-            f"工具 {name} 不存在。当前可用工具：{', '.join(sorted(tool_map)) or '（无）'}。"
-            f"请只调用列表中存在的工具。",
+            f"工具 {name} 不存在。当前可用工具：{', '.join(sorted(tool_map)) or '（无）'}。请只调用列表中存在的工具。",
             "not_found",
             f"tool {name} not found",
         )
@@ -350,8 +352,7 @@ def _validation_message(exc: Exception) -> str:
     if callable(errors):
         try:
             details = [
-                f"{'.'.join(str(p) for p in err.get('loc', ())) or '参数'}: {err.get('msg', '')}"
-                for err in errors()
+                f"{'.'.join(str(p) for p in err.get('loc', ())) or '参数'}: {err.get('msg', '')}" for err in errors()
             ]
             if details:
                 return "；".join(details)

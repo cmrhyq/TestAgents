@@ -174,7 +174,7 @@ LLMTestAgent/
 │       ├── skill/                       # SKILL.md 解析、发现、zip 导入、启用开关
 │       ├── memory/                      # 长期记忆 + 知识库
 │       ├── api/                         # FastAPI 路由层
-│       ├── core/                        # 配置、数据库、LLM 网关、Chroma、缓存、日志
+│       ├── core/                        # 配置、数据库、LLM 服务、Chroma、缓存、日志
 │       ├── data/                        # models / schemas / repositories / services / migration
 │       └── utils/                       # 雪花 ID、HTTP 封装、OpenAPI 解析
 ├── frontend/src/

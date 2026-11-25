@@ -3,6 +3,35 @@
 本文件记录项目所有值得注意的变更，格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- `tests/core/llm/test_llm_adapter_contract.py`：只 mock litellm Router、让真实
+  `langchain-litellm` 适配器参与，锁定「必须真流式」与「归因必须落到 `llm_log`」两条契约
+
+### Removed
+
+- **破坏性变更**：删除 `core/llm/llm_gateway.py` 门面。生产链路只用过 `astream_with_tools`
+  一个入口，其余 `chat` / `chat_stream` / `achat_stream` / `invoke_with_tools` /
+  `astream_events` / `get_model` 在 `src/` 无调用方，且 `get_model` / `astream_events` 绕过埋点。
+  `runner` 改为直连 `LLMService.astream_with_tools`；`src` 包级导出收敛为
+  `LLMService` / `get_llm_service` / `reset_llm_service`
+- 删除 `tests/core/llm/test_llm_gateway.py` 与 `conftest.py` 中两个未使用的 gateway mock
+  fixture；`tests/agent/test_runner_attribution.py` 改为断言 runner 直连 `LLMService`
+
+### Fixed
+
+- **Agent 对话恢复 token 级流式**：`ChatLiteLLMRouter` 未显式开启 `streaming` 时，
+  langchain-core 的 `_should_stream` 会回退 `ainvoke`，`astream_with_tools` 只产出一个
+  整体分片，SSE 的 `text_delta` 退化为终态分片（首字节延迟等于整段生成时间）
+- **流式路径的模型归因与成本**：`langchain-litellm` 会把 `response_metadata` 覆盖成路由组名，
+  导致 `llm_log.model_name` 记成 `smart-router`、`routing_tier` 为空、`cost_usd` 为 NULL。
+  新增 `src/core/llm/chat_model.py` 的 `MetadataChatLiteLLMRouter`，把 litellm 预路由就地写入
+  `metadata` 的 `deployment` / `routing_decision` 回填到 `response_metadata`
+- 显式 `stream=False` 时 `langchain-litellm` 仍以 `stream=True` 请求 Router（把异步流当完整
+  响应解析）；子类移除默认参数里的 `stream`，让调用意图真正生效
+
 ## [1.4.0] - 2026-11-18
 
 ### Added

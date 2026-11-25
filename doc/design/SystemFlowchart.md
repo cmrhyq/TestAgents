@@ -35,7 +35,7 @@ sequenceDiagram
   participant S as ChatStreamService
   participant REC as AgentRunRecorder
   participant A as runner.run
-  participant G as LLMGateway
+  participant LLM as LLMService
   participant DB as SQLite
 
   C->>R: instruction / space_id / mode / skill_names
@@ -53,10 +53,10 @@ sequenceDiagram
   R->>A: run(request, recorder)
 
   loop step in range(max_steps)
-    A->>G: astream_with_tools(messages, tools, space_id, conversation_id, run_id)
-    G->>G: bind_tools → astream → 埋点
-    G->>DB: INSERT llm_log（每次调用一条）
-    G-->>A: chunk 流（text / tool_calls）
+    A->>LLM: astream_with_tools(messages, tools, space_id, conversation_id, run_id)
+    LLM->>LLM: bind_tools → astream → 埋点
+    LLM->>DB: INSERT llm_log（每次调用一条）
+    LLM-->>A: chunk 流（text / tool_calls）
     A-->>C: event: text_delta
     alt 有 tool_calls
       loop 每个调用

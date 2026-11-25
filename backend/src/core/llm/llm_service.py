@@ -9,6 +9,7 @@ import os
 # 且远端表与本地表不一致时同一模型的成本会在「异常」与 0.0 之间漂移，而 0.0 会被读成免费。
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
+import asyncio  # noqa: E402
 from collections.abc import AsyncIterator, Callable, Iterator  # noqa: E402
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from contextlib import AbstractContextManager, contextmanager  # noqa: E402
@@ -16,14 +17,12 @@ from dataclasses import dataclass, field  # noqa: E402
 from time import perf_counter  # noqa: E402
 from typing import Any  # noqa: E402
 
-import asyncio  # noqa: E402
-
 from langchain_core.messages import AIMessage, BaseMessage  # noqa: E402
-from langchain_litellm import ChatLiteLLMRouter  # noqa: E402
 from litellm import Router  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from src.core.config import AppConfig, get_config  # noqa: E402
+from src.core.llm.chat_model import MetadataChatLiteLLMRouter  # noqa: E402
 from src.core.logging import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
@@ -71,7 +70,7 @@ def _run_async(coro) -> Any:
 class LLMService:
     """基于 LiteLLM Router 的统一 LLM 服务。
 
-    内部持有 ``ChatLiteLLMRouter``，每次调用都会写入 llm_log 统计。
+    内部持有开启流式的 ``MetadataChatLiteLLMRouter``，每次调用都会写入 llm_log 统计。
 
     Args:
         config: 应用配置；None 时取全局配置
@@ -86,7 +85,7 @@ class LLMService:
         if not self._config.model_list:
             raise ValueError("config.yaml 中缺少 model_list 配置")
         self._router: Router | None = None
-        self._model: ChatLiteLLMRouter | None = None
+        self._model: MetadataChatLiteLLMRouter | None = None
         self._session_scope = session_scope or _default_session_scope()
 
     # 属性（懒加载）
@@ -104,12 +103,17 @@ class LLMService:
         return self._router
 
     @property
-    def model(self) -> ChatLiteLLMRouter:
-        """返回 LangChain 模型实例，首次访问时构建。"""
+    def model(self) -> MetadataChatLiteLLMRouter:
+        """返回 LangChain 模型实例，首次访问时构建。
+
+        ``streaming=True`` 不可省略：langchain-core 依据 ``model_fields_set`` 判定流式，
+        漏传会回退 ``ainvoke``，``astream`` 退化成单个整体分片。
+        """
         if self._model is None:
-            self._model = ChatLiteLLMRouter(
+            self._model = MetadataChatLiteLLMRouter(
                 router=self.router,
                 model=self._config.llm.default_model,
+                streaming=True,
             )
         return self._model
 
@@ -414,9 +418,7 @@ class LLMService:
                         conversation_id=_as_int(conversation_id),
                         run_id=_as_int(run_id),
                         routing_tier=routing_tier or "",
-                        cost_usd=_estimate_cost(
-                            resolved_model, prompt_tokens, completion_tokens, self._config.pricing
-                        ),
+                        cost_usd=_estimate_cost(resolved_model, prompt_tokens, completion_tokens, self._config.pricing),
                     )
                 )
                 session.commit()
